@@ -1,0 +1,13 @@
+res://scripts/baker.gd
+res://scripts/market.gd
+res://scripts/farmer.gd
+res://scripts/main.gd
+res://scenes/Main.tscn
+res://scripts/economy_audit.gd
+res://scripts/event_bus.gd
+res://scripts/field_plot.gd
+res://scripts/household.gd
+res://scripts/household_agent.gd
+res://scripts/simulation_clock.gd
+res://scripts/components/food_need.gd
+res://scripts/components/food_stockpile.gd

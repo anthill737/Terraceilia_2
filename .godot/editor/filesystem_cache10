@@ -1,0 +1,11 @@
+63f7b34db8d8cdea90c76aacccf841ec
+::res://::1768187418
+::res://scenes/::1768126491
+Main.tscn::PackedScene::6983042255043502403::1768128054::0::1::::<><><>0<>0<><>::res://scripts/main.gd<>res://scripts/farmer.gd<>res://scripts/baker.gd
+::res://scripts/::1768127974
+baker.gd::GDScript::6817721013542221784::1768128042::0::1::::Baker<>CharacterBody2D<><>0<>0<><>::
+farmer.gd::GDScript::7621894199137673295::1768128044::0::1::::Farmer<>CharacterBody2D<><>0<>0<><>::
+field.gd::GDScript::4733968351011427748::1768128046::0::1::::Field<>Node<><>0<>0<><>::
+main.gd::GDScript::4367299375606912633::1768128048::0::1::::<>Node<><>0<>0<><>::
+market.gd::GDScript::4536528864107674126::1768128049::0::1::::Market<>Node<><>0<>0<><>::
+simulation_runner.gd::GDScript::2445473179528491375::1768128051::0::1::::<>Node<><>0<>0<><>::

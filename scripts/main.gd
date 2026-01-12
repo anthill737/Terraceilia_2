@@ -40,6 +40,8 @@ var baker_status_label: Label
 var household_money_label: Label
 var household_bread_label: Label
 var household_bread_consumed_label: Label
+var household_hunger_label: Label
+var household_starving_label: Label
 var household_status_label: Label
 var event_log: RichTextLabel
 
@@ -199,6 +201,8 @@ func get_ui_labels() -> void:
 	household_money_label = household_card.get_node("HouseholdMoney")
 	household_bread_label = household_card.get_node("HouseholdBread")
 	household_bread_consumed_label = household_card.get_node("HouseholdBreadConsumed")
+	household_hunger_label = household_card.get_node("HouseholdHunger")
+	household_starving_label = household_card.get_node("HouseholdStarving")
 	
 	market_money_label = market_card.get_node("MarketMoney")
 	market_seeds_label = market_card.get_node("MarketSeeds")
@@ -249,3 +253,6 @@ func update_ui() -> void:
 		household_money_label.text = "Household Money: $%.2f" % household_agent.get_node("Wallet").money
 		household_bread_label.text = "Household Bread: %d" % household_agent.get_node("Inventory").get_qty("bread")
 		household_bread_consumed_label.text = "Household Bread Consumed: %d" % household_agent.bread_consumed
+		var household_hunger = household_agent.get_node("HungerNeed")
+		household_hunger_label.text = "Household Hunger: %d/%d" % [household_hunger.hunger_days, household_hunger.hunger_max_days]
+		household_starving_label.text = "Household Starving: %s" % ("Yes" if household_hunger.is_starving else "No")

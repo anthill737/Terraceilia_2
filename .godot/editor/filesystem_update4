@@ -11,3 +11,4 @@ res://scripts/household_agent.gd
 res://scripts/simulation_clock.gd
 res://scripts/components/food_need.gd
 res://scripts/components/food_stockpile.gd
+res://scripts/components/hunger_need.gd

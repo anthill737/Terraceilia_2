@@ -300,6 +300,14 @@ text = "Household Bread: 0"
 layout_mode = 2
 text = "Household Bread Consumed: 0"
 
+[node name="HouseholdHunger" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
+layout_mode = 2
+text = "Household Hunger: 5/5"
+
+[node name="HouseholdStarving" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
+layout_mode = 2
+text = "Household Starving: No"
+
 [node name="HSeparator3" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
 layout_mode = 2
 

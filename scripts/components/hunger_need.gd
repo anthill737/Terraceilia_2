@@ -5,12 +5,12 @@ signal starved(agent_name: String)
 
 # Configuration
 var food_item: String = "bread"
-var hunger_max_days: int = 3
+var hunger_max_days: int = 5
 var eat_restore_days: int = 1
 var deplete_per_day: int = 1
 
 # State
-var hunger_days: int = 3
+var hunger_days: int = 5
 var is_starving: bool = false
 
 # Dependencies (set by owner)

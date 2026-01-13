@@ -1,8 +1,2 @@
 res://scripts/baker.gd
-res://scripts/farmer.gd
-res://scripts/household_agent.gd
-res://scripts/economy_audit.gd
-res://scripts/main.gd
 res://scripts/market.gd
-res://scripts/components/inventory.gd
-res://scripts/components/inventory_capacity.gd

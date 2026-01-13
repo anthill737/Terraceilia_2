@@ -291,6 +291,12 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	if requested <= 0:
 		return 0
 	
+	# GUARD RAIL: Prevent Baker from buying bread (producers must not buy their own output)
+	if agent is Baker:
+		if event_bus:
+			event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED - producers must not buy their output)" % current_tick)
+		return 0
+	
 	# Check if market has no bread
 	if bread <= 0:
 		if event_bus:

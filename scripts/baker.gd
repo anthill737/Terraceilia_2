@@ -3,10 +3,13 @@ class_name Baker
 
 ## Baker agent - buys wheat, grinds flour, bakes bread, sells at market.
 ## Movement is handled by RouteRunner component.
+## Baker NEVER buys bread - only eats from own inventory when hungry.
 
 enum ProductionState { IDLE, GRINDING, BAKING }
+enum Phase { RESTOCK, PRODUCE, SELL }
 
 var production_state: ProductionState = ProductionState.IDLE
+var phase: Phase = Phase.RESTOCK
 var bakery_location: Node2D = null
 var market_location: Node2D = null
 
@@ -21,7 +24,12 @@ const GRIND_BATCH_SIZE: int = 5
 const BAKE_BATCH_SIZE: int = 5
 const FLOUR_PER_WHEAT: int = 1
 const BREAD_PER_FLOUR: int = 2
-const DELIVER_BREAD_THRESHOLD: int = 20
+
+# Batch cycle thresholds
+const WHEAT_LOW_WATERMARK: int = 5  # Buy wheat when below this
+const WHEAT_TARGET_STOCK: int = 30  # Restock to this amount
+const BREAD_SELL_THRESHOLD: int = 20  # Sell when bread reaches this
+const BREAD_PRODUCTION_MIN: int = 2  # Keep at least this much bread for eating
 
 var process_timer: float = 0.0
 
@@ -43,6 +51,14 @@ var current_tick: int = 0
 
 # Pending target for after waiting
 var pending_target: Node2D = null
+
+
+func get_display_name() -> String:
+	return "Baker"
+
+
+func _bread_for_food() -> int:
+	return inv.get_qty("bread")
 
 
 func set_tick(t: int) -> void:
@@ -112,30 +128,40 @@ func _on_wait_finished() -> void:
 
 
 func perform_market_transactions() -> void:
-	# Sell bread to market, but keep food buffer
-	var sellable: int = max(0, inv.get_qty("bread") - food_stockpile.target_buffer)
-	if sellable > 0:
-		market.buy_bread_from_agent(self, sellable)
-	
-	# Buy wheat if below threshold
-	var current_wheat: int = inv.get_qty("wheat")
-	if current_wheat < 20:
-		var wheat_needed: int = 20 - current_wheat
-		market.sell_wheat_to_baker(self, wheat_needed)
-	
-	# Buy bread to reach food buffer target
-	var bread_needed: int = food_stockpile.needed_to_reach_target()
-	if bread_needed > 0:
-		var bought: int = market.sell_bread_to_agent(self, bread_needed)
-		inv.add("bread", bought)
-		if bought > 0 and event_bus:
-			event_bus.log("Tick %d: Baker bought %d bread for food buffer" % [current_tick, bought])
+	# Execute action based on current phase
+	match phase:
+		Phase.RESTOCK:
+			# Buy wheat for production
+			var current_wheat: int = inv.get_qty("wheat")
+			if current_wheat < WHEAT_LOW_WATERMARK:
+				var wheat_needed: int = WHEAT_TARGET_STOCK - current_wheat
+				market.sell_wheat_to_baker(self, wheat_needed)
+			# Transition to production phase
+			phase = Phase.PRODUCE
+			pending_target = bakery_location
+			route.wait(WAIT_TIME)
+		
+		Phase.SELL:
+			# Sell bread in large batch, keeping minimum for eating
+			var current_bread: int = inv.get_qty("bread")
+			var sellable: int = max(0, current_bread - BREAD_PRODUCTION_MIN)
+			if sellable > 0:
+				market.buy_bread_from_agent(self, sellable)
+			# Transition back to restock phase
+			phase = Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
+		
+		Phase.PRODUCE:
+			# Should not be at market during production phase
+			if event_bus:
+				event_bus.log("ERROR Tick %d: Baker at market during PRODUCE phase" % current_tick)
+			phase = Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
 
 
 func handle_bakery_arrival() -> void:
-	# Try to eat bread to restore hunger
-	hunger.try_eat(current_tick)
-	
 	# Start production if not starving
 	if not hunger.is_starving:
 		start_production()
@@ -199,14 +225,15 @@ func process_grinding(delta: float) -> void:
 				if event_bus:
 					event_bus.log("Tick %d: Baker ground %d wheat into %d flour" % [current_tick, units, flour_produced])
 				
-				# Decide next action: continue production or deliver to market
+				# Decide next action: continue production or go to market
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
 				var current_wheat: int = inv.get_qty("wheat")
 				
-				# Go to market if we have enough bread to deliver
-				if current_bread >= DELIVER_BREAD_THRESHOLD:
+				# Go to market to sell if bread threshold reached
+				if current_bread >= BREAD_SELL_THRESHOLD:
 					production_state = ProductionState.IDLE
+					phase = Phase.SELL
 					pending_target = market_location
 					route.wait(WAIT_TIME)
 				# Continue to baking if we have flour and space for bread
@@ -218,11 +245,14 @@ func process_grinding(delta: float) -> void:
 					production_state = ProductionState.GRINDING
 					process_timer = GRINDING_TIME
 				else:
-					# Blocked: go to market to sell or buy
+					# Blocked by capacity or out of inputs - go to market
 					production_state = ProductionState.IDLE
+					if current_bread >= BREAD_PRODUCTION_MIN:
+						phase = Phase.SELL
+					else:
+						phase = Phase.RESTOCK
 					pending_target = market_location
 					route.wait(WAIT_TIME)
-				# Blocked: go to market to sell or buy
 
 func process_baking(delta: float) -> void:
 	process_timer -= delta
@@ -260,14 +290,15 @@ func process_baking(delta: float) -> void:
 				if event_bus:
 					event_bus.log("Tick %d: Baker baked %d flour into %d bread" % [current_tick, units, bread_produced])
 				
-				# Decide next action: continue production or deliver to market
+				# Decide next action: continue production or go to market
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
 				var current_wheat: int = inv.get_qty("wheat")
 				
-				# Go to market if we have enough bread to deliver
-				if current_bread >= DELIVER_BREAD_THRESHOLD:
+				# Go to market to sell if bread threshold reached
+				if current_bread >= BREAD_SELL_THRESHOLD:
 					production_state = ProductionState.IDLE
+					phase = Phase.SELL
 					pending_target = market_location
 					route.wait(WAIT_TIME)
 				# Continue baking if we have flour and space for bread
@@ -279,8 +310,12 @@ func process_baking(delta: float) -> void:
 					production_state = ProductionState.GRINDING
 					process_timer = GRINDING_TIME
 				else:
-					# Blocked: go to market to sell or buy
+					# Blocked by capacity or out of inputs - go to market
 					production_state = ProductionState.IDLE
+					if current_bread >= BREAD_PRODUCTION_MIN:
+						phase = Phase.SELL
+					else:
+						phase = Phase.RESTOCK
 					pending_target = market_location
 					route.wait(WAIT_TIME)
 

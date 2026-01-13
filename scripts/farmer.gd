@@ -39,6 +39,10 @@ var current_tick: int = 0
 var pending_target: Node2D = null
 
 
+func get_display_name() -> String:
+	return "Farmer"
+
+
 func set_tick(t: int) -> void:
 	current_tick = t
 	if t == 0 and event_bus:
@@ -118,8 +122,8 @@ func handle_arrival(t: Node2D) -> void:
 
 
 func handle_house_arrival() -> void:
-	# Try to eat bread to restore hunger
-	hunger.try_eat(current_tick)
+	# Home arrival - no action needed (eating handled by HungerNeed)
+	pass
 
 
 func handle_field_arrival(field: FieldPlot, field_name: String) -> void:

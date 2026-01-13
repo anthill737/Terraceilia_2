@@ -61,6 +61,10 @@ func _on_ate_meal(qty: int) -> void:
 	bread_consumed += qty
 
 
+func get_display_name() -> String:
+	return "Household"
+
+
 func set_tick(t: int) -> void:
 	current_tick = t
 
@@ -107,13 +111,8 @@ func attempt_buy_bread() -> void:
 
 
 func consume_bread_at_home() -> void:
-	# Try to eat bread to restore hunger
-	var old_bread = inv.get_qty("bread")
-	hunger.try_eat(current_tick)
-	var new_bread = inv.get_qty("bread")
-	var consumed = old_bread - new_bread
-	if consumed > 0:
-		bread_consumed += consumed
+	# Eating handled by HungerNeed auto-eat mechanic
+	pass
 
 
 func get_status_text() -> String:

@@ -12,12 +12,26 @@ var bread_capacity: int = 200
 const SEED_PRICE: float = 0.5
 const WHEAT_PRICE_FLOOR: float = 0.50
 const BREAD_PRICE_FLOOR: float = 1.00
+const WHEAT_PRICE_CEILING: float = 5.00
+const BREAD_PRICE_CEILING: float = 10.00
+const PRICE_STEP: float = 0.10  # 10% adjustment per day
 
 var wheat_price: float = 1.0
 var bread_price: float = 2.5
 
+var wheat_target: int = 50
+var bread_target: int = 80
+
 var event_bus: EventBus = null
 var current_tick: int = 0
+
+
+func _agent_label(agent) -> String:
+	if agent == null:
+		return "Unknown"
+	if agent.has_method("get_display_name"):
+		return str(agent.get_display_name())
+	return str(agent.name)
 
 
 func get_wallet(agent) -> Wallet:
@@ -30,9 +44,9 @@ func get_inv(agent) -> Inventory:
 
 func set_tick(t: int) -> void:
 	current_tick = t
-	# Enforce price floors
-	wheat_price = max(wheat_price, WHEAT_PRICE_FLOOR)
-	bread_price = max(bread_price, BREAD_PRICE_FLOOR)
+	# Enforce price floors and ceilings
+	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
 
 
 func buy_wheat_from_farmer(farmer: Farmer) -> void:
@@ -47,7 +61,7 @@ func buy_wheat_from_farmer(farmer: Farmer) -> void:
 	var available_space: int = wheat_capacity - wheat
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Farmer tried to sell %d wheat, but market wheat storage FULL (%d/%d)" % [current_tick, farmer_wheat, wheat, wheat_capacity])
+			event_bus.log("Tick %d: %s tried to sell %d wheat, but market wheat storage FULL (%d/%d)" % [current_tick, _agent_label(farmer), farmer_wheat, wheat, wheat_capacity])
 		return
 	
 	# Determine how much we can buy (limited by space)
@@ -62,7 +76,7 @@ func buy_wheat_from_farmer(farmer: Farmer) -> void:
 	
 	if amount <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Farmer tried to sell wheat, but market cannot afford (money=$%.2f)" % [current_tick, money])
+			event_bus.log("Tick %d: %s tried to sell wheat, but market cannot afford (money=$%.2f)" % [current_tick, _agent_label(farmer), money])
 		return
 	
 	# Execute transaction
@@ -75,9 +89,9 @@ func buy_wheat_from_farmer(farmer: Farmer) -> void:
 	# Log transaction
 	if event_bus:
 		if amount < original_farmer_wheat:
-			event_bus.log("Tick %d: Farmer sold %d/%d wheat (market wheat=%d/%d, limited by storage)" % [current_tick, amount, original_farmer_wheat, wheat, wheat_capacity])
+			event_bus.log("Tick %d: %s sold %d/%d wheat (market wheat=%d/%d, limited by storage)" % [current_tick, _agent_label(farmer), amount, original_farmer_wheat, wheat, wheat_capacity])
 		else:
-			event_bus.log("Tick %d: Market bought %d wheat from Farmer for $%.2f (market wheat=%d/%d)" % [current_tick, amount, actual_payout, wheat, wheat_capacity])
+			event_bus.log("Tick %d: Market bought %d wheat from %s for $%.2f (market wheat=%d/%d)" % [current_tick, amount, _agent_label(farmer), actual_payout, wheat, wheat_capacity])
 
 
 func sell_seeds_to_farmer(farmer: Farmer) -> void:
@@ -99,7 +113,7 @@ func sell_seeds_to_farmer(farmer: Farmer) -> void:
 		farmer_inv.add("seeds", needed)
 		
 		if event_bus:
-			event_bus.log("Tick %d: Market sold %d seeds to Farmer for $%.2f" % [current_tick, needed, cost])
+			event_bus.log("Tick %d: Market sold %d seeds to %s for $%.2f" % [current_tick, needed, _agent_label(farmer), cost])
 
 
 func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
@@ -109,7 +123,7 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 	# Check if market has no wheat
 	if wheat == 0:
 		if event_bus:
-			event_bus.log("Tick %d: Baker tried to buy %d wheat, but market has 0." % [current_tick, requested])
+			event_bus.log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
 		return 0
 	
 	var baker_wallet: Wallet = get_wallet(baker)
@@ -121,7 +135,7 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 	# Check if baker cannot afford any
 	if max_affordable == 0:
 		if event_bus:
-			event_bus.log("Tick %d: Baker tried to buy wheat, but cannot afford any at $%.2f (money=$%.2f)." % [current_tick, wheat_price, baker_wallet.money])
+			event_bus.log("Tick %d: %s tried to buy wheat, but cannot afford any at $%.2f (money=$%.2f)." % [current_tick, _agent_label(baker), wheat_price, baker_wallet.money])
 		return 0
 	
 	# Determine how much wheat is available
@@ -142,9 +156,9 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 	# Log success or partial fulfillment
 	if event_bus:
 		if amount_sold < requested:
-			event_bus.log("Tick %d: Baker requested %d wheat; bought %d (market wheat=%d, affordable=%d)." % [current_tick, requested, amount_sold, before_market_wheat, max_affordable])
+			event_bus.log("Tick %d: %s requested %d wheat; bought %d (market wheat=%d, affordable=%d)." % [current_tick, _agent_label(baker), requested, amount_sold, before_market_wheat, max_affordable])
 		else:
-			event_bus.log("Tick %d: Market sold %d wheat to Baker for $%.2f" % [current_tick, amount_sold, cost])
+			event_bus.log("Tick %d: Market sold %d wheat to %s for $%.2f" % [current_tick, amount_sold, _agent_label(baker), cost])
 	
 	return amount_sold
 
@@ -161,7 +175,7 @@ func buy_bread_from_baker(baker: Baker) -> void:
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Baker tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, baker_bread, bread, bread_capacity])
+			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(baker), baker_bread, bread, bread_capacity])
 		return
 	
 	# Determine how much we can buy (limited by space)
@@ -176,7 +190,7 @@ func buy_bread_from_baker(baker: Baker) -> void:
 	
 	if amount <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Baker tried to sell bread, but market cannot afford (money=$%.2f)" % [current_tick, money])
+			event_bus.log("Tick %d: %s tried to sell bread, but market cannot afford (money=$%.2f)" % [current_tick, _agent_label(baker), money])
 		return
 	
 	# Execute transaction
@@ -189,9 +203,9 @@ func buy_bread_from_baker(baker: Baker) -> void:
 	# Log transaction
 	if event_bus:
 		if amount < original_baker_bread:
-			event_bus.log("Tick %d: Baker sold %d/%d bread (market bread=%d/%d, limited by storage)" % [current_tick, amount, original_baker_bread, bread, bread_capacity])
+			event_bus.log("Tick %d: %s sold %d/%d bread (market bread=%d/%d, limited by storage)" % [current_tick, _agent_label(baker), amount, original_baker_bread, bread, bread_capacity])
 		else:
-			event_bus.log("Tick %d: Market bought %d bread from Baker for $%.2f (market bread=%d/%d)" % [current_tick, amount, actual_payout, bread, bread_capacity])
+			event_bus.log("Tick %d: Market bought %d bread from %s for $%.2f (market bread=%d/%d)" % [current_tick, amount, _agent_label(baker), actual_payout, bread, bread_capacity])
 
 
 func buy_bread_from_agent(agent, amount_offered: int) -> int:
@@ -210,7 +224,7 @@ func buy_bread_from_agent(agent, amount_offered: int) -> int:
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Agent tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, amount_offered, bread, bread_capacity])
+			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(agent), amount_offered, bread, bread_capacity])
 		return 0
 	
 	# Determine how much we can buy (limited by what they offer, what they have, and space)
@@ -225,7 +239,7 @@ func buy_bread_from_agent(agent, amount_offered: int) -> int:
 	
 	if amount <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Agent tried to sell bread, but market cannot afford (money=$%.2f)" % [current_tick, money])
+			event_bus.log("Tick %d: %s tried to sell bread, but market cannot afford (money=$%.2f)" % [current_tick, _agent_label(agent), money])
 		return 0
 	
 	# Execute transaction
@@ -237,7 +251,7 @@ func buy_bread_from_agent(agent, amount_offered: int) -> int:
 	
 	# Log transaction
 	if event_bus:
-		event_bus.log("Tick %d: Market bought %d bread from agent for $%.2f (market bread=%d/%d)" % [current_tick, amount, actual_payout, bread, bread_capacity])
+		event_bus.log("Tick %d: Market bought %d bread from %s for $%.2f (market bread=%d/%d)" % [current_tick, amount, _agent_label(agent), actual_payout, bread, bread_capacity])
 	
 	return amount
 
@@ -249,7 +263,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	# Check if market has no bread
 	if bread <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Household tried to buy %d bread, but market has 0" % [current_tick, requested])
+			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(h), requested])
 		return 0
 	
 	var h_wallet: Wallet = get_wallet(h)
@@ -261,7 +275,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	if qty <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Household cannot afford bread ($%.2f), money=$%.2f" % [current_tick, bread_price, h_wallet.money])
+			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(h), bread_price, h_wallet.money])
 		return 0
 	
 	# Perform transaction
@@ -280,7 +294,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	# Check if market has no bread
 	if bread <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Agent tried to buy %d bread, but market has 0" % [current_tick, requested])
+			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
 		return 0
 	
 	var agent_wallet: Wallet = get_wallet(agent)
@@ -292,7 +306,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	
 	if qty <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: Agent cannot afford bread ($%.2f), money=$%.2f" % [current_tick, bread_price, agent_wallet.money])
+			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(agent), bread_price, agent_wallet.money])
 		return 0
 	
 	# Perform transaction
@@ -302,6 +316,50 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	bread -= qty
 	
 	if event_bus and qty < requested:
-		event_bus.log("Tick %d: Agent bought %d/%d bread (limited by availability or money)" % [current_tick, qty, requested])
+		event_bus.log("Tick %d: %s bought %d/%d bread (limited by availability or money)" % [current_tick, _agent_label(agent), qty, requested])
 	
 	return qty
+
+
+# ==================== DAILY PRICE ADJUSTMENT ====================
+
+func on_day_changed(day: int) -> void:
+	"""Called by Calendar when a new day starts. Adjusts prices based on inventory vs target."""
+	_adjust_wheat_price(day)
+	_adjust_bread_price(day)
+
+
+func _adjust_wheat_price(day: int) -> void:
+	var old_price: float = wheat_price
+	
+	if wheat < wheat_target:
+		# Low inventory → raise price (scarcity)
+		wheat_price *= (1.0 + PRICE_STEP)
+	elif wheat > wheat_target:
+		# High inventory → lower price (surplus)
+		wheat_price *= (1.0 - PRICE_STEP)
+	else:
+		return  # At target, no change
+	
+	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	
+	if abs(wheat_price - old_price) > 0.0001 and event_bus:
+		event_bus.log("Day %d: wheat_price $%.2f → $%.2f (inv %d / target %d)" % [day, old_price, wheat_price, wheat, wheat_target])
+
+
+func _adjust_bread_price(day: int) -> void:
+	var old_price: float = bread_price
+	
+	if bread < bread_target:
+		# Low inventory → raise price (scarcity)
+		bread_price *= (1.0 + PRICE_STEP)
+	elif bread > bread_target:
+		# High inventory → lower price (surplus)
+		bread_price *= (1.0 - PRICE_STEP)
+	else:
+		return  # At target, no change
+	
+	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	
+	if abs(bread_price - old_price) > 0.0001 and event_bus:
+		event_bus.log("Day %d: bread_price $%.2f → $%.2f (inv %d / target %d)" % [day, old_price, bread_price, bread, bread_target])

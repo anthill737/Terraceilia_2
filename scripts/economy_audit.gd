@@ -58,8 +58,12 @@ func audit(farmer: Farmer, baker: Baker, market: Market, bus: EventBus, tick: in
 		errors.append("Market bread exceeds capacity: %d/%d" % [market.bread, market.bread_capacity])
 	if market.wheat_price < market.WHEAT_PRICE_FLOOR - 0.001:
 		errors.append("Market wheat_price below floor: %.2f < %.2f" % [market.wheat_price, market.WHEAT_PRICE_FLOOR])
+	if market.wheat_price > market.WHEAT_PRICE_CEILING + 0.001:
+		errors.append("Market wheat_price above ceiling: %.2f > %.2f" % [market.wheat_price, market.WHEAT_PRICE_CEILING])
 	if market.bread_price < market.BREAD_PRICE_FLOOR - 0.001:
 		errors.append("Market bread_price below floor: %.2f < %.2f" % [market.bread_price, market.BREAD_PRICE_FLOOR])
+	if market.bread_price > market.BREAD_PRICE_CEILING + 0.001:
+		errors.append("Market bread_price above ceiling: %.2f > %.2f" % [market.bread_price, market.BREAD_PRICE_CEILING])
 	if is_nan(market.money):
 		errors.append("Market money is NaN")
 	

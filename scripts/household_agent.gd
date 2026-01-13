@@ -1,10 +1,12 @@
 extends CharacterBody2D
 class_name HouseholdAgent
 
-enum Phase { GO_TO_MARKET, WAIT_AT_MARKET, GO_HOME, WAIT_AT_HOME }
+## Household agent - buys bread at market, consumes at home.
+## Movement is handled by RouteRunner component.
 
-var phase: Phase = Phase.GO_TO_MARKET
-var target: Node2D = null
+enum Phase { AT_MARKET, AT_HOME }
+
+var phase: Phase = Phase.AT_MARKET
 
 # Locations
 var home_location: Node2D = null
@@ -25,10 +27,14 @@ const WAIT_TIME: float = 1.0
 @onready var inv: Inventory = $Inventory
 @onready var hunger: HungerNeed = $HungerNeed
 @onready var food_stockpile: FoodStockpile = $FoodStockpile
+@onready var route: RouteRunner = $RouteRunner
+@onready var cap: InventoryCapacity = $InventoryCapacity
 
 # State
 var bread_consumed: int = 0
-var wait_left: float = 0.0
+
+# Pending target for after waiting
+var pending_target: Node2D = null
 
 
 func _ready() -> void:
@@ -36,8 +42,19 @@ func _ready() -> void:
 	wallet.money = 5000.0
 	inv.items = {"bread": 0}
 	
+	# Bind capacity to inventory
+	cap.bind(inv)
+	inv.bind_capacity(cap)
+	
 	# Bind food stockpile
 	food_stockpile.bind(inv)
+	
+	# Bind RouteRunner
+	route.bind(self)
+	route.speed = SPEED
+	route.arrival_distance = ARRIVAL_DISTANCE
+	route.arrived.connect(_on_arrived)
+	route.wait_finished.connect(_on_wait_finished)
 
 
 func _on_ate_meal(qty: int) -> void:
@@ -51,44 +68,28 @@ func set_tick(t: int) -> void:
 func set_locations(home: Node2D, market_node: Node2D) -> void:
 	home_location = home
 	market_location = market_node
-	target = market_location
+	route.set_target(market_location)
 
 
-func _physics_process(delta: float) -> void:
-	if target == null:
-		return
-	
-	match phase:
-		Phase.GO_TO_MARKET, Phase.GO_HOME:
-			move_toward_target(delta)
-		Phase.WAIT_AT_MARKET, Phase.WAIT_AT_HOME:
-			wait_at_location(delta)
-
-
-func move_toward_target(delta: float) -> void:
-	var direction = (target.global_position - global_position).normalized()
-	var distance = global_position.distance_to(target.global_position)
-	
-	if distance <= ARRIVAL_DISTANCE:
-		velocity = Vector2.ZERO
-		handle_arrival()
-	else:
-		velocity = direction * SPEED
-	
-	move_and_slide()
-
-
-func handle_arrival() -> void:
-	if target == market_location:
+func _on_arrived(t: Node2D) -> void:
+	if t == market_location:
 		# Arrived at market
 		attempt_buy_bread()
-		phase = Phase.WAIT_AT_MARKET
-		wait_left = WAIT_TIME
-	elif target == home_location:
+		phase = Phase.AT_MARKET
+		pending_target = home_location
+		route.wait(WAIT_TIME)
+	elif t == home_location:
 		# Arrived at home
 		consume_bread_at_home()
-		phase = Phase.WAIT_AT_HOME
-		wait_left = WAIT_TIME
+		phase = Phase.AT_HOME
+		pending_target = market_location
+		route.wait(WAIT_TIME)
+
+
+func _on_wait_finished() -> void:
+	if pending_target != null:
+		route.set_target(pending_target)
+		pending_target = null
 
 
 func attempt_buy_bread() -> void:
@@ -115,31 +116,17 @@ func consume_bread_at_home() -> void:
 		bread_consumed += consumed
 
 
-func wait_at_location(delta: float) -> void:
-	wait_left -= delta
-	if wait_left <= 0.0:
-		if phase == Phase.WAIT_AT_MARKET:
-			# Done waiting at market, go home
-			target = home_location
-			phase = Phase.GO_HOME
-		elif phase == Phase.WAIT_AT_HOME:
-			# Done waiting at home, go to market
-			target = market_location
-			phase = Phase.GO_TO_MARKET
-
-
 func get_status_text() -> String:
-	match phase:
-		Phase.GO_TO_MARKET:
-			return "Going to Market"
-		Phase.WAIT_AT_MARKET:
+	# Use RouteRunner status with context
+	if route.target == market_location:
+		if route.is_waiting:
 			return "Waiting at Market"
-		Phase.GO_HOME:
-			return "Going Home"
-		Phase.WAIT_AT_HOME:
+		return "Going to Market"
+	elif route.target == home_location:
+		if route.is_waiting:
 			if inv.get_qty("bread") > 0:
 				return "Eating"
-			else:
-				return "Waiting at Home"
+			return "Waiting at Home"
+		return "Going Home"
 	
-	return "Unknown"
+	return route.get_status_text()

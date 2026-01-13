@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://c6qvxkw7yf1yd"]
+[gd_scene load_steps=12 format=3 uid="uid://c6qvxkw7yf1yd"]
 
 [ext_resource type="Script" uid="uid://b3hs1u0d10nyn" path="res://scripts/main.gd" id="1_abcde"]
 [ext_resource type="Script" uid="uid://dgudqpmx1nxlv" path="res://scripts/farmer.gd" id="2_farmer"]
@@ -10,6 +10,9 @@
 [ext_resource type="Script" path="res://scripts/components/hunger_need.gd" id="8_hunger_need"]
 [ext_resource type="Script" path="res://scripts/components/food_stockpile.gd" id="9_food_stockpile"]
 [ext_resource type="Script" path="res://scripts/calendar.gd" id="10_calendar"]
+[ext_resource type="Script" path="res://scripts/components/route_runner.gd" id="11_route_runner"]
+[ext_resource type="Script" path="res://scripts/components/inventory_capacity.gd" id="12_inventory_capacity"]
+[ext_resource type="Script" path="res://scripts/components/production_batch.gd" id="13_production_batch"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_abcde")
@@ -89,6 +92,12 @@ script = ExtResource("8_hunger_need")
 [node name="FoodStockpile" type="Node" parent="Farmer"]
 script = ExtResource("9_food_stockpile")
 
+[node name="RouteRunner" type="Node" parent="Farmer"]
+script = ExtResource("11_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="Farmer"]
+script = ExtResource("12_inventory_capacity")
+
 [node name="Baker" type="CharacterBody2D" parent="."]
 position = Vector2(350, 450)
 script = ExtResource("3_baker")
@@ -111,6 +120,15 @@ script = ExtResource("8_hunger_need")
 
 [node name="FoodStockpile" type="Node" parent="Baker"]
 script = ExtResource("9_food_stockpile")
+
+[node name="RouteRunner" type="Node" parent="Baker"]
+script = ExtResource("11_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="Baker"]
+script = ExtResource("12_inventory_capacity")
+
+[node name="ProductionBatch" type="Node" parent="Baker"]
+script = ExtResource("13_production_batch")
 
 [node name="HouseholdHome" type="Node2D" parent="."]
 position = Vector2(177, 287)
@@ -144,6 +162,12 @@ script = ExtResource("8_hunger_need")
 
 [node name="FoodStockpile" type="Node" parent="HouseholdAgent"]
 script = ExtResource("9_food_stockpile")
+
+[node name="RouteRunner" type="Node" parent="HouseholdAgent"]
+script = ExtResource("11_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="HouseholdAgent"]
+script = ExtResource("12_inventory_capacity")
 
 [node name="UI" type="CanvasLayer" parent="."]
 
@@ -226,6 +250,10 @@ text = "Farmer Days Until Starve: 3"
 layout_mode = 2
 text = "Farmer Starving: No"
 
+[node name="FarmerInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
+layout_mode = 2
+text = "Inventory: 0 / 50"
+
 [node name="HSeparator1" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
 layout_mode = 2
 
@@ -271,6 +299,10 @@ text = "Baker Days Until Starve: 3"
 layout_mode = 2
 text = "Baker Starving: No"
 
+[node name="BakerInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
+layout_mode = 2
+text = "Inventory: 0 / 50"
+
 [node name="HSeparator2" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
 layout_mode = 2
 
@@ -307,6 +339,10 @@ text = "Household Hunger: 5/5"
 [node name="HouseholdStarving" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
 layout_mode = 2
 text = "Household Starving: No"
+
+[node name="HouseholdInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
+layout_mode = 2
+text = "Inventory: 0 / 50"
 
 [node name="HSeparator3" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
 layout_mode = 2
@@ -372,6 +408,9 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 bbcode_enabled = true
-scroll_following = true
+scroll_following = false
 
+[node name="ExportLogButton" type="Button" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox"]
+layout_mode = 2
+text = "Export Log"
 

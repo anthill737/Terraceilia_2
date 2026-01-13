@@ -1,10 +1,8 @@
 extends CharacterBody2D
 class_name Farmer
 
-enum State { WALKING, WAITING }
-
-var state: State = State.WAITING
-var current_target: Node2D = null
+## Farmer agent - plants seeds, harvests wheat, sells at market, buys bread.
+## Movement is handled by RouteRunner component.
 
 # Route nodes
 var house_node: Node2D = null
@@ -22,13 +20,13 @@ const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
 const WAIT_TIME: float = 1.0
 
-var wait_timer: float = 0.0
-
 # Components
 @onready var wallet: Wallet = $Wallet
 @onready var inv: Inventory = $Inventory
 @onready var hunger: HungerNeed = $HungerNeed
 @onready var food_stockpile: FoodStockpile = $FoodStockpile
+@onready var route: RouteRunner = $RouteRunner
+@onready var cap: InventoryCapacity = $InventoryCapacity
 
 # Reference to market
 var market: Market = null
@@ -36,6 +34,9 @@ var market: Market = null
 # Event logging
 var event_bus: EventBus = null
 var current_tick: int = 0
+
+# Pending target for after waiting
+var pending_target: Node2D = null
 
 
 func set_tick(t: int) -> void:
@@ -45,14 +46,23 @@ func set_tick(t: int) -> void:
 
 
 func _ready() -> void:
-	wait_timer = WAIT_TIME
-	
 	# Initialize wallet and inventory
 	wallet.money = 1000.0
-	inv.items = {"seeds": 100, "wheat": 0, "bread": 2}
+	inv.items = {"seeds": 20, "wheat": 0, "bread": 2}
+	
+	# Bind capacity to inventory
+	cap.bind(inv)
+	inv.bind_capacity(cap)
 	
 	# Bind food stockpile
 	food_stockpile.bind(inv)
+	
+	# Bind RouteRunner
+	route.bind(self)
+	route.speed = SPEED
+	route.arrival_distance = ARRIVAL_DISTANCE
+	route.arrived.connect(_on_arrived)
+	route.wait_finished.connect(_on_wait_finished)
 
 
 func set_route_nodes(house: Node2D, field1: Node2D, field2: Node2D, market: Node2D) -> void:
@@ -62,7 +72,7 @@ func set_route_nodes(house: Node2D, field1: Node2D, field2: Node2D, market: Node
 	market_node = market
 	route_targets = [house_node, field1_node, field2_node, market_node]
 	route_index = 0
-	current_target = route_targets[route_index]
+	route.set_target(route_targets[route_index])
 
 
 func set_fields(field1: FieldPlot, field2: FieldPlot) -> void:
@@ -70,53 +80,40 @@ func set_fields(field1: FieldPlot, field2: FieldPlot) -> void:
 	field2_plot = field2
 
 
-func _physics_process(delta: float) -> void:
-	if current_target == null or hunger.is_starving:
-		return
+func _physics_process(_delta: float) -> void:
+	# Stop movement if starving (RouteRunner still processes but we override here)
+	if hunger.is_starving:
+		route.stop()
+
+
+func _on_arrived(t: Node2D) -> void:
+	# Handle arrival actions
+	handle_arrival(t)
 	
-	match state:
-		State.WALKING:
-			walk_toward_target(delta)
-		State.WAITING:
-			wait_at_location(delta)
+	# Set pending target for after wait completes
+	pending_target = get_next_target()
+	route.wait(WAIT_TIME)
 
 
-func walk_toward_target(delta: float) -> void:
-	var direction = (current_target.global_position - global_position).normalized()
-	var distance = global_position.distance_to(current_target.global_position)
-	
-	if distance <= ARRIVAL_DISTANCE:
-		velocity = Vector2.ZERO
-		state = State.WAITING
-		wait_timer = WAIT_TIME
-		# Perform actions at arrival
-		handle_arrival()
-	else:
-		velocity = direction * SPEED
-	
-	move_and_slide()
+func _on_wait_finished() -> void:
+	if pending_target != null:
+		route.set_target(pending_target)
+		pending_target = null
 
 
-func wait_at_location(delta: float) -> void:
-	wait_timer -= delta
-	if wait_timer <= 0.0:
-		advance_to_next_target()
-		state = State.WALKING
-
-
-func advance_to_next_target() -> void:
+func get_next_target() -> Node2D:
 	route_index = (route_index + 1) % route_targets.size()
-	current_target = route_targets[route_index]
+	return route_targets[route_index]
 
 
-func handle_arrival() -> void:
-	if current_target == house_node:
+func handle_arrival(t: Node2D) -> void:
+	if t == house_node:
 		handle_house_arrival()
-	elif current_target == field1_node:
+	elif t == field1_node:
 		handle_field_arrival(field1_plot, "Field1")
-	elif current_target == field2_node:
+	elif t == field2_node:
 		handle_field_arrival(field2_plot, "Field2")
-	elif current_target == market_node:
+	elif t == market_node:
 		handle_market_arrival()
 
 
@@ -163,27 +160,22 @@ func get_status_text() -> String:
 	if hunger.is_starving:
 		return "STARVING (inactive)"
 	
-	if state == State.WAITING:
-		if current_target == house_node:
+	# Use RouteRunner status with context
+	if route.target == house_node:
+		if route.is_waiting:
 			return "Waiting at House"
-		elif current_target == field1_node:
+		return "Walking to House"
+	elif route.target == field1_node:
+		if route.is_waiting:
 			return "Waiting at Field1"
-		elif current_target == field2_node:
+		return "Walking to Field1"
+	elif route.target == field2_node:
+		if route.is_waiting:
 			return "Waiting at Field2"
-		elif current_target == market_node:
+		return "Walking to Field2"
+	elif route.target == market_node:
+		if route.is_waiting:
 			return "At Market (trading)"
-		else:
-			return "Waiting"
-	elif state == State.WALKING:
-		if current_target == house_node:
-			return "Walking to House"
-		elif current_target == field1_node:
-			return "Walking to Field1"
-		elif current_target == field2_node:
-			return "Walking to Field2"
-		elif current_target == market_node:
-			return "Walking to Market"
-		else:
-			return "Walking"
+		return "Walking to Market"
 	
-	return "Unknown"
+	return route.get_status_text()

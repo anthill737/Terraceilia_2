@@ -43,9 +43,15 @@ var household_bread_consumed_label: Label
 var household_hunger_label: Label
 var household_starving_label: Label
 var household_status_label: Label
+var farmer_inventory_label: Label
+var baker_inventory_label: Label
+var household_inventory_label: Label
 var event_log: RichTextLabel
+var export_log_button: Button
 
 var log_lines: Array[String] = []
+var log_buffer: Array[String] = []  # Full log for export (not trimmed)
+var follow_log: bool = false  # Auto-scroll disabled by default
 const MAX_LOG_LINES: int = 200
 
 
@@ -88,6 +94,9 @@ func _ready() -> void:
 	market = Market.new()
 	market.name = "Market"
 	add_child(market)
+	
+	# Wire calendar day_changed to market for daily price adjustments
+	calendar.day_changed.connect(market.on_day_changed)
 	
 	# Wire event bus to all agents
 	market.event_bus = bus
@@ -161,8 +170,9 @@ func _on_tick(tick: int) -> void:
 
 func _on_event_logged(msg: String) -> void:
 	log_lines.append(msg)
+	log_buffer.append(msg)  # Keep full log for export
 	
-	# Trim to max lines
+	# Trim display log to max lines
 	while log_lines.size() > MAX_LOG_LINES:
 		log_lines.pop_front()
 	
@@ -171,6 +181,65 @@ func _on_event_logged(msg: String) -> void:
 		event_log.clear()
 		for line in log_lines:
 			event_log.append_text(line + "\n")
+		
+		# Only auto-scroll if follow_log is enabled
+		if follow_log:
+			event_log.scroll_to_line(event_log.get_line_count())
+
+
+func export_log() -> void:
+	print("export_log() called - buffer size: ", log_buffer.size())
+	
+	# Create a snapshot of the buffer to avoid modification during iteration
+	var log_snapshot = log_buffer.duplicate()
+	
+	var dir = DirAccess.open("user://")
+	if not dir:
+		print("ERROR: Could not open user:// directory")
+		if event_log:
+			event_log.append_text("[ERROR] Could not access user directory\n")
+		return
+	
+	print("Opened user:// directory")
+	
+	if not dir.dir_exists("logs"):
+		print("Creating logs directory")
+		var err = dir.make_dir("logs")
+		if err != OK:
+			print("ERROR: Failed to create logs directory: ", err)
+			if event_log:
+				event_log.append_text("[ERROR] Failed to create logs directory\n")
+			return
+	
+	var datetime = Time.get_datetime_dict_from_system()
+	var filename = "economy_log_%04d-%02d-%02d_%02d-%02d-%02d.txt" % [
+		datetime.year, datetime.month, datetime.day,
+		datetime.hour, datetime.minute, datetime.second
+	]
+	var path = "user://logs/" + filename
+	print("Attempting to save to: ", path)
+	
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		print("File opened successfully, writing ", log_snapshot.size(), " lines...")
+		for line in log_snapshot:
+			file.store_line(line)
+		file.close()
+		print("File closed successfully")
+		
+		# Convert user:// path to absolute file system path
+		var abs_path = ProjectSettings.globalize_path(path)
+		print("Absolute path: ", abs_path)
+		
+		# Update event log directly to avoid recursion
+		if event_log:
+			event_log.append_text("[EXPORT] Log saved to: %s\n" % abs_path)
+			event_log.append_text("[EXPORT] (%d lines written)\n" % log_snapshot.size())
+	else:
+		var err = FileAccess.get_open_error()
+		print("ERROR: Failed to open file for writing: ", err)
+		if event_log:
+			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
 
 
 func get_ui_labels() -> void:
@@ -187,6 +256,7 @@ func get_ui_labels() -> void:
 	farmer_bread_label = farmer_card.get_node("FarmerBread")
 	farmer_days_until_starve_label = farmer_card.get_node("FarmerDaysUntilStarve")
 	farmer_starving_label = farmer_card.get_node("FarmerStarving")
+	farmer_inventory_label = farmer_card.get_node("FarmerInventory")
 	
 	baker_status_label = baker_card.get_node("BakerStatus")
 	baker_money_label = baker_card.get_node("BakerMoney")
@@ -196,6 +266,7 @@ func get_ui_labels() -> void:
 	baker_food_bread_label = baker_card.get_node("BakerFoodBread")
 	baker_days_until_starve_label = baker_card.get_node("BakerDaysUntilStarve")
 	baker_starving_label = baker_card.get_node("BakerStarving")
+	baker_inventory_label = baker_card.get_node("BakerInventory")
 	
 	household_status_label = household_card.get_node("HouseholdStatus")
 	household_money_label = household_card.get_node("HouseholdMoney")
@@ -203,6 +274,7 @@ func get_ui_labels() -> void:
 	household_bread_consumed_label = household_card.get_node("HouseholdBreadConsumed")
 	household_hunger_label = household_card.get_node("HouseholdHunger")
 	household_starving_label = household_card.get_node("HouseholdStarving")
+	household_inventory_label = household_card.get_node("HouseholdInventory")
 	
 	market_money_label = market_card.get_node("MarketMoney")
 	market_seeds_label = market_card.get_node("MarketSeeds")
@@ -214,6 +286,8 @@ func get_ui_labels() -> void:
 	bread_price_label = market_card.get_node("BreadPrice")
 	
 	event_log = log_vbox.get_node("EventLog")
+	export_log_button = log_vbox.get_node("ExportLogButton")
+	export_log_button.pressed.connect(export_log)
 
 
 func update_ui() -> void:
@@ -226,6 +300,11 @@ func update_ui() -> void:
 		var farmer_hunger = farmer.get_node("HungerNeed")
 		farmer_days_until_starve_label.text = "Farmer Hunger Days: %d/%d" % [farmer_hunger.hunger_days, farmer_hunger.hunger_max_days]
 		farmer_starving_label.text = "Farmer Starving: %s" % ("Yes" if farmer_hunger.is_starving else "No")
+		var farmer_cap = farmer.get_node("InventoryCapacity")
+		var farmer_inv_text = "Inventory: %d / %d" % [farmer_cap.current_total(), farmer_cap.max_items]
+		if farmer_cap.is_full():
+			farmer_inv_text += " (FULL)"
+		farmer_inventory_label.text = farmer_inv_text
 	
 	if market:
 		market_money_label.text = "Market Money: $%.2f" % market.money
@@ -234,8 +313,8 @@ func update_ui() -> void:
 		market_wheat_cap_label.text = "Market Wheat: %d/%d" % [market.wheat, market.wheat_capacity]
 		market_bread_label.text = "Market Bread: %d" % market.bread
 		market_bread_cap_label.text = "Market Bread: %d/%d" % [market.bread, market.bread_capacity]
-		wheat_price_label.text = "Wheat Price: $%.2f (floor $%.2f)" % [market.wheat_price, market.WHEAT_PRICE_FLOOR]
-		bread_price_label.text = "Bread Price: $%.2f (floor $%.2f)" % [market.bread_price, market.BREAD_PRICE_FLOOR]
+		wheat_price_label.text = "Wheat Price: $%.2f ($%.2f–$%.2f)" % [market.wheat_price, market.WHEAT_PRICE_FLOOR, market.WHEAT_PRICE_CEILING]
+		bread_price_label.text = "Bread Price: $%.2f ($%.2f–$%.2f)" % [market.bread_price, market.BREAD_PRICE_FLOOR, market.BREAD_PRICE_CEILING]
 	
 	if baker:
 		baker_status_label.text = "Status: " + baker.get_status_text()
@@ -247,6 +326,11 @@ func update_ui() -> void:
 		var baker_hunger = baker.get_node("HungerNeed")
 		baker_days_until_starve_label.text = "Baker Hunger Days: %d/%d" % [baker_hunger.hunger_days, baker_hunger.hunger_max_days]
 		baker_starving_label.text = "Baker Starving: %s" % ("Yes" if baker_hunger.is_starving else "No")
+		var baker_cap = baker.get_node("InventoryCapacity")
+		var baker_inv_text = "Inventory: %d / %d" % [baker_cap.current_total(), baker_cap.max_items]
+		if baker_cap.is_full():
+			baker_inv_text += " (FULL)"
+		baker_inventory_label.text = baker_inv_text
 	
 	if household_agent:
 		household_status_label.text = "Status: " + household_agent.get_status_text()
@@ -256,3 +340,8 @@ func update_ui() -> void:
 		var household_hunger = household_agent.get_node("HungerNeed")
 		household_hunger_label.text = "Household Hunger: %d/%d" % [household_hunger.hunger_days, household_hunger.hunger_max_days]
 		household_starving_label.text = "Household Starving: %s" % ("Yes" if household_hunger.is_starving else "No")
+		var household_cap = household_agent.get_node("InventoryCapacity")
+		var household_inv_text = "Inventory: %d / %d" % [household_cap.current_total(), household_cap.max_items]
+		if household_cap.is_full():
+			household_inv_text += " (FULL)"
+		household_inventory_label.text = household_inv_text

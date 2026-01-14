@@ -36,7 +36,7 @@ const MIN_TRADES_FOR_PRICE_DISCOVERY: int = 5  # Minimum trades to use price dis
 var wheat_price: float = 1.0
 var bread_price: float = 2.5
 
-var wheat_target: int = 50
+var wheat_target: int = 60
 var bread_target: int = 80
 
 # Trade flow tracking (reset daily)

@@ -59,7 +59,7 @@ func set_tick(t: int) -> void:
 func _ready() -> void:
 	# Initialize wallet and inventory
 	wallet.money = 1000.0
-	inv.items = {"seeds": 20, "wheat": 0, "bread": 2}
+	inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
 	
 	# Bind capacity to inventory
 	cap.bind(inv)
@@ -142,11 +142,11 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		if event_bus:
 			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds)" % [current_tick, field_name, harvest_result.wheat, harvest_result.seeds])
 	# Otherwise try to plant if field is empty and we have seeds
-	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 1:
+	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
 		if field.plant():
-			inv.remove("seeds", 1)
+			inv.remove("seeds", 5)
 			if event_bus:
-				event_bus.log("Tick %d: Farmer planted %s (-1 seed)" % [current_tick, field_name])
+				event_bus.log("Tick %d: Farmer planted %s (-5 seeds)" % [current_tick, field_name])
 
 
 func handle_market_arrival() -> void:

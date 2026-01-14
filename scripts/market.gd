@@ -20,10 +20,18 @@ const PRICE_STEP: float = 0.10  # 10% adjustment per day
 # If sell_pressure_ratio < threshold, price won't increase even if inventory is low
 const SELL_PRESSURE_THRESHOLD: float = 0.5  # 50% fulfillment required
 
-# Bid pricing configuration
-const BID_DISCOUNT_MIN: float = 0.8  # 20% max discount when at capacity
-const BID_DISCOUNT_MAX: float = 1.0  # No discount when empty
+# Bid curve configuration - steep near target for strong downward pressure
+const BID_CURVE_SCARCITY_MULTIPLIER: float = 1.3  # Max 30% premium when empty
+const BID_CURVE_SURPLUS_MULTIPLIER: float = 0.7  # Min 30% discount when full
+const BID_CURVE_PRE_TARGET_RATIO: float = 0.80  # Where steep decline starts (80% of target)
+const BID_CURVE_STEEPNESS: float = 3.0  # Exponent for steep decline near target (higher = steeper)
 const MAX_MICROFILL_UNITS_PER_TRADE: int = 25  # Performance cap
+
+# Price discovery configuration - reference prices follow clearing prices
+const CLEARING_ANCHOR_STRENGTH: float = 0.5  # How much reference lerps toward clearing price (0.0-1.0)
+const MAX_PREMIUM_OVER_CLEARING: float = 0.05  # Max 5% premium over avg clearing price
+const MAX_INVENTORY_NUDGE_PER_DAY: float = 0.03  # Max 3% inventory-based adjustment per day
+const MIN_TRADES_FOR_PRICE_DISCOVERY: int = 5  # Minimum trades to use price discovery
 
 var wheat_price: float = 1.0
 var bread_price: float = 2.5
@@ -36,6 +44,12 @@ var wheat_sold_today: int = 0
 var wheat_requested_today: int = 0
 var bread_sold_today: int = 0
 var bread_requested_today: int = 0
+
+# Clearing price tracking (reset daily) - prevents reference price ratcheting
+var wheat_total_cleared: int = 0
+var wheat_total_value: float = 0.0
+var bread_total_cleared: int = 0
+var bread_total_value: float = 0.0
 
 var event_bus: EventBus = null
 var current_tick: int = 0
@@ -68,35 +82,55 @@ func set_tick(t: int) -> void:
 
 func get_bid_price(good: String) -> float:
 	"""Get current bid price for a good (what market will pay right now).
-	Bid price = reference_price * inventory_discount_factor.
-	Bid drops as inventory approaches capacity."""
+	Bid uses a curve:
+	- Below target: bid_multiplier >= 1.0 (market pays premium for scarcity)
+	- At target: bid_multiplier = 1.0
+	- Above target: bid_multiplier < 1.0 (market discounts for surplus)"""
 	var reference_price: float = 0.0
 	var current_inv: int = 0
-	var capacity: int = 0
+	var target_inv: int = 0
 	var floor_price: float = 0.0
 	
 	match good:
 		"wheat":
 			reference_price = wheat_price
 			current_inv = wheat
-			capacity = wheat_capacity
+			target_inv = wheat_target
 			floor_price = WHEAT_PRICE_FLOOR
 		"bread":
 			reference_price = bread_price
 			current_inv = bread
-			capacity = bread_capacity
+			target_inv = bread_target
 			floor_price = BREAD_PRICE_FLOOR
 		_:
 			return 0.0
 	
-	# Calculate inventory pressure (0.0 = empty, 1.0 = at capacity)
-	var inventory_pressure: float = 0.0 if capacity == 0 else float(current_inv) / float(capacity)
+	if target_inv <= 0:
+		return reference_price
 	
-	# Calculate discount factor (1.0 at empty, BID_DISCOUNT_MIN at capacity)
-	var discount_factor: float = BID_DISCOUNT_MAX - (inventory_pressure * (BID_DISCOUNT_MAX - BID_DISCOUNT_MIN))
+	# Calculate inventory ratio (0.0 = empty, 1.0 = at target, >1.0 = over target)
+	var inv_ratio: float = float(current_inv) / float(target_inv)
 	
-	# Apply discount and enforce floor
-	var bid: float = reference_price * discount_factor
+	# Calculate bid multiplier using steep non-linear curve
+	var bid_multiplier: float = 1.0
+	if inv_ratio < BID_CURVE_PRE_TARGET_RATIO:
+		# Below pre-target: gentle linear decline from max premium
+		var ratio_in_zone: float = inv_ratio / BID_CURVE_PRE_TARGET_RATIO
+		bid_multiplier = BID_CURVE_SCARCITY_MULTIPLIER - (ratio_in_zone * (BID_CURVE_SCARCITY_MULTIPLIER - 1.0))
+	elif inv_ratio < 1.0:
+		# Pre-target to target: STEEP decline using power curve
+		var ratio_in_steep_zone: float = (inv_ratio - BID_CURVE_PRE_TARGET_RATIO) / (1.0 - BID_CURVE_PRE_TARGET_RATIO)
+		# Apply steepness exponent: as inventory approaches target, bid drops sharply
+		bid_multiplier = 1.0 - (pow(ratio_in_steep_zone, BID_CURVE_STEEPNESS) * 0.0)  # Drops from 1.0 toward 1.0 but ready for overshoot
+		bid_multiplier = max(bid_multiplier, 0.85)  # Floor at 85% when at target edge
+	elif inv_ratio >= 1.0:
+		# Above target: aggressive discount (inventory overshoot)
+		var over_target_ratio: float = min((inv_ratio - 1.0), 1.0)  # Cap at 2x target
+		# Start at 0.85 (target edge) and drop to SURPLUS_MULTIPLIER
+		bid_multiplier = 0.85 - (over_target_ratio * (0.85 - BID_CURVE_SURPLUS_MULTIPLIER))
+	
+	# Apply multiplier and enforce floor
+	var bid: float = reference_price * bid_multiplier
 	return max(bid, floor_price)
 
 
@@ -184,17 +218,18 @@ func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0) ->
 	var units_bought: int = 0
 	var total_paid: float = 0.0
 	var initial_bid: float = get_bid_price("wheat")
+	var final_bid: float = initial_bid
 	var stopped_by_price: bool = false
+	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
 		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("wheat")
+		final_bid = current_bid
 		
 		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
-			if event_bus and units_bought > 0:
-				event_bus.log("Tick %d: Market micro-fill wheat: offered %d, bought %d (bid fell %.2f→%.2f, stopped at min_price %.2f)" % [current_tick, farmer_wheat, units_bought, initial_bid, current_bid, min_acceptable_price])
 			break
 		
 		# Check if market can afford this unit
@@ -209,16 +244,27 @@ func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0) ->
 		total_paid += current_bid
 		units_bought += 1
 	
+	# Check if capped by performance limit
+	if units_bought == max_units and units_bought < farmer_wheat:
+		stopped_by_cap = true
+	
 	# Track flow for pricing
 	wheat_sold_today += units_bought
 	
-	# Log transaction
+	# Track clearing prices for reference price adjustment
+	if units_bought > 0:
+		wheat_total_cleared += units_bought
+		wheat_total_value += total_paid
+	
+	# Summary log
 	if event_bus and units_bought > 0:
-		if not stopped_by_price:
-			if units_bought < farmer_wheat:
-				event_bus.log("Tick %d: %s sold %d/%d wheat for $%.2f (market wheat=%d/%d)" % [current_tick, _agent_label(farmer), units_bought, farmer_wheat, total_paid, wheat, wheat_capacity])
-			else:
-				event_bus.log("Tick %d: Market bought %d wheat from %s for $%.2f (market wheat=%d/%d)" % [current_tick, units_bought, _agent_label(farmer), total_paid, wheat, wheat_capacity])
+		var avg_price: float = total_paid / float(units_bought)
+		var reason: String = "complete"
+		if stopped_by_price:
+			reason = "walk-away"
+		elif stopped_by_cap:
+			reason = "capped"
+		event_bus.log("Tick %d: %s wheat sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(farmer), farmer_wheat, units_bought, avg_price, initial_bid, final_bid, reason])
 	
 	return units_bought
 
@@ -319,17 +365,18 @@ func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> in
 	var units_bought: int = 0
 	var total_paid: float = 0.0
 	var initial_bid: float = get_bid_price("bread")
+	var final_bid: float = initial_bid
 	var stopped_by_price: bool = false
+	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
 		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("bread")
+		final_bid = current_bid
 		
 		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
-			if event_bus and units_bought > 0:
-				event_bus.log("Tick %d: Market micro-fill bread: offered %d, bought %d (bid fell %.2f→%.2f, stopped at min_price %.2f)" % [current_tick, baker_bread, units_bought, initial_bid, current_bid, min_acceptable_price])
 			break
 		
 		# Check if market can afford this unit
@@ -344,16 +391,27 @@ func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> in
 		total_paid += current_bid
 		units_bought += 1
 	
+	# Check if capped by performance limit
+	if units_bought == max_units and units_bought < baker_bread:
+		stopped_by_cap = true
+	
 	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# Log transaction
+	# Track clearing prices for reference price adjustment
+	if units_bought > 0:
+		bread_total_cleared += units_bought
+		bread_total_value += total_paid
+	
+	# Summary log
 	if event_bus and units_bought > 0:
-		if not stopped_by_price:
-			if units_bought < baker_bread:
-				event_bus.log("Tick %d: %s sold %d/%d bread for $%.2f (market bread=%d/%d)" % [current_tick, _agent_label(baker), units_bought, baker_bread, total_paid, bread, bread_capacity])
-			else:
-				event_bus.log("Tick %d: Market bought %d bread from %s for $%.2f (market bread=%d/%d)" % [current_tick, units_bought, _agent_label(baker), total_paid, bread, bread_capacity])
+		var avg_price: float = total_paid / float(units_bought)
+		var reason: String = "complete"
+		if stopped_by_price:
+			reason = "walk-away"
+		elif stopped_by_cap:
+			reason = "capped"
+		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason])
 	
 	return units_bought
 
@@ -385,19 +443,18 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	var units_bought: int = 0
 	var total_paid: float = 0.0
 	var initial_bid: float = get_bid_price("bread")
+	var final_bid: float = initial_bid
 	var stopped_by_price: bool = false
+	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
 		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("bread")
+		final_bid = current_bid
 		
 		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
-			if event_bus and i == 0:
-				event_bus.log("Tick %d: %s refused sell: bid %.2f < min %.2f" % [current_tick, _agent_label(agent), current_bid, min_acceptable_price])
-			elif event_bus and units_bought > 0:
-				event_bus.log("Tick %d: Market micro-fill bread: offered %d, bought %d (bid fell %.2f→%.2f, stopped at min_price %.2f)" % [current_tick, amount_offered, units_bought, initial_bid, current_bid, min_acceptable_price])
 			break
 		
 		# Check if market can afford this unit
@@ -412,13 +469,27 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 		total_paid += current_bid
 		units_bought += 1
 	
+	# Check if capped by performance limit
+	if units_bought == max_units and units_bought < amount_offered:
+		stopped_by_cap = true
+	
 	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# Log transaction
+	# Track clearing prices for reference price adjustment
+	if units_bought > 0:
+		bread_total_cleared += units_bought
+		bread_total_value += total_paid
+	
+	# Summary log
 	if event_bus and units_bought > 0:
-		if not stopped_by_price:
-			event_bus.log("Tick %d: Market bought %d bread from %s for $%.2f (market bread=%d/%d)" % [current_tick, units_bought, _agent_label(agent), total_paid, bread, bread_capacity])
+		var avg_price: float = total_paid / float(units_bought)
+		var reason: String = "complete"
+		if stopped_by_price:
+			reason = "walk-away"
+		elif stopped_by_cap:
+			reason = "capped"
+		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason])
 	
 	return units_bought
 
@@ -551,59 +622,151 @@ func on_day_changed(day: int) -> void:
 	wheat_requested_today = 0
 	bread_sold_today = 0
 	bread_requested_today = 0
+	
+	# Reset clearing price tracking
+	wheat_total_cleared = 0
+	wheat_total_value = 0.0
+	bread_total_cleared = 0
+	bread_total_value = 0.0
 
 
 func _adjust_wheat_price(day: int) -> void:
 	var old_price: float = wheat_price
-	var sell_pressure: float = _get_sell_pressure_ratio("wheat")
-	var price_change_blocked: bool = false
 	
-	if wheat < wheat_target:
-		# Low inventory suggests scarcity, but check sell pressure first
-		if sell_pressure < SELL_PRESSURE_THRESHOLD:
-			# Demand exists but not being fulfilled - BLOCK price increase
-			price_change_blocked = true
-			if event_bus:
-				event_bus.log("Day %d: wheat price increase BLOCKED due to low sell flow (pressure: %.1f%%, inv: %d/%d, sold: %d, requested: %d)" % [day, sell_pressure * 100.0, wheat, wheat_target, wheat_sold_today, wheat_requested_today])
-		else:
-			# Genuine scarcity with good fulfillment - allow price increase
-			wheat_price *= (1.0 + PRICE_STEP)
-	elif wheat > wheat_target:
-		# High inventory → lower price (surplus)
-		wheat_price *= (1.0 - PRICE_STEP)
-	else:
-		return  # At target, no change
+	# Calculate clearing price statistics
+	var has_clearing_data: bool = wheat_total_cleared >= MIN_TRADES_FOR_PRICE_DISCOVERY
+	var avg_clearing_price: float = 0.0
+	if wheat_total_cleared > 0:
+		avg_clearing_price = wheat_total_value / float(wheat_total_cleared)
 	
-	if not price_change_blocked:
-		wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	var new_price: float = old_price
+	var cap_applied: bool = false
+	var update_reason: String = ""
+	
+	if has_clearing_data:
+		# PRICE DISCOVERY MODE: Anchor reference to actual clearing prices
+		# Step 1: Lerp reference toward clearing price
+		new_price = lerp(old_price, avg_clearing_price, CLEARING_ANCHOR_STRENGTH)
 		
-		if abs(wheat_price - old_price) > 0.0001 and event_bus:
-			event_bus.log("Day %d: wheat_price $%.2f → $%.2f (inv %d / target %d, pressure: %.1f%%)" % [day, old_price, wheat_price, wheat, wheat_target, sell_pressure * 100.0])
+		# Step 2: Apply bounded inventory nudge
+		var inv_ratio: float = float(wheat) / float(wheat_target) if wheat_target > 0 else 1.0
+		var inventory_nudge: float = 0.0
+		if wheat < wheat_target:
+			# Low inventory -> small upward nudge
+			inventory_nudge = min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+		elif wheat > wheat_target:
+			# High inventory -> small downward nudge
+			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
+		new_price *= (1.0 + inventory_nudge)
+		
+		# Step 3: CRITICAL - prevent upward drift beyond clearing reality
+		var max_allowed_price: float = avg_clearing_price * (1.0 + MAX_PREMIUM_OVER_CLEARING)
+		if new_price > max_allowed_price:
+			new_price = max_allowed_price
+			cap_applied = true
+		update_reason = "cleared"
+	elif wheat_total_cleared == 0:
+		# DEMAND-CONFIRMATION RULE: No trades = no price increases
+		# Prices may only rise when demand is confirmed by actual purchases
+		if wheat > wheat_target:
+			# High inventory with no demand -> decrease price
+			new_price *= (1.0 - PRICE_STEP)
+			update_reason = "no-demand decrease"
+		else:
+			# Low inventory but no demand -> hold price flat
+			new_price = old_price
+			update_reason = "no-demand cap"
+	else:
+		# Trades below threshold: allow only neutral or downward movement
+		if wheat > wheat_target:
+			new_price *= (1.0 - PRICE_STEP)
+			update_reason = "low-trades decrease"
+		else:
+			new_price = old_price
+			update_reason = "low-trades cap"
+	
+	# Apply floor and ceiling
+	wheat_price = clamp(new_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	
+	# Daily diagnostic log
+	if event_bus:
+		if wheat_total_cleared > 0:
+			event_bus.log("Day %d: wheat | inv %d/%d | trades=%d | $%.2f→$%.2f | %s" % [
+				day, wheat, wheat_target, wheat_total_cleared, old_price, wheat_price,
+				update_reason + (" (CAP)" if cap_applied else "")
+			])
+		else:
+			event_bus.log("Day %d: wheat | inv %d/%d | trades=0 | $%.2f→$%.2f | %s" % [
+				day, wheat, wheat_target, old_price, wheat_price, update_reason
+			])
 
 
 func _adjust_bread_price(day: int) -> void:
 	var old_price: float = bread_price
-	var sell_pressure: float = _get_sell_pressure_ratio("bread")
-	var price_change_blocked: bool = false
 	
-	if bread < bread_target:
-		# Low inventory suggests scarcity, but check sell pressure first
-		if sell_pressure < SELL_PRESSURE_THRESHOLD:
-			# Demand exists but not being fulfilled - BLOCK price increase
-			price_change_blocked = true
-			if event_bus:
-				event_bus.log("Day %d: bread price increase BLOCKED due to low sell flow (pressure: %.1f%%, inv: %d/%d, sold: %d, requested: %d)" % [day, sell_pressure * 100.0, bread, bread_target, bread_sold_today, bread_requested_today])
-		else:
-			# Genuine scarcity with good fulfillment - allow price increase
-			bread_price *= (1.0 + PRICE_STEP)
-	elif bread > bread_target:
-		# High inventory → lower price (surplus)
-		bread_price *= (1.0 - PRICE_STEP)
-	else:
-		return  # At target, no change
+	# Calculate clearing price statistics
+	var has_clearing_data: bool = bread_total_cleared >= MIN_TRADES_FOR_PRICE_DISCOVERY
+	var avg_clearing_price: float = 0.0
+	if bread_total_cleared > 0:
+		avg_clearing_price = bread_total_value / float(bread_total_cleared)
 	
-	if not price_change_blocked:
-		bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	var new_price: float = old_price
+	var cap_applied: bool = false
+	var update_reason: String = ""
+	
+	if has_clearing_data:
+		# PRICE DISCOVERY MODE: Anchor reference to actual clearing prices
+		# Step 1: Lerp reference toward clearing price
+		new_price = lerp(old_price, avg_clearing_price, CLEARING_ANCHOR_STRENGTH)
 		
-		if abs(bread_price - old_price) > 0.0001 and event_bus:
-			event_bus.log("Day %d: bread_price $%.2f → $%.2f (inv %d / target %d, pressure: %.1f%%)" % [day, old_price, bread_price, bread, bread_target, sell_pressure * 100.0])
+		# Step 2: Apply bounded inventory nudge
+		var inv_ratio: float = float(bread) / float(bread_target) if bread_target > 0 else 1.0
+		var inventory_nudge: float = 0.0
+		if bread < bread_target:
+			# Low inventory -> small upward nudge
+			inventory_nudge = min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+		elif bread > bread_target:
+			# High inventory -> small downward nudge
+			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
+		new_price *= (1.0 + inventory_nudge)
+		
+		# Step 3: CRITICAL - prevent upward drift beyond clearing reality
+		var max_allowed_price: float = avg_clearing_price * (1.0 + MAX_PREMIUM_OVER_CLEARING)
+		if new_price > max_allowed_price:
+			new_price = max_allowed_price
+			cap_applied = true
+		update_reason = "cleared"
+	elif bread_total_cleared == 0:
+		# DEMAND-CONFIRMATION RULE: No trades = no price increases
+		# Prices may only rise when demand is confirmed by actual purchases
+		if bread > bread_target:
+			# High inventory with no demand -> decrease price
+			new_price *= (1.0 - PRICE_STEP)
+			update_reason = "no-demand decrease"
+		else:
+			# Low inventory but no demand -> hold price flat
+			new_price = old_price
+			update_reason = "no-demand cap"
+	else:
+		# Trades below threshold: allow only neutral or downward movement
+		if bread > bread_target:
+			new_price *= (1.0 - PRICE_STEP)
+			update_reason = "low-trades decrease"
+		else:
+			new_price = old_price
+			update_reason = "low-trades cap"
+	
+	# Apply floor and ceiling
+	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	
+	# Daily diagnostic log
+	if event_bus:
+		if bread_total_cleared > 0:
+			event_bus.log("Day %d: bread | inv %d/%d | trades=%d | $%.2f→$%.2f | %s" % [
+				day, bread, bread_target, bread_total_cleared, old_price, bread_price,
+				update_reason + (" (CAP)" if cap_applied else "")
+			])
+		else:
+			event_bus.log("Day %d: bread | inv %d/%d | trades=0 | $%.2f→$%.2f | %s" % [
+				day, bread, bread_target, old_price, bread_price, update_reason
+			])

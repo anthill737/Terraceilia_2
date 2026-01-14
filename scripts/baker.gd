@@ -244,8 +244,16 @@ func perform_market_transactions() -> void:
 			# Buy wheat for production
 			var current_wheat: int = inv.get_qty("wheat")
 			if current_wheat < WHEAT_LOW_WATERMARK:
-				var wheat_needed: int = WHEAT_TARGET_STOCK - current_wheat
-				market.sell_wheat_to_baker(self, wheat_needed)
+				# Calculate procurement target based on production throttle
+				var base_target: int = WHEAT_TARGET_STOCK - current_wheat
+				var adjusted_target: int = base_target
+				
+				# Scale wheat buying based on production throttle
+				if inventory_throttle:
+					var throttle_factor: float = inventory_throttle.production_throttle
+					adjusted_target = max(1, int(float(base_target) * throttle_factor))
+				
+				market.sell_wheat_to_baker(self, adjusted_target)
 			# Transition to production phase
 			phase = Phase.PRODUCE
 			pending_target = bakery_location

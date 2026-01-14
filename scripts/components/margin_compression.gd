@@ -49,8 +49,15 @@ func check_margin_compression(recipe: Dictionary) -> bool:
 	var output_quantity: int = recipe["output_quantity"]
 	var inputs: Dictionary = recipe["inputs"]
 	
-	# Get market prices
-	var output_price: float = market.get_price(output_good)
+	# Get market prices - use BID prices for realistic calculation
+	var output_price: float = 0.0
+	if market.has_method("get_bid_price"):
+		output_price = market.get_bid_price(output_good)
+	elif output_good == "bread":
+		output_price = market.bread_price
+	elif output_good == "wheat":
+		output_price = market.wheat_price
+	
 	if output_price <= 0.0:
 		# Output not tradeable or has no price - no compression check
 		return false
@@ -61,7 +68,12 @@ func check_margin_compression(recipe: Dictionary) -> bool:
 	
 	for input_good in inputs.keys():
 		var input_qty: int = inputs[input_good]
-		var input_price: float = market.get_price(input_good)
+		var input_price: float = 0.0
+		# Use reference prices for inputs (what we'd pay to restock)
+		if input_good == "bread":
+			input_price = market.bread_price
+		elif input_good == "wheat":
+			input_price = market.wheat_price
 		
 		if input_price > 0.0:
 			has_valid_input_prices = true
@@ -107,14 +119,24 @@ func get_margin_percentage(recipe: Dictionary) -> float:
 	var output_quantity: int = recipe["output_quantity"]
 	var inputs: Dictionary = recipe["inputs"]
 	
-	var output_price: float = market.get_price(output_good)
+	var output_price: float = 0.0
+	if output_good == "bread":
+		output_price = market.bread_price
+	elif output_good == "wheat":
+		output_price = market.wheat_price
+	
 	if output_price <= 0.0:
 		return 0.0
 	
 	var total_input_cost: float = 0.0
 	for input_good in inputs.keys():
 		var input_qty: int = inputs[input_good]
-		var input_price: float = market.get_price(input_good)
+		var input_price: float = 0.0
+		if input_good == "bread":
+			input_price = market.bread_price
+		elif input_good == "wheat":
+			input_price = market.wheat_price
+		
 		if input_price > 0.0:
 			total_input_cost += input_price * input_qty
 	

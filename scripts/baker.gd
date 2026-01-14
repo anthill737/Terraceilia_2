@@ -56,6 +56,9 @@ var process_timer: float = 0.0
 # Margin compression component (loaded dynamically to avoid class resolution issues)
 var margin_compression = null
 
+# Inventory throttle component (loaded dynamically)
+var inventory_throttle = null
+
 # Reference to market
 var market: Market = null
 
@@ -91,6 +94,10 @@ func set_tick(t: int) -> void:
 		profit.set_tick(t)
 	if margin_compression:
 		margin_compression.set_tick(t)
+	if inventory_throttle:
+		inventory_throttle.set_tick(t)
+		# Calculate throttle factor based on market inventory pressure
+		inventory_throttle.calculate_throttle(BREAD_RECIPE)
 	if food_reserve:
 		food_reserve.set_tick(t)
 		# Check survival mode - this takes priority over production
@@ -104,7 +111,7 @@ func set_tick(t: int) -> void:
 		if last_diagnostic_day >= 0 and bread_produced_today == 0:
 			# Check if conditions allow production
 			var has_wheat: bool = inv.get_qty("wheat") > 0
-			var at_bakery: bool = route and route.is_arrived() and route.current_target == bakery_location
+			var at_bakery: bool = route and route.target == null and position.distance_to(bakery_location.global_position) <= 10.0
 			if has_wheat and at_bakery and event_bus:
 				event_bus.log("Tick %d: [DIAGNOSTIC] Baker produced 0 bread on day %d (wheat=%d, at_bakery=%s, profit=%s, override=%s)" % [
 					t, last_diagnostic_day, inv.get_qty("wheat"), at_bakery, 
@@ -126,6 +133,10 @@ func _ready() -> void:
 	# Load margin compression component dynamically
 	if has_node("MarginCompression"):
 		margin_compression = get_node("MarginCompression")
+	
+	# Load inventory throttle component dynamically
+	if has_node("InventoryThrottle"):
+		inventory_throttle = get_node("InventoryThrottle")
 	
 	# Bind capacity to inventory
 	cap.bind(inv)
@@ -161,6 +172,9 @@ func set_locations(bakery: Node2D, market_node: Node2D) -> void:
 	# Bind margin compression (early throttle mechanic)
 	if margin_compression and market and event_bus:
 		margin_compression.bind(market, event_bus, get_display_name())
+	# Bind inventory throttle (smooth production scaling)
+	if inventory_throttle and market and event_bus:
+		inventory_throttle.bind(market, event_bus, get_display_name())
 	# Bind food reserve (survival mechanic)
 	if food_reserve and market:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
@@ -260,8 +274,15 @@ func perform_market_transactions() -> void:
 			# Sell bread in large batch, keeping minimum for eating
 			var current_bread: int = inv.get_qty("bread")
 			var sellable: int = max(0, current_bread - BREAD_PRODUCTION_MIN)
+			# Apply inventory throttle to selling
+			if inventory_throttle:
+				sellable = inventory_throttle.apply_to_sell(sellable)
 			if sellable > 0:
-				market.buy_bread_from_agent(self, sellable)
+				# Calculate min acceptable price using production cost + margin
+				var min_price: float = 0.0
+				if profit:
+					min_price = profit.get_min_acceptable_price(BREAD_RECIPE)
+				market.buy_bread_from_agent(self, sellable, min_price)
 			
 			# After selling, decide next action
 			var current_wheat: int = inv.get_qty("wheat")
@@ -360,8 +381,12 @@ func process_grinding(delta: float) -> void:
 			route.wait(WAIT_TIME)
 			return
 		
-		# Compute safe batch size
-		var units: int = prod.compute_batch(GRIND_BATCH_SIZE, "wheat", "flour", FLOUR_PER_WHEAT)
+		# Compute safe batch size with inventory throttling
+		var target_batch: int = GRIND_BATCH_SIZE
+		# Apply inventory throttle (unless survival override active)
+		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
+			target_batch = inventory_throttle.apply_to_batch(target_batch)
+		var units: int = prod.compute_batch(target_batch, "wheat", "flour", FLOUR_PER_WHEAT)
 		
 		if units == 0:
 			# No wheat or no space
@@ -470,8 +495,12 @@ func process_baking(delta: float) -> void:
 			route.wait(WAIT_TIME)
 			return
 		
-		# Compute safe batch size
-		var units: int = prod.compute_batch(BAKE_BATCH_SIZE, "flour", "bread", BREAD_PER_FLOUR)
+		# Compute safe batch size with inventory throttling
+		var target_batch: int = BAKE_BATCH_SIZE
+		# Apply inventory throttle (unless survival override active)
+		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
+			target_batch = inventory_throttle.apply_to_batch(target_batch)
+		var units: int = prod.compute_batch(target_batch, "flour", "bread", BREAD_PER_FLOUR)
 		
 		if units == 0:
 			# No flour or no space

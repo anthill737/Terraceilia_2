@@ -6,3 +6,6 @@ res://scripts/household_agent.gd
 res://scripts/main.gd
 res://scripts/components/food_reserve.gd
 res://scripts/simulation_clock.gd
+res://scripts/components/margin_compression.gd
+res://scripts/components/inventory_throttle.gd
+res://scripts/components/production_profitability.gd

@@ -178,10 +178,14 @@ func _on_tick(tick: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if clock == null:
+		return
 	if event.is_action_pressed("speed_up"):
 		clock.increase_speed()
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("speed_down"):
 		clock.decrease_speed()
+		get_viewport().set_input_as_handled()
 
 
 func _on_speed_changed(new_speed: float) -> void:

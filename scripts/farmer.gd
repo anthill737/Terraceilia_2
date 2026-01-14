@@ -158,7 +158,9 @@ func handle_market_arrival() -> void:
 	
 	# PRIORITY 2: Sell all wheat to market
 	if inv.get_qty("wheat") > 0:
-		market.buy_wheat_from_farmer(self)
+		# Simple min price: 150% of seed cost (rough profit margin)
+		var min_price: float = market.SEED_PRICE * 1.5
+		market.buy_wheat_from_farmer(self, min_price)
 	
 	# Buy seeds if below threshold
 	if inv.get_qty("seeds") < 20:

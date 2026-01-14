@@ -20,6 +20,14 @@ const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
 const WAIT_TIME: float = 1.0
 
+# Production recipe for profitability checking (seed→wheat chain)
+# 5 seeds per field planting → 10 wheat per harvest (1:2 ratio)
+const WHEAT_RECIPE: Dictionary = {
+	"output_good": "wheat",
+	"output_quantity": 10,
+	"inputs": {"seeds": 5}
+}
+
 # Components
 @onready var wallet: Wallet = $Wallet
 @onready var inv: Inventory = $Inventory
@@ -28,6 +36,10 @@ const WAIT_TIME: float = 1.0
 @onready var route: RouteRunner = $RouteRunner
 @onready var cap: InventoryCapacity = $InventoryCapacity
 @onready var food_reserve: FoodReserve = $FoodReserve
+
+# Producer mechanics (shared with baker)
+var profit: ProductionProfitability = null
+var inventory_throttle: InventoryThrottle = null
 
 # Reference to market
 var market: Market = null
@@ -46,6 +58,12 @@ func get_display_name() -> String:
 
 func set_tick(t: int) -> void:
 	current_tick = t
+	if profit:
+		profit.set_tick(t)
+	if inventory_throttle:
+		inventory_throttle.set_tick(t)
+		# Calculate throttle factor based on market wheat inventory pressure
+		inventory_throttle.calculate_throttle(WHEAT_RECIPE)
 	if food_reserve:
 		food_reserve.set_tick(t)
 		# Check survival mode - takes priority
@@ -60,6 +78,12 @@ func _ready() -> void:
 	# Initialize wallet and inventory
 	wallet.money = 1000.0
 	inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
+	
+	# Load producer mechanics components dynamically
+	if has_node("ProductionProfitability"):
+		profit = get_node("ProductionProfitability")
+	if has_node("InventoryThrottle"):
+		inventory_throttle = get_node("InventoryThrottle")
 	
 	# Bind capacity to inventory
 	cap.bind(inv)
@@ -76,13 +100,19 @@ func _ready() -> void:
 	route.wait_finished.connect(_on_wait_finished)
 
 
-func set_route_nodes(house: Node2D, field1: Node2D, field2: Node2D, market: Node2D) -> void:
+func set_route_nodes(house: Node2D, field1: Node2D, field2: Node2D, market_pos: Node2D) -> void:
 	house_node = house
 	field1_node = field1
 	field2_node = field2
-	market_node = market
+	market_node = market_pos
 	route_targets = [house_node, field1_node, field2_node, market_node]
 	route_index = 0
+	# Bind profitability to market
+	if profit and self.market and event_bus:
+		profit.bind(self.market, event_bus, get_display_name())
+	# Bind inventory throttle (smooth production scaling based on wheat inventory)
+	if inventory_throttle and self.market and event_bus:
+		inventory_throttle.bind(self.market, event_bus, get_display_name())
 	route.set_target(route_targets[route_index])
 
 
@@ -143,10 +173,21 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds)" % [current_tick, field_name, harvest_result.wheat, harvest_result.seeds])
 	# Otherwise try to plant if field is empty and we have seeds
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
-		if field.plant():
+		# Apply production throttle to planting (procurement coupling)
+		var should_plant: bool = true
+		if inventory_throttle:
+			var throttle_factor: float = inventory_throttle.production_throttle
+			# Skip planting probabilistically based on throttle
+			# throttle=1.0 → always plant, throttle=0.5 → plant 50% of the time
+			should_plant = randf() < throttle_factor
+		
+		if should_plant and field.plant():
 			inv.remove("seeds", 5)
 			if event_bus:
 				event_bus.log("Tick %d: Farmer planted %s (-5 seeds)" % [current_tick, field_name])
+		elif inventory_throttle and not should_plant:
+			if event_bus:
+				event_bus.log("Tick %d: Farmer SKIPPED planting %s (throttle %.0f%%)" % [current_tick, field_name, inventory_throttle.production_throttle * 100.0])
 
 
 func handle_market_arrival() -> void:
@@ -158,8 +199,13 @@ func handle_market_arrival() -> void:
 	
 	# PRIORITY 2: Sell all wheat to market
 	if inv.get_qty("wheat") > 0:
-		# Simple min price: 150% of seed cost (rough profit margin)
-		var min_price: float = market.SEED_PRICE * 1.5
+		# Calculate min acceptable price using production cost + margin (shared logic)
+		var min_price: float = 0.0
+		if profit:
+			min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
+		else:
+			# Fallback: 150% of seed cost (rough profit margin)
+			min_price = market.SEED_PRICE * 1.5
 		market.buy_wheat_from_farmer(self, min_price)
 	
 	# Buy seeds if below threshold

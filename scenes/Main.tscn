@@ -102,6 +102,12 @@ script = ExtResource("11_route_runner")
 [node name="InventoryCapacity" type="Node" parent="Farmer"]
 script = ExtResource("12_inventory_capacity")
 
+[node name="ProductionProfitability" type="Node" parent="Farmer"]
+script = ExtResource("14_production_profitability")
+
+[node name="InventoryThrottle" type="Node" parent="Farmer"]
+script = ExtResource("17_inventory_throttle")
+
 [node name="FoodReserve" type="Node" parent="Farmer"]
 script = ExtResource("15_food_reserve")
 

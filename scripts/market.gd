@@ -10,11 +10,33 @@ var wheat_capacity: int = 100
 var bread_capacity: int = 200
 
 const SEED_PRICE: float = 0.5
-const WHEAT_PRICE_FLOOR: float = 0.50
+const WHEAT_PRICE_FLOOR: float = 1.00
 const BREAD_PRICE_FLOOR: float = 1.00
 const WHEAT_PRICE_CEILING: float = 5.00
 const BREAD_PRICE_CEILING: float = 10.00
 const PRICE_STEP: float = 0.10  # 10% adjustment per day
+
+# Decay configuration - generic per-good spoilage/loss mechanic
+const DECAY_CONFIG: Dictionary = {
+	"wheat": {
+		"enabled": true,
+		"min_rate_per_day": 0.05,  # 5% minimum daily decay
+		"max_rate_per_day": 0.15,  # 15% maximum daily decay
+		"applies_to_market": true
+	},
+	"bread": {
+		"enabled": true,
+		"min_rate_per_day": 0.05,  # 5% minimum daily decay
+		"max_rate_per_day": 0.15,  # 15% maximum daily decay
+		"applies_to_market": true
+	},
+	"seeds": {
+		"enabled": false,
+		"min_rate_per_day": 0.0,
+		"max_rate_per_day": 0.0,
+		"applies_to_market": false
+	}
+}
 
 # Sell pressure threshold - prevents monopoly price pegging
 # If sell_pressure_ratio < threshold, price won't increase even if inventory is low
@@ -614,6 +636,9 @@ func _get_sell_pressure_ratio(good: String) -> float:
 
 func on_day_changed(day: int) -> void:
 	"""Called by Calendar when a new day starts. Adjusts prices based on inventory vs target."""
+	# Apply inventory decay first (before price adjustments)
+	_apply_inventory_decay(day)
+	
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
 	
@@ -628,6 +653,57 @@ func on_day_changed(day: int) -> void:
 	wheat_total_value = 0.0
 	bread_total_cleared = 0
 	bread_total_value = 0.0
+
+
+func _apply_inventory_decay(day: int) -> void:
+	"""Apply random inventory decay to market goods based on DECAY_CONFIG."""
+	for good_name in DECAY_CONFIG.keys():
+		var config = DECAY_CONFIG[good_name]
+		if not config.get("enabled", false):
+			continue
+		if not config.get("applies_to_market", false):
+			continue
+		
+		# Get current inventory for this good
+		var current_inventory: int = 0
+		match good_name:
+			"wheat":
+				current_inventory = wheat
+			"bread":
+				current_inventory = bread
+			"seeds":
+				current_inventory = seeds
+			_:
+				continue  # Unknown good
+		
+		if current_inventory <= 0:
+			continue  # No inventory to decay
+		
+		# Draw random decay rate between min and max
+		var min_rate: float = config.get("min_rate_per_day", 0.0)
+		var max_rate: float = config.get("max_rate_per_day", 0.0)
+		var decay_rate: float = randf_range(min_rate, max_rate)
+		
+		# Calculate decay amount (floor to integer)
+		var decay_amount: int = int(floor(float(current_inventory) * decay_rate))
+		if decay_amount <= 0:
+			continue  # No decay this day
+		
+		# Apply decay to inventory (never below zero)
+		match good_name:
+			"wheat":
+				wheat = max(0, wheat - decay_amount)
+			"bread":
+				bread = max(0, bread - decay_amount)
+			"seeds":
+				seeds = max(0, seeds - decay_amount)
+		
+		# Log decay
+		if event_bus:
+			event_bus.log("Day %d: %s decay removed %d units (%.1f%%), inventory %d→%d" % [
+				day, good_name, decay_amount, decay_rate * 100.0, 
+				current_inventory, current_inventory - decay_amount
+			])
 
 
 func _adjust_wheat_price(day: int) -> void:

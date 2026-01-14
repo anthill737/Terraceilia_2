@@ -22,8 +22,8 @@ const BAKING_TIME: float = 2.0
 # Production recipe parameters
 const GRIND_BATCH_SIZE: int = 5
 const BAKE_BATCH_SIZE: int = 5
-const FLOUR_PER_WHEAT: int = 1
-const BREAD_PER_FLOUR: int = 2
+const FLOUR_PER_WHEAT: int = 2
+const BREAD_PER_FLOUR: int = 1
 
 # Batch cycle thresholds
 const WHEAT_LOW_WATERMARK: int = 5  # Buy wheat when below this
@@ -32,12 +32,12 @@ const BREAD_SELL_THRESHOLD: int = 20  # Sell when bread reaches this
 const BREAD_PRODUCTION_MIN: int = 2  # Keep at least this much bread for eating
 
 # Production recipe for profitability checking (full wheat→bread chain)
-# Note: 2 wheat → 2 flour (1:1 ratio), then 2 flour → 4 bread (1:2 ratio)
-# So effectively: 2 wheat → 4 bread (1:2 ratio)
+# Note: 1 wheat → 2 flour (1:2 ratio), then 2 flour → 2 bread (1:1 ratio)
+# So effectively: 1 wheat → 2 bread (1:2 ratio)
 const BREAD_RECIPE: Dictionary = {
 	"output_good": "bread",
-	"output_quantity": 4,
-	"inputs": {"wheat": 2}
+	"output_quantity": 2,
+	"inputs": {"wheat": 1}
 }
 
 var process_timer: float = 0.0

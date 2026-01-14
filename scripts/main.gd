@@ -48,11 +48,14 @@ var baker_inventory_label: Label
 var household_inventory_label: Label
 var event_log: RichTextLabel
 var export_log_button: Button
+var jump_to_bottom_button: Button
+var sim_speed_label: Label
 
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
-var follow_log: bool = false  # Auto-scroll disabled by default
+var user_at_bottom: bool = true  # Track if user is at bottom for sticky auto-scroll
 const MAX_LOG_LINES: int = 200
+const SCROLL_THRESHOLD: int = 50  # Pixels from bottom to consider "at bottom"
 
 
 func _ready() -> void:
@@ -61,6 +64,7 @@ func _ready() -> void:
 	clock.name = "SimulationClock"
 	add_child(clock)
 	clock.ticked.connect(_on_tick)
+	clock.speed_changed.connect(_on_speed_changed)
 	
 	bus = EventBus.new()
 	bus.name = "EventBus"
@@ -122,6 +126,11 @@ func _ready() -> void:
 	farmer.set_route_nodes(house, field1_node, field2_node, market_node)
 	farmer.set_fields(field1_plot, field2_plot)
 	
+	# Bind farmer food reserve after market is set
+	var farmer_food_reserve = farmer.get_node("FoodReserve") as FoodReserve
+	if farmer_food_reserve:
+		farmer_food_reserve.bind(farmer.get_node("Inventory"), farmer.get_node("HungerNeed"), market, farmer.get_node("Wallet"), bus, "Farmer")
+	
 	# Connect baker to market
 	baker.market = market
 	
@@ -168,6 +177,18 @@ func _on_tick(tick: int) -> void:
 	audit.audit(farmer, baker, market, bus, tick)
 
 
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("speed_up"):
+		clock.increase_speed()
+	elif event.is_action_pressed("speed_down"):
+		clock.decrease_speed()
+
+
+func _on_speed_changed(new_speed: float) -> void:
+	if sim_speed_label:
+		sim_speed_label.text = "Speed: %.1fx" % new_speed
+
+
 func _on_event_logged(msg: String) -> void:
 	log_lines.append(msg)
 	log_buffer.append(msg)  # Keep full log for export
@@ -182,9 +203,27 @@ func _on_event_logged(msg: String) -> void:
 		for line in log_lines:
 			event_log.append_text(line + "\n")
 		
-		# Only auto-scroll if follow_log is enabled
-		if follow_log:
+		# Only auto-scroll if user is at bottom
+		if user_at_bottom:
 			event_log.scroll_to_line(event_log.get_line_count())
+
+
+func _on_log_scroll(_value: float) -> void:
+	# Check if user scrolled away from bottom
+	if event_log:
+		var vscroll = event_log.get_v_scroll_bar()
+		if vscroll:
+			var max_scroll = vscroll.max_value - vscroll.page
+			var current_scroll = vscroll.value
+			# User is at bottom if within threshold pixels
+			user_at_bottom = (max_scroll - current_scroll) <= SCROLL_THRESHOLD
+
+
+func _on_jump_to_bottom() -> void:
+	# Re-enable auto-scroll and scroll to bottom
+	user_at_bottom = true
+	if event_log:
+		event_log.scroll_to_line(event_log.get_line_count())
 
 
 func export_log() -> void:
@@ -288,6 +327,25 @@ func get_ui_labels() -> void:
 	event_log = log_vbox.get_node("EventLog")
 	export_log_button = log_vbox.get_node("ExportLogButton")
 	export_log_button.pressed.connect(export_log)
+	
+	# Add Jump to Bottom button if it exists in scene
+	if log_vbox.has_node("JumpToBottomButton"):
+		jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
+		jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
+	
+	# Add simulation speed label if it exists in scene
+	if has_node("UI/HUDRoot/Layout/TopBar"):
+		var top_bar = get_node("UI/HUDRoot/Layout/TopBar")
+		if top_bar and top_bar.has_node("SimSpeedLabel"):
+			sim_speed_label = top_bar.get_node("SimSpeedLabel")
+			sim_speed_label.text = "Speed: 1.0x"
+	
+	# Connect scroll detection for sticky auto-scroll
+	if event_log:
+		# RichTextLabel uses a ScrollBar child for scrolling
+		var vscroll = event_log.get_v_scroll_bar()
+		if vscroll:
+			vscroll.value_changed.connect(_on_log_scroll)
 
 
 func update_ui() -> void:

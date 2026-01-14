@@ -27,6 +27,7 @@ const WAIT_TIME: float = 1.0
 @onready var food_stockpile: FoodStockpile = $FoodStockpile
 @onready var route: RouteRunner = $RouteRunner
 @onready var cap: InventoryCapacity = $InventoryCapacity
+@onready var food_reserve: FoodReserve = $FoodReserve
 
 # Reference to market
 var market: Market = null
@@ -45,6 +46,12 @@ func get_display_name() -> String:
 
 func set_tick(t: int) -> void:
 	current_tick = t
+	if food_reserve:
+		food_reserve.set_tick(t)
+		# Check survival mode - takes priority
+		food_reserve.check_survival_mode()
+		# Update survival override (though farmer doesn't produce food)
+		food_reserve.update_survival_override()
 	if t == 0 and event_bus:
 		event_bus.log("Tick 0: Farmer starting food=%d" % inv.get_qty("bread"))
 
@@ -143,7 +150,13 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 
 
 func handle_market_arrival() -> void:
-	# Sell all wheat to market
+	# PRIORITY 1: Survival mode - buy food if reserve is critical AND market has food
+	if food_reserve and food_reserve.is_survival_mode:
+		var bought: int = food_reserve.attempt_survival_purchase()
+		# If bought == 0, market has no food - continue with normal logic
+		# Farmer cannot produce food, so will rely on baker producing bread
+	
+	# PRIORITY 2: Sell all wheat to market
 	if inv.get_qty("wheat") > 0:
 		market.buy_wheat_from_farmer(self)
 	

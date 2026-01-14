@@ -1,2 +1,8 @@
 res://scripts/baker.gd
 res://scripts/market.gd
+res://scripts/components/route_runner.gd
+res://scripts/farmer.gd
+res://scripts/household_agent.gd
+res://scripts/main.gd
+res://scripts/components/food_reserve.gd
+res://scripts/simulation_clock.gd

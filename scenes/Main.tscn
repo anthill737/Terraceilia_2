@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3 uid="uid://c6qvxkw7yf1yd"]
+[gd_scene load_steps=15 format=3 uid="uid://c6qvxkw7yf1yd"]
 
 [ext_resource type="Script" uid="uid://b3hs1u0d10nyn" path="res://scripts/main.gd" id="1_abcde"]
 [ext_resource type="Script" uid="uid://dgudqpmx1nxlv" path="res://scripts/farmer.gd" id="2_farmer"]
@@ -13,6 +13,9 @@
 [ext_resource type="Script" path="res://scripts/components/route_runner.gd" id="11_route_runner"]
 [ext_resource type="Script" path="res://scripts/components/inventory_capacity.gd" id="12_inventory_capacity"]
 [ext_resource type="Script" path="res://scripts/components/production_batch.gd" id="13_production_batch"]
+[ext_resource type="Script" path="res://scripts/components/production_profitability.gd" id="14_production_profitability"]
+[ext_resource type="Script" path="res://scripts/components/food_reserve.gd" id="15_food_reserve"]
+[ext_resource type="Script" path="res://scripts/components/margin_compression.gd" id="16_margin_compression"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_abcde")
@@ -98,6 +101,9 @@ script = ExtResource("11_route_runner")
 [node name="InventoryCapacity" type="Node" parent="Farmer"]
 script = ExtResource("12_inventory_capacity")
 
+[node name="FoodReserve" type="Node" parent="Farmer"]
+script = ExtResource("15_food_reserve")
+
 [node name="Baker" type="CharacterBody2D" parent="."]
 position = Vector2(350, 450)
 script = ExtResource("3_baker")
@@ -129,6 +135,15 @@ script = ExtResource("12_inventory_capacity")
 
 [node name="ProductionBatch" type="Node" parent="Baker"]
 script = ExtResource("13_production_batch")
+
+[node name="ProductionProfitability" type="Node" parent="Baker"]
+script = ExtResource("14_production_profitability")
+
+[node name="MarginCompression" type="Node" parent="Baker"]
+script = ExtResource("16_margin_compression")
+
+[node name="FoodReserve" type="Node" parent="Baker"]
+script = ExtResource("15_food_reserve")
 
 [node name="HouseholdHome" type="Node2D" parent="."]
 position = Vector2(177, 287)
@@ -168,6 +183,9 @@ script = ExtResource("11_route_runner")
 
 [node name="InventoryCapacity" type="Node" parent="HouseholdAgent"]
 script = ExtResource("12_inventory_capacity")
+
+[node name="FoodReserve" type="Node" parent="HouseholdAgent"]
+script = ExtResource("15_food_reserve")
 
 [node name="UI" type="CanvasLayer" parent="."]
 

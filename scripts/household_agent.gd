@@ -29,6 +29,7 @@ const WAIT_TIME: float = 1.0
 @onready var food_stockpile: FoodStockpile = $FoodStockpile
 @onready var route: RouteRunner = $RouteRunner
 @onready var cap: InventoryCapacity = $InventoryCapacity
+@onready var food_reserve: FoodReserve = $FoodReserve
 
 # State
 var bread_consumed: int = 0
@@ -67,11 +68,19 @@ func get_display_name() -> String:
 
 func set_tick(t: int) -> void:
 	current_tick = t
+	if food_reserve:
+		food_reserve.set_tick(t)
+		food_reserve.check_survival_mode()
+		# Update survival override (though household doesn't produce food)
+		food_reserve.update_survival_override()
 
 
 func set_locations(home: Node2D, market_node: Node2D) -> void:
 	home_location = home
 	market_location = market_node
+	# Bind food reserve
+	if food_reserve and market:
+		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
 	route.set_target(market_location)
 
 

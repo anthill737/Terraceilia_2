@@ -49,6 +49,55 @@ func set_tick(t: int) -> void:
 	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
 
 
+## Market Saturation API - Reusable for all producers
+
+func is_saturated(good: String) -> bool:
+	"""Check if market storage is full for a given good."""
+	match good:
+		"wheat":
+			return wheat >= wheat_capacity
+		"bread":
+			return bread >= bread_capacity
+		_:
+			if event_bus:
+				event_bus.log("ERROR: Unknown good '%s' in is_saturated()" % good)
+			return false
+
+
+func remaining_capacity(good: String) -> int:
+	"""Get remaining storage space for a given good."""
+	match good:
+		"wheat":
+			return max(0, wheat_capacity - wheat)
+		"bread":
+			return max(0, bread_capacity - bread)
+		_:
+			if event_bus:
+				event_bus.log("ERROR: Unknown good '%s' in remaining_capacity()" % good)
+			return 0
+
+
+func get_saturation_info(good: String) -> Dictionary:
+	"""Get detailed saturation info for logging/decisions."""
+	match good:
+		"wheat":
+			return {
+				"current": wheat,
+				"capacity": wheat_capacity,
+				"remaining": remaining_capacity("wheat"),
+				"saturated": is_saturated("wheat")
+			}
+		"bread":
+			return {
+				"current": bread,
+				"capacity": bread_capacity,
+				"remaining": remaining_capacity("bread"),
+				"saturated": is_saturated("bread")
+			}
+		_:
+			return {}
+
+
 func buy_wheat_from_farmer(farmer: Farmer) -> void:
 	var farmer_inv: Inventory = get_inv(farmer)
 	var farmer_wallet: Wallet = get_wallet(farmer)
@@ -291,11 +340,26 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	if requested <= 0:
 		return 0
 	
-	# GUARD RAIL: Prevent Baker from buying bread (producers must not buy their own output)
+	# GUARD RAIL: Prevent producers from buying their own output UNLESS:
+	# 1. They are in survival mode (food reserve critical), OR
+	# 2. Production is profit-paused (can't produce their own food)
 	if agent is Baker:
-		if event_bus:
-			event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED - producers must not buy their output)" % current_tick)
-		return 0
+		var can_buy_own_output: bool = false
+		
+		# Check if in survival mode
+		var food_reserve = agent.get_node_or_null("FoodReserve")
+		if food_reserve and food_reserve.is_survival_mode:
+			can_buy_own_output = true
+		
+		# Check if production is profit-paused
+		var profit_checker = agent.get_node_or_null("ProductionProfitability")
+		if profit_checker and not profit_checker.is_profitable:
+			can_buy_own_output = true
+		
+		if not can_buy_own_output:
+			if event_bus:
+				event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED - producers must not buy their output unless survival mode or production paused)" % current_tick)
+			return 0
 	
 	# Check if market has no bread
 	if bread <= 0:

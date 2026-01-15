@@ -32,6 +32,7 @@ func set_tick(tick: int) -> void:
 
 
 ## Calculate production throttle factor based on market inventory pressure.
+## Uses target bands for hysteresis to avoid rapid toggling.
 ## Returns value between min_throttle and 1.0.
 ## Recipe format: { "output_good": String, ... }
 func calculate_throttle(recipe: Dictionary) -> float:
@@ -60,20 +61,31 @@ func calculate_throttle(recipe: Dictionary) -> float:
 	if target_inventory <= 0:
 		return 1.0
 	
-	# Calculate inventory pressure (0.0 = empty, 1.0 = at target, >1.0 = over target)
-	var inventory_pressure: float = float(market_inventory) / float(target_inventory)
+	# Calculate target bands (use market's TARGET_BAND_PCT)
+	var band_pct: float = 0.15  # Match market's TARGET_BAND_PCT
+	var lower_band: float = float(target_inventory) * (1.0 - band_pct)
+	var upper_band: float = float(target_inventory) * (1.0 + band_pct)
+	var inv_float: float = float(market_inventory)
 	
-	# Apply throttle once inventory exceeds soft threshold
+	# Apply throttle using bands (hysteresis)
 	var throttle: float = 1.0
-	if inventory_pressure > soft_throttle_threshold:
-		# Linear reduction from soft_threshold to 1.0 (target)
-		# At soft_threshold (0.7): throttle = 1.0
-		# At 1.0 (target): throttle = min_throttle
-		var pressure_above_threshold: float = inventory_pressure - soft_throttle_threshold
-		var threshold_range: float = 1.0 - soft_throttle_threshold  # e.g., 0.3
-		var throttle_factor: float = pressure_above_threshold / threshold_range
-		throttle = 1.0 - throttle_factor
-		throttle = clamp(throttle, min_throttle, 1.0)
+	
+	if inv_float >= upper_band:
+		# Above upper band: throttle strongly (market saturated)
+		var excess_ratio: float = (inv_float - upper_band) / float(target_inventory)
+		excess_ratio = min(excess_ratio, 0.5)  # Cap at 50% above upper band
+		# Lerp from soft_throttle_threshold at upper_band to min_throttle at max excess
+		throttle = lerp(soft_throttle_threshold, min_throttle, excess_ratio / 0.5)
+	elif inv_float <= lower_band:
+		# Below lower band: full production (market undersupplied)
+		throttle = 1.0
+	else:
+		# Within bands: moderate throttling based on position
+		var band_position: float = (inv_float - lower_band) / (upper_band - lower_band)
+		# Lerp from 1.0 at lower_band to soft_throttle_threshold at upper_band
+		throttle = lerp(1.0, soft_throttle_threshold, band_position)
+	
+	throttle = clamp(throttle, min_throttle, 1.0)
 	
 	# Update state and log band changes
 	var current_band: int = int(throttle * 10.0)  # 0-10 scale
@@ -81,8 +93,9 @@ func calculate_throttle(recipe: Dictionary) -> float:
 		if event_bus:
 			var throttle_percent: int = int(throttle * 100.0)
 			var last_percent: int = int((float(last_throttle_band) / 10.0) * 100.0)
-			event_bus.log("Tick %d: %s throttling production: %d%% → %d%% (inventory pressure: %.1f%%)" % [
-				current_tick, agent_name, last_percent, throttle_percent, inventory_pressure * 100.0
+			var inv_percent: float = (inv_float / float(target_inventory)) * 100.0 if target_inventory > 0 else 0.0
+			event_bus.log("Tick %d: %s throttling production: %d%% → %d%% (inventory: %.1f%%)" % [
+				current_tick, agent_name, last_percent, throttle_percent, inv_percent
 			])
 		last_throttle_band = current_band
 	

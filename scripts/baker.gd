@@ -241,23 +241,32 @@ func perform_market_transactions() -> void:
 	# PRIORITY 2: Execute action based on current phase
 	match phase:
 		Phase.RESTOCK:
-			# Buy wheat for production
-			var current_wheat: int = inv.get_qty("wheat")
-			if current_wheat < WHEAT_LOW_WATERMARK:
-				# Calculate procurement target based on production throttle
-				var base_target: int = WHEAT_TARGET_STOCK - current_wheat
-				var adjusted_target: int = base_target
-				
-				# Scale wheat buying based on production throttle
-				if inventory_throttle:
-					var throttle_factor: float = inventory_throttle.production_throttle
-					adjusted_target = max(1, int(float(base_target) * throttle_factor))
-				
-				market.sell_wheat_to_baker(self, adjusted_target)
-			# Transition to production phase
-			phase = Phase.PRODUCE
-			pending_target = bakery_location
-			route.wait(WAIT_TIME)
+			# HYSTERESIS PROCUREMENT COUPLING: Don't buy wheat if bread production is paused
+			if not market.can_producer_produce("bread"):
+				# Production paused by hysteresis - don't buy inputs, transition to production (will idle)
+				if event_bus:
+					event_bus.log("Tick %d: Baker skipping wheat purchase - bread production paused by hysteresis" % current_tick)
+				phase = Phase.PRODUCE
+				pending_target = bakery_location
+				route.wait(WAIT_TIME)
+			else:
+				# Buy wheat for production
+				var current_wheat: int = inv.get_qty("wheat")
+				if current_wheat < WHEAT_LOW_WATERMARK:
+					# Calculate procurement target based on production throttle
+					var base_target: int = WHEAT_TARGET_STOCK - current_wheat
+					var adjusted_target: int = base_target
+					
+					# Scale wheat buying based on production throttle
+					if inventory_throttle:
+						var throttle_factor: float = inventory_throttle.production_throttle
+						adjusted_target = max(1, int(float(base_target) * throttle_factor))
+					
+					market.sell_wheat_to_baker(self, adjusted_target)
+				# Transition to production phase
+				phase = Phase.PRODUCE
+				pending_target = bakery_location
+				route.wait(WAIT_TIME)
 		
 		Phase.SELL:
 			# Check margin compression FIRST - throttle selling if margins too thin
@@ -357,6 +366,16 @@ func start_production() -> void:
 func process_grinding(delta: float) -> void:
 	process_timer -= delta
 	if process_timer <= 0.0:
+		# HYSTERESIS GATE: Check if market-directed bread production is allowed
+		if not market.can_producer_produce("bread"):
+			# Production paused by hysteresis - stop and go to market
+			production_state = ProductionState.IDLE
+			phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
+			# No log needed - market hysteresis system logs state transitions
+			return
+		
 		# DECISION ORDER:
 		# 1. Survival override (allow subsistence production)
 		# 2. Margin compression (throttle before prices crash)
@@ -391,6 +410,7 @@ func process_grinding(delta: float) -> void:
 		
 		# Compute safe batch size with inventory throttling
 		var target_batch: int = GRIND_BATCH_SIZE
+		
 		# Apply inventory throttle (unless survival override active)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)
@@ -471,6 +491,16 @@ func process_grinding(delta: float) -> void:
 func process_baking(delta: float) -> void:
 	process_timer -= delta
 	if process_timer <= 0.0:
+		# HYSTERESIS GATE: Check if market-directed bread production is allowed
+		if not market.can_producer_produce("bread"):
+			# Production paused by hysteresis - stop and go to market
+			production_state = ProductionState.IDLE
+			phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
+			# No log needed - market hysteresis system logs state transitions
+			return
+		
 		# DECISION ORDER:
 		# 1. Survival override (allow subsistence production)
 		# 2. Margin compression (throttle before prices crash)
@@ -505,6 +535,7 @@ func process_baking(delta: float) -> void:
 		
 		# Compute safe batch size with inventory throttling
 		var target_batch: int = BAKE_BATCH_SIZE
+		
 		# Apply inventory throttle (unless survival override active)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)

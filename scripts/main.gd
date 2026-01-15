@@ -168,10 +168,14 @@ func _on_tick(tick: int) -> void:
 		field2_plot.tick()
 	
 	# Update tick for all agents
-	market.set_tick(tick)
-	farmer.set_tick(tick)
-	baker.set_tick(tick)
-	household_agent.set_tick(tick)
+	if market:
+		market.set_tick(tick)
+	if farmer:
+		farmer.set_tick(tick)
+	if baker:
+		baker.set_tick(tick)
+	if household_agent:
+		household_agent.set_tick(tick)
 	
 	# Run audit checks
 	audit.audit(farmer, baker, market, bus, tick)
@@ -353,55 +357,86 @@ func get_ui_labels() -> void:
 
 
 func update_ui() -> void:
-	if farmer:
+	if farmer and farmer_status_label:
 		farmer_status_label.text = "Status: " + farmer.get_status_text()
+	if farmer and farmer_money_label:
 		farmer_money_label.text = "Farmer Money: $%.2f" % farmer.get_node("Wallet").money
+	if farmer and farmer_seeds_label:
 		farmer_seeds_label.text = "Farmer Seeds: %d" % farmer.get_node("Inventory").get_qty("seeds")
+	if farmer and farmer_wheat_label:
 		farmer_wheat_label.text = "Farmer Wheat: %d" % farmer.get_node("Inventory").get_qty("wheat")
+	if farmer and farmer_bread_label:
 		farmer_bread_label.text = "Farmer Bread: %d" % farmer.get_node("Inventory").get_qty("bread")
+	if farmer and farmer_days_until_starve_label:
 		var farmer_hunger = farmer.get_node("HungerNeed")
 		farmer_days_until_starve_label.text = "Farmer Hunger Days: %d/%d" % [farmer_hunger.hunger_days, farmer_hunger.hunger_max_days]
+	if farmer and farmer_starving_label:
+		var farmer_hunger = farmer.get_node("HungerNeed")
 		farmer_starving_label.text = "Farmer Starving: %s" % ("Yes" if farmer_hunger.is_starving else "No")
+	if farmer and farmer_inventory_label:
 		var farmer_cap = farmer.get_node("InventoryCapacity")
 		var farmer_inv_text = "Inventory: %d / %d" % [farmer_cap.current_total(), farmer_cap.max_items]
 		if farmer_cap.is_full():
 			farmer_inv_text += " (FULL)"
 		farmer_inventory_label.text = farmer_inv_text
 	
-	if market:
+	if market and market_money_label:
 		market_money_label.text = "Market Money: $%.2f" % market.money
+	if market and market_seeds_label:
 		market_seeds_label.text = "Market Seeds: %d" % market.seeds
+	if market and market_wheat_label:
 		market_wheat_label.text = "Market Wheat: %d" % market.wheat
+	if market and market_wheat_cap_label:
 		market_wheat_cap_label.text = "Market Wheat: %d/%d" % [market.wheat, market.wheat_capacity]
+	if market and market_bread_label:
 		market_bread_label.text = "Market Bread: %d" % market.bread
+	if market and market_bread_cap_label:
 		market_bread_cap_label.text = "Market Bread: %d/%d" % [market.bread, market.bread_capacity]
+	if market and wheat_price_label:
 		wheat_price_label.text = "Wheat Price: $%.2f ($%.2f–$%.2f)" % [market.wheat_price, market.WHEAT_PRICE_FLOOR, market.WHEAT_PRICE_CEILING]
+	if market and bread_price_label:
 		bread_price_label.text = "Bread Price: $%.2f ($%.2f–$%.2f)" % [market.bread_price, market.BREAD_PRICE_FLOOR, market.BREAD_PRICE_CEILING]
 	
-	if baker:
+	if baker and baker_status_label:
 		baker_status_label.text = "Status: " + baker.get_status_text()
+	if baker and baker_money_label:
 		baker_money_label.text = "Baker Money: $%.2f" % baker.get_node("Wallet").money
+	if baker and baker_wheat_label:
 		baker_wheat_label.text = "Baker Wheat: %d" % baker.get_node("Inventory").get_qty("wheat")
+	if baker and baker_flour_label:
 		baker_flour_label.text = "Baker Flour: %d" % baker.get_node("Inventory").get_qty("flour")
+	if baker and baker_bread_label:
 		baker_bread_label.text = "Baker Bread: %d" % baker.get_node("Inventory").get_qty("bread")
+	if baker and baker_food_bread_label:
 		baker_food_bread_label.text = "Baker Food Bread: %d" % baker.get_node("Inventory").get_qty("bread")
+	if baker and baker_days_until_starve_label:
 		var baker_hunger = baker.get_node("HungerNeed")
 		baker_days_until_starve_label.text = "Baker Hunger Days: %d/%d" % [baker_hunger.hunger_days, baker_hunger.hunger_max_days]
+	if baker and baker_starving_label:
+		var baker_hunger = baker.get_node("HungerNeed")
 		baker_starving_label.text = "Baker Starving: %s" % ("Yes" if baker_hunger.is_starving else "No")
+	if baker and baker_inventory_label:
 		var baker_cap = baker.get_node("InventoryCapacity")
 		var baker_inv_text = "Inventory: %d / %d" % [baker_cap.current_total(), baker_cap.max_items]
 		if baker_cap.is_full():
 			baker_inv_text += " (FULL)"
 		baker_inventory_label.text = baker_inv_text
 	
-	if household_agent:
+	if household_agent and household_status_label:
 		household_status_label.text = "Status: " + household_agent.get_status_text()
+	if household_agent and household_money_label:
 		household_money_label.text = "Household Money: $%.2f" % household_agent.get_node("Wallet").money
+	if household_agent and household_bread_label:
 		household_bread_label.text = "Household Bread: %d" % household_agent.get_node("Inventory").get_qty("bread")
+	if household_agent and household_bread_consumed_label:
 		household_bread_consumed_label.text = "Household Bread Consumed: %d" % household_agent.bread_consumed
+	if household_agent and household_hunger_label:
 		var household_hunger = household_agent.get_node("HungerNeed")
 		household_hunger_label.text = "Household Hunger: %d/%d" % [household_hunger.hunger_days, household_hunger.hunger_max_days]
+	if household_agent and household_starving_label:
+		var household_hunger = household_agent.get_node("HungerNeed")
 		household_starving_label.text = "Household Starving: %s" % ("Yes" if household_hunger.is_starving else "No")
+	if household_agent and household_inventory_label:
 		var household_cap = household_agent.get_node("InventoryCapacity")
 		var household_inv_text = "Inventory: %d / %d" % [household_cap.current_total(), household_cap.max_items]
 		if household_cap.is_full():

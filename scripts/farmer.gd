@@ -173,6 +173,12 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds)" % [current_tick, field_name, harvest_result.wheat, harvest_result.seeds])
 	# Otherwise try to plant if field is empty and we have seeds
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
+		# HYSTERESIS PROCUREMENT COUPLING: Don't plant if wheat production is paused
+		if not market.can_producer_produce("wheat"):
+			if event_bus:
+				event_bus.log("Tick %d: Farmer SKIPPED planting %s (wheat production paused by hysteresis)" % [current_tick, field_name])
+			return
+		
 		# Apply production throttle to planting (procurement coupling)
 		var should_plant: bool = true
 		if inventory_throttle:

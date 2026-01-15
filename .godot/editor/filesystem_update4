@@ -1,3 +1,7 @@
 res://scripts/market.gd
 res://scripts/farmer.gd
 res://scripts/baker.gd
+res://scripts/components/inventory_throttle.gd
+res://scripts/economy_audit.gd
+res://scripts/main.gd
+res://scripts/simulation_clock.gd

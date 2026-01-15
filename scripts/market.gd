@@ -10,24 +10,26 @@ var wheat_capacity: int = 100
 var bread_capacity: int = 200
 
 const SEED_PRICE: float = 0.5
-const WHEAT_PRICE_FLOOR: float = 1.00
-const BREAD_PRICE_FLOOR: float = 1.00
 const WHEAT_PRICE_CEILING: float = 5.00
 const BREAD_PRICE_CEILING: float = 10.00
 const PRICE_STEP: float = 0.10  # 10% adjustment per day
+
+# Price floors - stable lower bounds for staple goods
+const WHEAT_PRICE_FLOOR: float = 1.00
+const BREAD_PRICE_FLOOR: float = 1.00
 
 # Decay configuration - generic per-good spoilage/loss mechanic
 const DECAY_CONFIG: Dictionary = {
 	"wheat": {
 		"enabled": true,
-		"min_rate_per_day": 0.05,  # 5% minimum daily decay
-		"max_rate_per_day": 0.15,  # 15% maximum daily decay
+		"min_rate_per_day": 0.01,  # PART 1: Reduced from 0.03 to 0.01
+		"max_rate_per_day": 0.04,  # PART 1: Reduced from 0.10 to 0.04
 		"applies_to_market": true
 	},
 	"bread": {
 		"enabled": true,
-		"min_rate_per_day": 0.05,  # 5% minimum daily decay
-		"max_rate_per_day": 0.15,  # 15% maximum daily decay
+		"min_rate_per_day": 0.02,  # PART 1: Reduced from 0.03 to 0.02
+		"max_rate_per_day": 0.06,  # PART 1: Reduced from 0.10 to 0.06
 		"applies_to_market": true
 	},
 	"seeds": {
@@ -37,6 +39,17 @@ const DECAY_CONFIG: Dictionary = {
 		"applies_to_market": false
 	}
 }
+
+# PART 3: Weekly-held decay configuration
+const DECAY_WINDOW_DAYS: int = 7  # Hold decay rate constant for 7 days
+
+# Target band configuration - hysteresis for market willingness and producer throttling
+# Affects ONLY bid multipliers, max_buy_qty, and producer throttling
+# Does NOT affect reference price authority (prices still need trades to rise)
+const TARGET_BAND_PCT: float = 0.15  # 15% band around target
+const BAND_UPPER_BID_MULTIPLIER: float = 0.70  # Aggressive discount above upper band
+const BAND_LOWER_BID_MULTIPLIER: float = 1.10  # PART 2: Reduced from 1.30 to 1.10 to prevent scarcity spiral
+const BAND_UPPER_MAX_BUY_TAPER: float = 0.10  # Max buy qty tapers to 10% above upper band
 
 # Sell pressure threshold - prevents monopoly price pegging
 # If sell_pressure_ratio < threshold, price won't increase even if inventory is low
@@ -54,12 +67,44 @@ const CLEARING_ANCHOR_STRENGTH: float = 0.5  # How much reference lerps toward c
 const MAX_PREMIUM_OVER_CLEARING: float = 0.05  # Max 5% premium over avg clearing price
 const MAX_INVENTORY_NUDGE_PER_DAY: float = 0.03  # Max 3% inventory-based adjustment per day
 const MIN_TRADES_FOR_PRICE_DISCOVERY: int = 5  # Minimum trades to use price discovery
+const MAX_DAILY_PRICE_CHANGE: float = 0.05  # Max 5% daily price movement cap
+const DECAY_DISABLE_DAYS: int = 10  # Disable decay for first N days
+
+# Producer hysteresis configuration - prevents price drift to floors by gating producer behavior at bands
+const PRODUCER_HYSTERESIS_CONFIG: Dictionary = {
+	"wheat": {
+		"enabled": true,
+		"stop_sell_at_or_above_upper_band": true,
+		"resume_sell_at_or_below_lower_band": true,
+		"stop_produce_at_or_above_upper_band": true,
+		"resume_produce_at_or_below_lower_band": true
+	},
+	"bread": {
+		"enabled": true,
+		"stop_sell_at_or_above_upper_band": true,
+		"resume_sell_at_or_below_lower_band": true,
+		"stop_produce_at_or_above_upper_band": true,
+		"resume_produce_at_or_below_lower_band": true
+	}
+}
 
 var wheat_price: float = 1.0
 var bread_price: float = 2.5
 
-var wheat_target: int = 60
-var bread_target: int = 80
+# PART 3: Targets aligned with actual throughput
+var wheat_target: int = 45  # Reduced from 60 to match production capacity
+var bread_target: int = 50  # Reduced from 80 to match consumption
+
+# Previous day inventory tracking for recovery detection
+var wheat_prev: int = 0
+var bread_prev: int = 0
+var current_day: int = 0
+
+# PART 3: Weekly-held decay rate tracking
+var wheat_decay_rate: float = 0.0
+var wheat_decay_days_remaining: int = 0
+var bread_decay_rate: float = 0.0
+var bread_decay_days_remaining: int = 0
 
 # Trade flow tracking (reset daily)
 var wheat_sold_today: int = 0
@@ -72,6 +117,18 @@ var wheat_total_cleared: int = 0
 var wheat_total_value: float = 0.0
 var bread_total_cleared: int = 0
 var bread_total_value: float = 0.0
+
+# Producer hysteresis state tracking - prevents repeated state change spam
+var producer_hysteresis_state: Dictionary = {
+	"wheat": {
+		"can_sell": true,
+		"can_produce": true
+	},
+	"bread": {
+		"can_sell": true,
+		"can_produce": true
+	}
+}
 
 var event_bus: EventBus = null
 var current_tick: int = 0
@@ -95,19 +152,117 @@ func get_inv(agent) -> Inventory:
 
 func set_tick(t: int) -> void:
 	current_tick = t
+	
+	# PART 1: Log market parameters once at startup
+	if t == 0 and event_bus:
+		# Log wheat parameters
+		var wheat_lower: int = int(float(wheat_target) * (1.0 - TARGET_BAND_PCT))
+		var wheat_upper: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("[MARKET PARAMS] wheat: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
+			wheat_target, wheat_lower, wheat_upper, TARGET_BAND_PCT,
+			DECAY_CONFIG["wheat"]["min_rate_per_day"],
+			DECAY_CONFIG["wheat"]["max_rate_per_day"],
+			BAND_LOWER_BID_MULTIPLIER
+		])
+		# Log bread parameters
+		var bread_lower: int = int(float(bread_target) * (1.0 - TARGET_BAND_PCT))
+		var bread_upper: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("[MARKET PARAMS] bread: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
+			bread_target, bread_lower, bread_upper, TARGET_BAND_PCT,
+			DECAY_CONFIG["bread"]["min_rate_per_day"],
+			DECAY_CONFIG["bread"]["max_rate_per_day"],
+			BAND_LOWER_BID_MULTIPLIER
+		])
+	
 	# Enforce price floors and ceilings
 	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
 	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	
+	# Update producer hysteresis state based on inventory bands
+	_update_producer_hysteresis("wheat", wheat, wheat_target)
+	_update_producer_hysteresis("bread", bread, bread_target)
+
+
+## Producer Hysteresis API - Prevents price drift to floors
+
+func _update_producer_hysteresis(good: String, current_inv: int, target_inv: int) -> void:
+	"""Update producer hysteresis state for a good based on current inventory vs bands.
+	Logs only on state transitions to avoid spam."""
+	if not PRODUCER_HYSTERESIS_CONFIG.has(good):
+		return
+	
+	var config = PRODUCER_HYSTERESIS_CONFIG[good]
+	if not config["enabled"]:
+		return
+	
+	var lower_band: int = int(float(target_inv) * (1.0 - TARGET_BAND_PCT))
+	var upper_band: int = int(float(target_inv) * (1.0 + TARGET_BAND_PCT))
+	var state = producer_hysteresis_state[good]
+	
+	# Update selling state
+	if config["stop_sell_at_or_above_upper_band"]:
+		var was_can_sell: bool = state["can_sell"]
+		if current_inv >= upper_band:
+			state["can_sell"] = false
+		elif current_inv <= lower_band:
+			state["can_sell"] = true
+		# Log only on state change
+		if was_can_sell != state["can_sell"] and event_bus:
+			if state["can_sell"]:
+				event_bus.log("[HYSTERESIS] %s SELLING RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
+			else:
+				event_bus.log("[HYSTERESIS] %s SELLING PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
+	
+	# Update production state
+	if config["stop_produce_at_or_above_upper_band"]:
+		var was_can_produce: bool = state["can_produce"]
+		if current_inv >= upper_band:
+			state["can_produce"] = false
+		elif current_inv <= lower_band:
+			state["can_produce"] = true
+		# Log only on state change
+		if was_can_produce != state["can_produce"] and event_bus:
+			if state["can_produce"]:
+				event_bus.log("[HYSTERESIS] %s PRODUCTION RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
+			else:
+				event_bus.log("[HYSTERESIS] %s PRODUCTION PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
+
+
+func can_producer_sell(good: String) -> bool:
+	"""Check if producers are allowed to sell this good to market (hysteresis gate)."""
+	if not PRODUCER_HYSTERESIS_CONFIG.has(good):
+		return true
+	if not PRODUCER_HYSTERESIS_CONFIG[good]["enabled"]:
+		return true
+	return producer_hysteresis_state[good]["can_sell"]
+
+
+func can_producer_produce(good: String) -> bool:
+	"""Check if producers are allowed to produce this good for market (hysteresis gate)."""
+	if not PRODUCER_HYSTERESIS_CONFIG.has(good):
+		return true
+	if not PRODUCER_HYSTERESIS_CONFIG[good]["enabled"]:
+		return true
+	return producer_hysteresis_state[good]["can_produce"]
+
+
+func get_production_throttle_for_hysteresis(good: String) -> float:
+	"""Get procurement throttle factor based on hysteresis state.
+	Returns 0.0 when production paused, 1.0 when production allowed."""
+	if not can_producer_produce(good):
+		return 0.0
+	return 1.0
 
 
 ## Bid Price API - Used by producers for economic decisions
 
 func get_bid_price(good: String) -> float:
 	"""Get current bid price for a good (what market will pay right now).
-	Bid uses a curve:
-	- Below target: bid_multiplier >= 1.0 (market pays premium for scarcity)
-	- At target: bid_multiplier = 1.0
-	- Above target: bid_multiplier < 1.0 (market discounts for surplus)"""
+	Uses target bands to compute market willingness:
+	- Below lower_band: strong premium (high willingness)
+	- Within bands: normal bid curve
+	- Above upper_band: aggressive discount (low willingness)
+	Does NOT affect reference price authority."""
 	var reference_price: float = 0.0
 	var current_inv: int = 0
 	var target_inv: int = 0
@@ -130,26 +285,31 @@ func get_bid_price(good: String) -> float:
 	if target_inv <= 0:
 		return reference_price
 	
-	# Calculate inventory ratio (0.0 = empty, 1.0 = at target, >1.0 = over target)
-	var inv_ratio: float = float(current_inv) / float(target_inv)
+	# Calculate target bands
+	var lower_band: float = float(target_inv) * (1.0 - TARGET_BAND_PCT)
+	var upper_band: float = float(target_inv) * (1.0 + TARGET_BAND_PCT)
+	var inv_float: float = float(current_inv)
 	
-	# Calculate bid multiplier using steep non-linear curve
+	# Calculate bid multiplier using band-based willingness
 	var bid_multiplier: float = 1.0
-	if inv_ratio < BID_CURVE_PRE_TARGET_RATIO:
-		# Below pre-target: gentle linear decline from max premium
-		var ratio_in_zone: float = inv_ratio / BID_CURVE_PRE_TARGET_RATIO
-		bid_multiplier = BID_CURVE_SCARCITY_MULTIPLIER - (ratio_in_zone * (BID_CURVE_SCARCITY_MULTIPLIER - 1.0))
-	elif inv_ratio < 1.0:
-		# Pre-target to target: STEEP decline using power curve
-		var ratio_in_steep_zone: float = (inv_ratio - BID_CURVE_PRE_TARGET_RATIO) / (1.0 - BID_CURVE_PRE_TARGET_RATIO)
-		# Apply steepness exponent: as inventory approaches target, bid drops sharply
-		bid_multiplier = 1.0 - (pow(ratio_in_steep_zone, BID_CURVE_STEEPNESS) * 0.0)  # Drops from 1.0 toward 1.0 but ready for overshoot
-		bid_multiplier = max(bid_multiplier, 0.85)  # Floor at 85% when at target edge
-	elif inv_ratio >= 1.0:
-		# Above target: aggressive discount (inventory overshoot)
-		var over_target_ratio: float = min((inv_ratio - 1.0), 1.0)  # Cap at 2x target
-		# Start at 0.85 (target edge) and drop to SURPLUS_MULTIPLIER
-		bid_multiplier = 0.85 - (over_target_ratio * (0.85 - BID_CURVE_SURPLUS_MULTIPLIER))
+	
+	if inv_float >= upper_band:
+		# Above upper band: aggressive discount (market saturated, low willingness)
+		var excess_ratio: float = (inv_float - upper_band) / float(target_inv)
+		excess_ratio = min(excess_ratio, 0.5)  # Cap at 50% above upper band
+		# Lerp from 0.85 at upper_band to BAND_UPPER_BID_MULTIPLIER at max excess
+		bid_multiplier = lerp(0.85, BAND_UPPER_BID_MULTIPLIER, excess_ratio / 0.5)
+	elif inv_float <= lower_band:
+		# Below lower band: strong premium (market undersupplied, high willingness)
+		var shortage_ratio: float = (lower_band - inv_float) / float(target_inv)
+		shortage_ratio = min(shortage_ratio, 0.5)  # Cap at 50% below lower band
+		# Lerp from 1.0 at lower_band to BAND_LOWER_BID_MULTIPLIER at max shortage
+		bid_multiplier = lerp(1.0, BAND_LOWER_BID_MULTIPLIER, shortage_ratio / 0.5)
+	else:
+		# Within bands: normal gentle slope
+		var band_position: float = (inv_float - lower_band) / (upper_band - lower_band)
+		# Lerp from 1.0 at lower_band to 0.85 at upper_band
+		bid_multiplier = lerp(1.0, 0.85, band_position)
 	
 	# Apply multiplier and enforce floor
 	var bid: float = reference_price * bid_multiplier
@@ -157,14 +317,57 @@ func get_bid_price(good: String) -> float:
 
 
 func get_max_buy_qty(good: String) -> int:
-	"""Get maximum quantity market can buy per trade (remaining capacity)."""
+	"""Get maximum quantity market can buy per trade.
+	Uses target bands to taper willingness:
+	- Below lower_band: full capacity available
+	- Within bands: normal capacity
+	- Above upper_band: capacity tapers toward zero"""
+	var current_inv: int = 0
+	var capacity: int = 0
+	var target_inv: int = 0
+	
 	match good:
 		"wheat":
-			return max(0, wheat_capacity - wheat)
+			current_inv = wheat
+			capacity = wheat_capacity
+			target_inv = wheat_target
 		"bread":
-			return max(0, bread_capacity - bread)
+			current_inv = bread
+			capacity = bread_capacity
+			target_inv = bread_target
 		_:
 			return 0
+	
+	var remaining: int = max(0, capacity - current_inv)
+	
+	if target_inv <= 0:
+		return remaining
+	
+	# Calculate bands
+	var lower_band: float = float(target_inv) * (1.0 - TARGET_BAND_PCT)
+	var upper_band: float = float(target_inv) * (1.0 + TARGET_BAND_PCT)
+	var inv_float: float = float(current_inv)
+	
+	# CHANGE 2: Strict oversupply gate for bread - refuse ALL purchases above upper_band
+	if good == "bread" and inv_float >= upper_band:
+		return 0
+	
+	# CHANGE 3: Linear taper for bread between target and upper_band
+	if good == "bread" and inv_float > float(target_inv):
+		var taper_range: float = upper_band - float(target_inv)
+		var excess: float = inv_float - float(target_inv)
+		var taper_ratio: float = 1.0 - (excess / taper_range)
+		taper_ratio = clamp(taper_ratio, 0.0, 1.0)
+		remaining = int(floor(float(remaining) * taper_ratio))
+	
+	# For wheat: use old logic (taper above upper_band)
+	if good == "wheat" and inv_float >= upper_band:
+		var excess_ratio: float = (inv_float - upper_band) / float(target_inv)
+		excess_ratio = min(excess_ratio, 0.5)  # Cap at 50% above upper band
+		var taper_factor: float = lerp(1.0, BAND_UPPER_MAX_BUY_TAPER, excess_ratio / 0.5)
+		remaining = int(floor(float(remaining) * taper_factor))
+	
+	return max(0, remaining)
 
 
 ## Market Saturation API - Reusable for all producers
@@ -219,6 +422,13 @@ func get_saturation_info(good: String) -> Dictionary:
 func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0) -> int:
 	"""Micro-fill buying: purchase wheat 1 unit at a time, recomputing bid after each unit.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	
+	# HYSTERESIS GATE: Check if wheat selling is allowed
+	if not can_producer_sell("wheat"):
+		if event_bus:
+			event_bus.log("Tick %d: %s wheat sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(farmer)])
+		return 0
+	
 	var farmer_inv: Inventory = get_inv(farmer)
 	var farmer_wallet: Wallet = get_wallet(farmer)
 	var farmer_wheat: int = farmer_inv.get_qty("wheat")
@@ -366,6 +576,13 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> int:
 	"""Micro-fill buying: purchase bread 1 unit at a time, recomputing bid after each unit.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	
+	# HYSTERESIS GATE: Check if bread selling is allowed
+	if not can_producer_sell("bread"):
+		if event_bus:
+			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(baker)])
+		return 0
+	
 	var baker_inv: Inventory = get_inv(baker)
 	var baker_wallet: Wallet = get_wallet(baker)
 	var baker_bread: int = baker_inv.get_qty("bread")
@@ -441,6 +658,14 @@ func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> in
 func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0) -> int:
 	"""Buy a specific amount of bread from any agent using micro-fill approach.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	
+	# HYSTERESIS GATE: Check if bread selling is allowed (applies to all producers)
+	# Note: Baker is the primary bread producer, but this gate applies generically
+	if agent is Baker and not can_producer_sell("bread"):
+		if event_bus:
+			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
+		return 0
+	
 	if amount_offered <= 0:
 		return 0
 	
@@ -636,11 +861,17 @@ func _get_sell_pressure_ratio(good: String) -> float:
 
 func on_day_changed(day: int) -> void:
 	"""Called by Calendar when a new day starts. Adjusts prices based on inventory vs target."""
+	current_day = day
+	
 	# Apply inventory decay first (before price adjustments)
 	_apply_inventory_decay(day)
 	
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
+	
+	# Store current inventory for next day's recovery detection
+	wheat_prev = wheat
+	bread_prev = bread
 	
 	# Reset daily flow counters
 	wheat_sold_today = 0
@@ -656,7 +887,11 @@ func on_day_changed(day: int) -> void:
 
 
 func _apply_inventory_decay(day: int) -> void:
-	"""Apply random inventory decay to market goods based on DECAY_CONFIG."""
+	"""Apply inventory decay with weekly-held rates, only when inventory > upper_band."""
+	# Early-game stabilization - disable decay for first N days
+	if day < DECAY_DISABLE_DAYS:
+		return
+	
 	for good_name in DECAY_CONFIG.keys():
 		var config = DECAY_CONFIG[good_name]
 		if not config.get("enabled", false):
@@ -664,45 +899,89 @@ func _apply_inventory_decay(day: int) -> void:
 		if not config.get("applies_to_market", false):
 			continue
 		
-		# Get current inventory for this good
+		# Get current inventory, target, and upper band for this good
 		var current_inventory: int = 0
+		var target_inventory: int = 0
+		var upper_band: int = 0
+		var current_decay_rate: float = 0.0
+		var decay_days_remaining: int = 0
+		
 		match good_name:
 			"wheat":
 				current_inventory = wheat
+				target_inventory = wheat_target
+				upper_band = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+				current_decay_rate = wheat_decay_rate
+				decay_days_remaining = wheat_decay_days_remaining
 			"bread":
 				current_inventory = bread
+				target_inventory = bread_target
+				upper_band = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+				current_decay_rate = bread_decay_rate
+				decay_days_remaining = bread_decay_days_remaining
 			"seeds":
 				current_inventory = seeds
+				target_inventory = 0  # Seeds have no target
+				upper_band = 0
+				current_decay_rate = 0.0
+				decay_days_remaining = 0
 			_:
 				continue  # Unknown good
 		
 		if current_inventory <= 0:
 			continue  # No inventory to decay
 		
-		# Draw random decay rate between min and max
-		var min_rate: float = config.get("min_rate_per_day", 0.0)
-		var max_rate: float = config.get("max_rate_per_day", 0.0)
-		var decay_rate: float = randf_range(min_rate, max_rate)
+		# PART 2: Only decay when inventory > upper_band (true oversupply)
+		if current_inventory <= upper_band:
+			continue  # Skip decay when at or below upper band
 		
-		# Calculate decay amount (floor to integer)
-		var decay_amount: int = int(floor(float(current_inventory) * decay_rate))
+		# PART 3: Weekly-held decay rate mechanism
+		# Decrement window counter and re-roll rate if needed
+		if decay_days_remaining <= 0:
+			# Roll new decay rate and reset window
+			var min_rate: float = config.get("min_rate_per_day", 0.0)
+			var max_rate: float = config.get("max_rate_per_day", 0.0)
+			current_decay_rate = randf_range(min_rate, max_rate)
+			decay_days_remaining = DECAY_WINDOW_DAYS
+			
+			# PART 4: Log when new decay rate is rolled
+			if event_bus:
+				event_bus.log("Day %d: %s decay rate set to %.1f%% for next %d days" % [
+					day, good_name, current_decay_rate * 100.0, DECAY_WINDOW_DAYS
+				])
+		
+		# Store back to instance variables
+		match good_name:
+			"wheat":
+				wheat_decay_rate = current_decay_rate
+				wheat_decay_days_remaining = decay_days_remaining - 1
+			"bread":
+				bread_decay_rate = current_decay_rate
+				bread_decay_days_remaining = decay_days_remaining - 1
+		
+		# Calculate decay amount using held rate (floor to integer)
+		var decay_amount: int = int(floor(float(current_inventory) * current_decay_rate))
 		if decay_amount <= 0:
 			continue  # No decay this day
 		
 		# Apply decay to inventory (never below zero)
+		var old_inventory: int = current_inventory
 		match good_name:
 			"wheat":
 				wheat = max(0, wheat - decay_amount)
+				current_inventory = wheat
 			"bread":
 				bread = max(0, bread - decay_amount)
+				current_inventory = bread
 			"seeds":
 				seeds = max(0, seeds - decay_amount)
+				current_inventory = seeds
 		
-		# Log decay
+		# PART 4: Log decay application
 		if event_bus:
-			event_bus.log("Day %d: %s decay removed %d units (%.1f%%), inventory %d→%d" % [
-				day, good_name, decay_amount, decay_rate * 100.0, 
-				current_inventory, current_inventory - decay_amount
+			event_bus.log("Day %d: %s decay removed %d units (rate %.1f%%), inv %d→%d" % [
+				day, good_name, decay_amount, current_decay_rate * 100.0,
+				old_inventory, current_inventory
 			])
 
 
@@ -733,6 +1012,15 @@ func _adjust_wheat_price(day: int) -> void:
 		elif wheat > wheat_target:
 			# High inventory -> small downward nudge
 			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
+		
+		# Change 1: Downward pressure on recovery (only when inventory >= upper_band)
+		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		if wheat > wheat_prev and wheat >= upper_band:
+			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
+			# Mirror the upward adjustment magnitude used during scarcity
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			inventory_nudge += recovery_adjustment
+		
 		new_price *= (1.0 + inventory_nudge)
 		
 		# Step 3: CRITICAL - prevent upward drift beyond clearing reality
@@ -743,37 +1031,55 @@ func _adjust_wheat_price(day: int) -> void:
 		update_reason = "cleared"
 	elif wheat_total_cleared == 0:
 		# DEMAND-CONFIRMATION RULE: No trades = no price increases
-		# Prices may only rise when demand is confirmed by actual purchases
-		if wheat > wheat_target:
-			# High inventory with no demand -> decrease price
+		# CHANGE 5: Only decrease on TRUE oversupply (above upper_band)
+		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		if wheat > upper_band:
+			# High inventory (oversupply) with no demand -> decrease price
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "no-demand decrease"
 		else:
-			# Low inventory but no demand -> hold price flat
+			# Normal inventory but no demand -> hold price flat
 			new_price = old_price
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		if wheat > wheat_target:
+		# CHANGE 5: Only decrease on TRUE oversupply
+		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		if wheat > upper_band:
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "low-trades decrease"
 		else:
 			new_price = old_price
 			update_reason = "low-trades cap"
 	
+	# Change 3: Apply hard daily price movement cap (±5%)
+	var max_change: float = old_price * MAX_DAILY_PRICE_CHANGE
+	if new_price > old_price + max_change:
+		new_price = old_price + max_change
+	elif new_price < old_price - max_change:
+		new_price = old_price - max_change
+	
 	# Apply floor and ceiling
 	wheat_price = clamp(new_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	
+	# Calculate band status for logging
+	var lower_band: int = int(float(wheat_target) * (1.0 - TARGET_BAND_PCT))
+	var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+	var bid_mult: float = get_bid_price("wheat") / wheat_price if wheat_price > 0 else 1.0
+	var max_buy: int = get_max_buy_qty("wheat")
 	
 	# Daily diagnostic log
 	if event_bus:
 		if wheat_total_cleared > 0:
-			event_bus.log("Day %d: wheat | inv %d/%d | trades=%d | $%.2f→$%.2f | %s" % [
-				day, wheat, wheat_target, wheat_total_cleared, old_price, wheat_price,
+			event_bus.log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
+				day, wheat, lower_band, wheat_target, upper_band, bid_mult, max_buy,
+				wheat_total_cleared, old_price, wheat_price,
 				update_reason + (" (CAP)" if cap_applied else "")
 			])
 		else:
-			event_bus.log("Day %d: wheat | inv %d/%d | trades=0 | $%.2f→$%.2f | %s" % [
-				day, wheat, wheat_target, old_price, wheat_price, update_reason
+			event_bus.log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
+				day, wheat, lower_band, wheat_target, upper_band, bid_mult, max_buy,
+				old_price, wheat_price, update_reason
 			])
 
 
@@ -804,6 +1110,15 @@ func _adjust_bread_price(day: int) -> void:
 		elif bread > bread_target:
 			# High inventory -> small downward nudge
 			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
+		
+		# Change 1: Downward pressure on recovery (only when inventory >= upper_band)
+		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		if bread > bread_prev and bread >= upper_band:
+			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
+			# Mirror the upward adjustment magnitude used during scarcity
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			inventory_nudge += recovery_adjustment
+		
 		new_price *= (1.0 + inventory_nudge)
 		
 		# Step 3: CRITICAL - prevent upward drift beyond clearing reality
@@ -814,35 +1129,53 @@ func _adjust_bread_price(day: int) -> void:
 		update_reason = "cleared"
 	elif bread_total_cleared == 0:
 		# DEMAND-CONFIRMATION RULE: No trades = no price increases
-		# Prices may only rise when demand is confirmed by actual purchases
-		if bread > bread_target:
-			# High inventory with no demand -> decrease price
+		# CHANGE 5: Only decrease on TRUE oversupply (above upper_band)
+		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		if bread > upper_band:
+			# High inventory (oversupply) with no demand -> decrease price
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "no-demand decrease"
 		else:
-			# Low inventory but no demand -> hold price flat
+			# Normal inventory but no demand -> hold price flat
 			new_price = old_price
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		if bread > bread_target:
+		# CHANGE 5: Only decrease on TRUE oversupply
+		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		if bread > upper_band:
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "low-trades decrease"
 		else:
 			new_price = old_price
 			update_reason = "low-trades cap"
 	
+	# Change 3: Apply hard daily price movement cap (±5%)
+	var max_change: float = old_price * MAX_DAILY_PRICE_CHANGE
+	if new_price > old_price + max_change:
+		new_price = old_price + max_change
+	elif new_price < old_price - max_change:
+		new_price = old_price - max_change
+	
 	# Apply floor and ceiling
 	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	
+	# Calculate band status for logging
+	var lower_band: int = int(float(bread_target) * (1.0 - TARGET_BAND_PCT))
+	var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+	var bid_mult: float = get_bid_price("bread") / bread_price if bread_price > 0 else 1.0
+	var max_buy: int = get_max_buy_qty("bread")
 	
 	# Daily diagnostic log
 	if event_bus:
 		if bread_total_cleared > 0:
-			event_bus.log("Day %d: bread | inv %d/%d | trades=%d | $%.2f→$%.2f | %s" % [
-				day, bread, bread_target, bread_total_cleared, old_price, bread_price,
+			event_bus.log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
+				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
+				bread_total_cleared, old_price, bread_price,
 				update_reason + (" (CAP)" if cap_applied else "")
 			])
 		else:
-			event_bus.log("Day %d: bread | inv %d/%d | trades=0 | $%.2f→$%.2f | %s" % [
-				day, bread, bread_target, old_price, bread_price, update_reason
+			event_bus.log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
+				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
+				old_price, bread_price, update_reason
 			])

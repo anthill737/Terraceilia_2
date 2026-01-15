@@ -15,10 +15,13 @@ var timer: Timer
 
 func _ready() -> void:
 	timer = Timer.new()
-	timer.wait_time = tick_rate / speed_multiplier
+	timer.wait_time = tick_rate
 	timer.autostart = true
 	timer.timeout.connect(_on_timer_timeout)
 	add_child(timer)
+	
+	# Initialize engine time scale
+	Engine.time_scale = speed_multiplier
 
 
 func _on_timer_timeout() -> void:
@@ -28,7 +31,8 @@ func _on_timer_timeout() -> void:
 
 func set_speed(multiplier: float) -> void:
 	speed_multiplier = clamp(multiplier, MIN_SPEED, MAX_SPEED)
-	timer.wait_time = tick_rate / speed_multiplier
+	# Use Engine.time_scale to scale the entire game (physics, timers, animations)
+	Engine.time_scale = speed_multiplier
 	speed_changed.emit(speed_multiplier)
 
 

@@ -112,6 +112,10 @@ var wheat_requested_today: int = 0
 var bread_sold_today: int = 0
 var bread_requested_today: int = 0
 
+# Market-side hysteresis tracking - prevents buy clearing above upper band
+var wheat_market_buy_blocked: bool = false
+var bread_market_buy_blocked: bool = false
+
 # Clearing price tracking (reset daily) - prevents reference price ratcheting
 var wheat_total_cleared: int = 0
 var wheat_total_value: float = 0.0
@@ -246,6 +250,18 @@ func can_producer_produce(good: String) -> bool:
 	return producer_hysteresis_state[good]["can_produce"]
 
 
+func is_market_buy_blocked(good: String) -> bool:
+	"""Check if market buying is currently blocked due to hysteresis (inventory >= upper_band).
+	PART 1: Distinguish market-blocked state from no-demand state."""
+	match good:
+		"wheat":
+			return wheat_market_buy_blocked
+		"bread":
+			return bread_market_buy_blocked
+		_:
+			return false
+
+
 func get_production_throttle_for_hysteresis(good: String) -> float:
 	"""Get procurement throttle factor based on hysteresis state.
 	Returns 0.0 when production paused, 1.0 when production allowed."""
@@ -321,7 +337,7 @@ func get_max_buy_qty(good: String) -> int:
 	Uses target bands to taper willingness:
 	- Below lower_band: full capacity available
 	- Within bands: normal capacity
-	- Above upper_band: capacity tapers toward zero"""
+	- Above upper_band: HARD CUTOFF - returns 0 (market-side hysteresis)"""
 	var current_inv: int = 0
 	var capacity: int = 0
 	var target_inv: int = 0
@@ -348,24 +364,16 @@ func get_max_buy_qty(good: String) -> int:
 	var upper_band: float = float(target_inv) * (1.0 + TARGET_BAND_PCT)
 	var inv_float: float = float(current_inv)
 	
-	# CHANGE 2: Strict oversupply gate for bread - refuse ALL purchases above upper_band
-	if good == "bread" and inv_float >= upper_band:
+	# PART 1: HARD CUTOFF - When inventory >= upper_band, NO market-directed purchases allowed
+	# This prevents prices from drifting downward due to forced clearing at discount bids
+	if inv_float >= upper_band:
+		# Update tracking flag for logging
+		match good:
+			"wheat":
+				wheat_market_buy_blocked = true
+			"bread":
+				bread_market_buy_blocked = true
 		return 0
-	
-	# CHANGE 3: Linear taper for bread between target and upper_band
-	if good == "bread" and inv_float > float(target_inv):
-		var taper_range: float = upper_band - float(target_inv)
-		var excess: float = inv_float - float(target_inv)
-		var taper_ratio: float = 1.0 - (excess / taper_range)
-		taper_ratio = clamp(taper_ratio, 0.0, 1.0)
-		remaining = int(floor(float(remaining) * taper_ratio))
-	
-	# For wheat: use old logic (taper above upper_band)
-	if good == "wheat" and inv_float >= upper_band:
-		var excess_ratio: float = (inv_float - upper_band) / float(target_inv)
-		excess_ratio = min(excess_ratio, 0.5)  # Cap at 50% above upper band
-		var taper_factor: float = lerp(1.0, BAND_UPPER_MAX_BUY_TAPER, excess_ratio / 0.5)
-		remaining = int(floor(float(remaining) * taper_factor))
 	
 	return max(0, remaining)
 
@@ -419,12 +427,13 @@ func get_saturation_info(good: String) -> Dictionary:
 			return {}
 
 
-func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0) -> int:
+func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Micro-fill buying: purchase wheat 1 unit at a time, recomputing bid after each unit.
-	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
+	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if wheat selling is allowed
-	if not can_producer_sell("wheat"):
+	# HYSTERESIS GATE: Check if wheat selling is allowed (skip for survival purchases)
+	if not is_survival and not can_producer_sell("wheat"):
 		if event_bus:
 			event_bus.log("Tick %d: %s wheat sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(farmer)])
 		return 0
@@ -483,8 +492,11 @@ func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0) ->
 	# Track flow for pricing
 	wheat_sold_today += units_bought
 	
-	# Track clearing prices for reference price adjustment
-	if units_bought > 0:
+	# PART 3: Track clearing prices ONLY for valid market-directed trades
+	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
+	var upper_band_wheat: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+	var should_update_clearing: bool = not is_survival and (wheat - units_bought) < upper_band_wheat
+	if units_bought > 0 and should_update_clearing:
 		wheat_total_cleared += units_bought
 		wheat_total_value += total_paid
 	
@@ -573,12 +585,13 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 	return amount_sold
 
 
-func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> int:
+func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Micro-fill buying: purchase bread 1 unit at a time, recomputing bid after each unit.
-	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
+	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if bread selling is allowed
-	if not can_producer_sell("bread"):
+	# HYSTERESIS GATE: Check if bread selling is allowed (skip for survival purchases)
+	if not is_survival and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(baker)])
 		return 0
@@ -637,8 +650,11 @@ func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> in
 	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# Track clearing prices for reference price adjustment
-	if units_bought > 0:
+	# PART 3: Track clearing prices ONLY for valid market-directed trades
+	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
+	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
+	if units_bought > 0 and should_update_clearing:
 		bread_total_cleared += units_bought
 		bread_total_value += total_paid
 	
@@ -650,18 +666,20 @@ func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0) -> in
 			reason = "walk-away"
 		elif stopped_by_cap:
 			reason = "capped"
-		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason])
+		var trade_type: String = " (SURVIVAL)" if is_survival else ""
+		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
 	return units_bought
 
 
-func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0) -> int:
+func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Buy a specific amount of bread from any agent using micro-fill approach.
-	Stops when bid drops below min_acceptable_price or inventory/money constraints hit."""
+	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
+	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if bread selling is allowed (applies to all producers)
+	# HYSTERESIS GATE: Check if bread selling is allowed (applies to all producers, skip for survival)
 	# Note: Baker is the primary bread producer, but this gate applies generically
-	if agent is Baker and not can_producer_sell("bread"):
+	if not is_survival and agent is Baker and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
 		return 0
@@ -723,8 +741,11 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# Track clearing prices for reference price adjustment
-	if units_bought > 0:
+	# PART 3: Track clearing prices ONLY for valid market-directed trades
+	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
+	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
+	if units_bought > 0 and should_update_clearing:
 		bread_total_cleared += units_bought
 		bread_total_value += total_paid
 	
@@ -736,7 +757,8 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 			reason = "walk-away"
 		elif stopped_by_cap:
 			reason = "capped"
-		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason])
+		var trade_type: String = " (SURVIVAL)" if is_survival else ""
+		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
 	return units_bought
 
@@ -873,11 +895,23 @@ func on_day_changed(day: int) -> void:
 	wheat_prev = wheat
 	bread_prev = bread
 	
+	# PART 4: Log market-side hysteresis blocking before reset
+	if wheat_market_buy_blocked and event_bus:
+		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, upper_band])
+	if bread_market_buy_blocked and event_bus:
+		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, upper_band])
+	
 	# Reset daily flow counters
 	wheat_sold_today = 0
 	wheat_requested_today = 0
 	bread_sold_today = 0
 	bread_requested_today = 0
+	
+	# Reset market-side hysteresis tracking
+	wheat_market_buy_blocked = false
+	bread_market_buy_blocked = false
 	
 	# Reset clearing price tracking
 	wheat_total_cleared = 0
@@ -1030,11 +1064,17 @@ func _adjust_wheat_price(day: int) -> void:
 			cap_applied = true
 		update_reason = "cleared"
 	elif wheat_total_cleared == 0:
-		# DEMAND-CONFIRMATION RULE: No trades = no price increases
-		# CHANGE 5: Only decrease on TRUE oversupply (above upper_band)
+		# PART 2: Distinguish market-blocked from no-demand
 		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		if wheat > upper_band:
-			# High inventory (oversupply) with no demand -> decrease price
+		
+		if wheat_market_buy_blocked:
+			# Market buying is intentionally blocked due to hysteresis
+			# HOLD price steady - no increase, no decrease
+			new_price = old_price
+			update_reason = "price held (market blocked)"
+		elif wheat > upper_band:
+			# Market is OPEN but no trades occurred AND inventory is oversupplied
+			# This is genuine lack of demand -> decrease price
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "no-demand decrease"
 		else:
@@ -1043,12 +1083,18 @@ func _adjust_wheat_price(day: int) -> void:
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		# CHANGE 5: Only decrease on TRUE oversupply
 		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		if wheat > upper_band:
+		
+		if wheat_market_buy_blocked:
+			# Market buying is blocked - hold price steady
+			new_price = old_price
+			update_reason = "price held (market blocked)"
+		elif wheat > upper_band:
+			# Market open but low trades with oversupply -> decrease
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "low-trades decrease"
 		else:
+			# Low trades but normal inventory -> hold
 			new_price = old_price
 			update_reason = "low-trades cap"
 	
@@ -1128,11 +1174,17 @@ func _adjust_bread_price(day: int) -> void:
 			cap_applied = true
 		update_reason = "cleared"
 	elif bread_total_cleared == 0:
-		# DEMAND-CONFIRMATION RULE: No trades = no price increases
-		# CHANGE 5: Only decrease on TRUE oversupply (above upper_band)
+		# PART 2: Distinguish market-blocked from no-demand
 		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
-		if bread > upper_band:
-			# High inventory (oversupply) with no demand -> decrease price
+		
+		if bread_market_buy_blocked:
+			# Market buying is intentionally blocked due to hysteresis
+			# HOLD price steady - no increase, no decrease
+			new_price = old_price
+			update_reason = "price held (market blocked)"
+		elif bread > upper_band:
+			# Market is OPEN but no trades occurred AND inventory is oversupplied
+			# This is genuine lack of demand -> decrease price
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "no-demand decrease"
 		else:
@@ -1141,12 +1193,18 @@ func _adjust_bread_price(day: int) -> void:
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		# CHANGE 5: Only decrease on TRUE oversupply
 		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
-		if bread > upper_band:
+		
+		if bread_market_buy_blocked:
+			# Market buying is blocked - hold price steady
+			new_price = old_price
+			update_reason = "price held (market blocked)"
+		elif bread > upper_band:
+			# Market open but low trades with oversupply -> decrease
 			new_price *= (1.0 - PRICE_STEP)
 			update_reason = "low-trades decrease"
 		else:
+			# Low trades but normal inventory -> hold
 			new_price = old_price
 			update_reason = "low-trades cap"
 	

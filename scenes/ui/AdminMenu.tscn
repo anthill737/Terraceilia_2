@@ -1,0 +1,164 @@
+[gd_scene load_steps=3 format=3 uid="uid://c0hfv3yqyn85u"]
+
+[ext_resource type="Script" path="res://scripts/ui/admin_menu.gd" id="1_admin"]
+[ext_resource type="Script" path="res://scripts/ui/world_click_catcher.gd" id="2_catcher"]
+
+[node name="AdminMenu" type="CanvasLayer"]
+script = ExtResource("1_admin")
+
+[node name="WorldClickCatcher" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("2_catcher")
+
+[node name="Panel" type="Panel" parent="."]
+offset_left = 50.0
+offset_top = 50.0
+offset_right = 450.0
+offset_bottom = 550.0
+mouse_filter = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+
+[node name="Header" type="HBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+text = "Admin Menu"
+theme_override_font_sizes/font_size = 20
+
+[node name="Spacer" type="Control" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="FarmerCount" type="Label" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+text = "Farmers: 0"
+
+[node name="BakerCount" type="Label" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+text = "Bakers: 0"
+
+[node name="FieldCount" type="Label" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+text = "Fields: 0"
+
+[node name="CloseButton" type="Button" parent="Panel/VBoxContainer/Header"]
+layout_mode = 2
+text = "X"
+
+[node name="HSeparator1" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="SpawnLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Spawn Entities"
+theme_override_font_sizes/font_size = 16
+
+[node name="SpawnSection" type="HBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="SpawnFarmer" type="Button" parent="Panel/VBoxContainer/SpawnSection"]
+layout_mode = 2
+text = "Spawn Farmer"
+
+[node name="SpawnBaker" type="Button" parent="Panel/VBoxContainer/SpawnSection"]
+layout_mode = 2
+text = "Spawn Baker"
+
+[node name="SpawnField" type="Button" parent="Panel/VBoxContainer/SpawnSection"]
+layout_mode = 2
+text = "Spawn Field"
+
+[node name="PlacementStatus" type="Label" parent="Panel/VBoxContainer/SpawnSection"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.8, 0, 1)
+text = ""
+
+[node name="HSeparator2" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="AssignLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Field Assignment"
+theme_override_font_sizes/font_size = 16
+
+[node name="AssignSection" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="FarmerLabel" type="Label" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+text = "Select Farmer:"
+
+[node name="FarmerSelect" type="OptionButton" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+
+[node name="FieldLabel" type="Label" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+text = "Select Field:"
+
+[node name="FieldSelect" type="OptionButton" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+
+[node name="Buttons1" type="HBoxContainer" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+
+[node name="AssignButton" type="Button" parent="Panel/VBoxContainer/AssignSection/Buttons1"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Assign Field → Farmer"
+
+[node name="UnassignButton" type="Button" parent="Panel/VBoxContainer/AssignSection/Buttons1"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Unassign Field"
+
+[node name="Buttons2" type="HBoxContainer" parent="Panel/VBoxContainer/AssignSection"]
+layout_mode = 2
+
+[node name="AssignAllButton" type="Button" parent="Panel/VBoxContainer/AssignSection/Buttons2"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Assign ALL → Farmer"
+
+[node name="UnassignAllButton" type="Button" parent="Panel/VBoxContainer/AssignSection/Buttons2"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Unassign ALL from Farmer"
+
+[node name="HSeparator3" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="InfoLabel" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+text = "Selection Info"
+theme_override_font_sizes/font_size = 16
+
+[node name="InfoSection" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="FarmerInfo" type="Label" parent="Panel/VBoxContainer/InfoSection"]
+layout_mode = 2
+text = "Selected Farmer: None"
+autowrap_mode = 3
+
+[node name="FieldInfo" type="Label" parent="Panel/VBoxContainer/InfoSection"]
+layout_mode = 2
+text = "Selected Field: None"
+autowrap_mode = 3

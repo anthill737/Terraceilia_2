@@ -14,12 +14,32 @@ var prosperity_meter: ProsperityMeter = null
 var field1_plot: FieldPlot = null
 var field2_plot: FieldPlot = null
 
+# PART 1: Central Registries (authoritative state)
+var farmers: Array = []
+var bakers: Array = []
+var fields: Array = []
+var farmer_counter: int = 1  # Track next ID for naming
+var baker_counter: int = 1
+var field_counter: int = 1
+
+# PART 5: AdminMenu reference
+var admin_menu = null
+var admin_menu_button: Button = null  # On-screen fallback button
+var placement_controller: PlacementController = null
+
+# PART 1: PackedScene references for spawning
+@export var FarmerScene: PackedScene
+@export var BakerScene: PackedScene
+@export var FieldScene: PackedScene
+@export var AdminMenuScene: PackedScene
+
 # Household management
 @export var HouseholdScene: PackedScene
 var households: Array = []
 var market_node: Node2D = null
 var event_bus: EventBus = null
 var economy_config: Dictionary = {}
+var last_spawn_day: int = -999  # Track last spawn day to enforce 1 spawn/day cap
 
 # UI Labels
 var farmer_money_label: Label
@@ -179,6 +199,22 @@ func _ready() -> void:
 	# Bind prosperity meter references
 	prosperity_meter.bind_references(bus, market, households)
 	
+	# PART 1: Initialize central registries from existing agents
+	_initialize_registries()
+	
+	# PART 5: Initialize PlacementController
+	_initialize_placement_controller()
+	
+	# PART 5: Initialize AdminMenu
+	_initialize_admin_menu()
+	
+	# Ensure we receive input events
+	set_process_input(true)
+	set_process_unhandled_input(true)
+	
+	# Add on-screen Admin button
+	_create_admin_button()
+	
 	# Get UI label references
 	get_ui_labels()
 	
@@ -222,8 +258,16 @@ func _on_tick(tick: int) -> void:
 		
 		# Check if we should spawn a new household
 		if prosperity_meter.should_spawn_household(calendar.day_index):
-			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
-			spawn_household_at(spawn_pos)
+			# POPULATION GROWTH FRICTION: Only spawn if we haven't already spawned today
+			if calendar.day_index != last_spawn_day:
+				var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
+				spawn_household_at(spawn_pos)
+				last_spawn_day = calendar.day_index
+				prosperity_meter.record_spawn(calendar.day_index)
+			else:
+				# Log once when blocked (only if we haven't logged yet this day)
+				if event_bus:
+					event_bus.log("POP GROWTH: blocked (already spawned today)")
 	
 	# Run audit checks
 	audit.audit(farmer, baker, market, bus, tick)
@@ -273,6 +317,13 @@ func _resolve_household_scene() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Direct key detection for AdminMenu toggle (F1 primary, F2 fallback)
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F1 or event.keycode == KEY_F2:
+			_toggle_admin_menu()
+			get_viewport().set_input_as_handled()
+			return
+	
 	if clock == null:
 		return
 	if event.is_action_pressed("speed_up"):
@@ -281,6 +332,35 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("speed_down"):
 		clock.decrease_speed()
 		get_viewport().set_input_as_handled()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	"""Fallback input handler in case _input doesn't catch the key."""
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F1 or event.keycode == KEY_F2:
+			_toggle_admin_menu()
+			get_viewport().set_input_as_handled()
+
+
+func _toggle_admin_menu() -> void:
+	"""Toggle AdminMenu visibility with proper null checks and logging."""
+	if admin_menu == null:
+		if event_bus:
+			event_bus.log("UI ERROR: AdminMenu is null, cannot toggle")
+		else:
+			push_error("UI ERROR: AdminMenu is null")
+		return
+	
+	if admin_menu.visible:
+		admin_menu.hide()
+		if event_bus:
+			event_bus.log("UI: AdminMenu closed")
+	else:
+		admin_menu.show()
+		if admin_menu.has_method("refresh"):
+			admin_menu.refresh()
+		if event_bus:
+			event_bus.log("UI: AdminMenu opened")
 
 
 func _on_speed_changed(new_speed: float) -> void:
@@ -631,3 +711,354 @@ func _on_household_died(household: HouseholdAgent) -> void:
 	household.remove_from_group("agents")
 	
 	# household will queue_free() itself, no need to call it here
+
+
+# ====================================================================
+# PART 1: CENTRAL REGISTRIES AND INITIALIZATION
+# ====================================================================
+
+func _initialize_registries() -> void:
+	"""Populate registries from existing scene nodes and groups."""
+	# Add existing farmer
+	if farmer:
+		farmers.append(farmer)
+		farmer.add_to_group("farmers")
+		farmer.name = "Farmer_1"
+		farmer_counter = 2
+	
+	# Add existing baker
+	if baker:
+		bakers.append(baker)
+		baker.add_to_group("bakers")
+		baker.name = "Baker_1"
+		baker_counter = 2
+	
+	# Add existing fields
+	if field1_plot:
+		fields.append(field1_plot)
+		field1_plot.add_to_group("fields")
+		if field1_plot.name != "Field_1":
+			field1_plot.name = "Field_1"
+	if field2_plot:
+		fields.append(field2_plot)
+		field2_plot.add_to_group("fields")
+		if field2_plot.name != "Field_2":
+			field2_plot.name = "Field_2"
+	
+	field_counter = 3
+	
+	if event_bus:
+		event_bus.log("REGISTRY: Initialized with %d farmers, %d bakers, %d fields" % [farmers.size(), bakers.size(), fields.size()])
+
+
+func _initialize_placement_controller() -> void:
+	"""PART 6: Initialize PlacementController for click-to-place spawning."""
+	placement_controller = PlacementController.new()
+	placement_controller.name = "PlacementController"
+	add_child(placement_controller)
+	placement_controller.set_controller(self)
+	
+	if event_bus:
+		event_bus.log("UI: PlacementController initialized")
+
+
+func _initialize_admin_menu() -> void:
+	"""PART 5: Initialize AdminMenu UI with robust error handling."""
+	if AdminMenuScene:
+		admin_menu = AdminMenuScene.instantiate()
+		if admin_menu:
+			add_child(admin_menu)
+			admin_menu.visible = false
+			admin_menu.set_controller(self)
+			if placement_controller:
+				admin_menu.set_placement_controller(placement_controller)
+				placement_controller.set_admin_menu(admin_menu)
+			if event_bus:
+				event_bus.log("UI: AdminMenu instantiated (press F1 or F2 to open)")
+		else:
+			if event_bus:
+				event_bus.log("UI ERROR: AdminMenuScene failed to instantiate")
+			else:
+				push_error("UI ERROR: AdminMenuScene failed to instantiate")
+	else:
+		# Try to load directly if not set in export
+		var menu_path = "res://scenes/ui/AdminMenu.tscn"
+		if ResourceLoader.exists(menu_path):
+			var scene = load(menu_path)
+			if scene:
+				admin_menu = scene.instantiate()
+				if admin_menu:
+					add_child(admin_menu)
+					admin_menu.visible = false
+					admin_menu.set_controller(self)
+					if placement_controller:
+						admin_menu.set_placement_controller(placement_controller)
+						placement_controller.set_admin_menu(admin_menu)
+					if event_bus:
+						event_bus.log("UI: AdminMenu loaded from %s (press F1 or F2 to open)" % menu_path)
+				else:
+					if event_bus:
+						event_bus.log("UI ERROR: AdminMenu scene instantiation failed")
+					else:
+						push_error("UI ERROR: AdminMenu scene instantiation failed")
+			else:
+				if event_bus:
+					event_bus.log("UI ERROR: Failed to load %s" % menu_path)
+				else:
+					push_error("UI ERROR: Failed to load %s" % menu_path)
+		else:
+			if event_bus:
+				event_bus.log("UI ERROR: AdminMenu scene not found at %s" % menu_path)
+			else:
+				push_error("UI ERROR: AdminMenu scene not found at %s" % menu_path)
+
+
+func _create_admin_button() -> void:
+	"""Create on-screen Admin button as fallback for opening menu."""
+	# Find the UI CanvasLayer
+	var ui_layer = get_node_or_null("UI")
+	if ui_layer == null:
+		if event_bus:
+			event_bus.log("UI ERROR: Cannot find UI CanvasLayer for admin button")
+		return
+	
+	# Create button
+	admin_menu_button = Button.new()
+	admin_menu_button.text = "Admin"
+	admin_menu_button.position = Vector2(10, 10)
+	admin_menu_button.custom_minimum_size = Vector2(80, 30)
+	admin_menu_button.pressed.connect(_toggle_admin_menu)
+	
+	# Add to UI layer
+	ui_layer.add_child(admin_menu_button)
+	
+	if event_bus:
+		event_bus.log("UI: Admin button created (top-left corner)")
+
+
+
+# ====================================================================
+# PART 2: SPAWN FUNCTIONS (CALLED BY UI)
+# ====================================================================
+
+func spawn_farmer_at(pos: Vector2) -> Farmer:
+	"""Spawn a new farmer from FarmerScene PackedScene."""
+	if FarmerScene == null:
+		if event_bus:
+			event_bus.log("ERROR: Cannot spawn farmer - FarmerScene PackedScene is null. Needs proper .tscn with all components!")
+		push_error("Cannot spawn farmer: FarmerScene is null - requires full scene with components")
+		return null
+	
+	var f := FarmerScene.instantiate() as Farmer
+	if f == null:
+		push_error("FarmerScene.instantiate() returned null")
+		return null
+	
+	# Setup
+	f.name = "Farmer_%d" % farmer_counter
+	farmer_counter += 1
+	f.global_position = pos
+	add_child(f)
+	
+	# Allow _ready() to run
+	await get_tree().process_frame
+	
+	# Wire references
+	f.market = market
+	f.event_bus = event_bus
+	
+	# Wire HungerNeed component
+	var f_hunger = f.get_node_or_null("HungerNeed") as HungerNeed
+	var f_inv = f.get_node_or_null("Inventory") as Inventory
+	if f_hunger and f_inv:
+		f_hunger.bind(f.name, f_inv, event_bus, calendar)
+	
+	# Wire FoodReserve component
+	var f_food_reserve = f.get_node_or_null("FoodReserve") as FoodReserve
+	if f_food_reserve and f_inv and f.get_node_or_null("HungerNeed") and f.get_node_or_null("Wallet"):
+		f_food_reserve.bind(f_inv, f.get_node("HungerNeed"), market, f.get_node("Wallet"), event_bus, f.name)
+	
+	# Create a house node for this farmer
+	var house = Node2D.new()
+	house.name = f.name + "_House"
+	house.global_position = pos
+	add_child(house)
+	
+	# Set route nodes (no fields assigned yet)
+	f.set_route_nodes(house, null, null, market_node)
+	
+	# Register
+	farmers.append(f)
+	f.add_to_group("farmers")
+	f.add_to_group("agents")
+	
+	if event_bus:
+		event_bus.log("SPAWN: %s at (%.0f,%.0f)" % [f.name, pos.x, pos.y])
+	
+	return f
+
+
+func spawn_baker_at(pos: Vector2) -> Baker:
+	"""Spawn a new baker from BakerScene PackedScene."""
+	if BakerScene == null:
+		if event_bus:
+			event_bus.log("ERROR: Cannot spawn baker - BakerScene PackedScene is null. Needs proper .tscn with all components!")
+		push_error("Cannot spawn baker: BakerScene is null - requires full scene with components")
+		return null
+	
+	var b := BakerScene.instantiate() as Baker
+	if b == null:
+		push_error("BakerScene.instantiate() returned null")
+		return null
+	
+	# Setup
+	b.name = "Baker_%d" % baker_counter
+	baker_counter += 1
+	b.global_position = pos
+	add_child(b)
+	
+	# Allow _ready() to run
+	await get_tree().process_frame
+	
+	# Wire references
+	b.market = market
+	b.event_bus = event_bus
+	
+	# Wire HungerNeed component
+	var b_hunger = b.get_node_or_null("HungerNeed") as HungerNeed
+	var b_inv = b.get_node_or_null("Inventory") as Inventory
+	if b_hunger and b_inv:
+		b_hunger.bind(b.name, b_inv, event_bus, calendar)
+	
+	# Wire FoodReserve component
+	var b_food_reserve = b.get_node_or_null("FoodReserve") as FoodReserve
+	if b_food_reserve and b_inv and b.get_node_or_null("HungerNeed") and b.get_node_or_null("Wallet"):
+		b_food_reserve.bind(b_inv, b.get_node("HungerNeed"), market, b.get_node("Wallet"), event_bus, b.name)
+	
+	# Create a bakery node for this baker
+	var bakery = Node2D.new()
+	bakery.name = b.name + "_Bakery"
+	bakery.global_position = pos
+	add_child(bakery)
+	
+	# Set locations
+	b.set_locations(bakery, market_node)
+	
+	# Register
+	bakers.append(b)
+	b.add_to_group("bakers")
+	b.add_to_group("agents")
+	
+	if event_bus:
+		event_bus.log("SPAWN: %s at (%.0f,%.0f)" % [b.name, pos.x, pos.y])
+	
+	return b
+
+
+func spawn_field_at(pos: Vector2) -> FieldPlot:
+	"""Spawn a new field from FieldScene PackedScene."""
+	if event_bus:
+		event_bus.log("DEBUG: spawn_field_at called with pos=(%.0f,%.0f), FieldScene=%s" % [pos.x, pos.y, "null" if FieldScene == null else "set"])
+	
+	if FieldScene == null:
+		# Fallback: Create field programmatically if PackedScene not set
+		if event_bus:
+			event_bus.log("INFO: FieldScene not set, creating field programmatically")
+		
+		var field = FieldPlot.new()
+		field.name = "Field_%d" % field_counter
+		field_counter += 1
+		field.global_position = pos
+		add_child(field)
+		
+		# Register
+		fields.append(field)
+		field.add_to_group("fields")
+		
+		if event_bus:
+			event_bus.log("SPAWN: %s at (%.0f,%.0f)" % [field.name, pos.x, pos.y])
+		
+		return field
+	
+	# Use PackedScene if available
+	var field_instance := FieldScene.instantiate() as FieldPlot
+	if field_instance == null:
+		push_error("FieldScene.instantiate() returned null")
+		return null
+	
+	# Setup
+	field_instance.name = "Field_%d" % field_counter
+	field_counter += 1
+	field_instance.global_position = pos
+	add_child(field_instance)
+	
+	# Allow _ready() to run
+	await get_tree().process_frame
+	
+	# Register
+	fields.append(field_instance)
+	field_instance.add_to_group("fields")
+	
+	if event_bus:
+		event_bus.log("SPAWN: %s at (%.0f,%.0f)" % [field_instance.name, pos.x, pos.y])
+	
+	return field_instance
+
+
+# ====================================================================
+# PART 3: FIELD-FARMER ASSIGNMENT API (CALLED BY UI)
+# ====================================================================
+
+func assign_field_to_farmer(field: FieldPlot, farmer_node: Farmer) -> void:
+	"""Assign a field to a farmer (bidirectional update)."""
+	if field == null or farmer_node == null:
+		push_error("assign_field_to_farmer: null parameter")
+		return
+	
+	# Use field's assignment function (handles bidirectional update)
+	field.assign_to_farmer(farmer_node)
+	
+	if event_bus:
+		event_bus.log("ASSIGN: %s -> %s" % [field.name, farmer_node.name])
+
+
+func unassign_field(field: FieldPlot) -> void:
+	"""Unassign a field from its current farmer."""
+	if field == null:
+		push_error("unassign_field: null parameter")
+		return
+	
+	var old_farmer = field.assigned_farmer
+	field.unassign_farmer()
+	
+	if event_bus and old_farmer:
+		event_bus.log("UNASSIGN: %s (was %s)" % [field.name, old_farmer.name])
+
+
+func assign_all_unassigned_to_farmer(farmer_node: Farmer) -> void:
+	"""Assign all unassigned fields to a farmer."""
+	if farmer_node == null:
+		push_error("assign_all_unassigned_to_farmer: null farmer")
+		return
+	
+	var count = 0
+	for field in fields:
+		if field.assigned_farmer == null:
+			assign_field_to_farmer(field, farmer_node)
+			count += 1
+	
+	if event_bus:
+		event_bus.log("ASSIGN ALL: %d unassigned fields -> %s" % [count, farmer_node.name])
+
+
+func unassign_all_from_farmer(farmer_node: Farmer) -> void:
+	"""Unassign all fields from a farmer."""
+	if farmer_node == null:
+		push_error("unassign_all_from_farmer: null farmer")
+		return
+	
+	var count = farmer_node.assigned_fields.size()
+	farmer_node.unassign_all_fields()
+	
+	if event_bus:
+		event_bus.log("UNASSIGN ALL: %d fields from %s" % [count, farmer_node.name])

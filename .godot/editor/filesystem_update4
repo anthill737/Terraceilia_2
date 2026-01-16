@@ -1,3 +1,8 @@
 res://scripts/household_agent.gd
 res://scripts/main.gd
-res://scripts/components/hunger_need.gd
+res://scripts/market.gd
+res://scripts/farmer.gd
+res://scripts/ui/admin_menu.gd
+res://scripts/field_plot.gd
+res://scripts/ui/placement_controller.gd
+res://scripts/ui/world_click_catcher.gd

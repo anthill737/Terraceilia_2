@@ -1,0 +1,57 @@
+[gd_scene load_steps=11 format=3 uid="uid://bdjc7h3m4kn6p"]
+
+[ext_resource type="Script" uid="uid://c4es4stvnr225" path="res://scripts/baker.gd" id="1_baker"]
+[ext_resource type="Script" path="res://scripts/components/wallet.gd" id="2_wallet"]
+[ext_resource type="Script" path="res://scripts/components/inventory.gd" id="3_inventory"]
+[ext_resource type="Script" path="res://scripts/components/hunger_need.gd" id="4_hunger"]
+[ext_resource type="Script" path="res://scripts/components/food_stockpile.gd" id="5_stockpile"]
+[ext_resource type="Script" path="res://scripts/components/route_runner.gd" id="6_route"]
+[ext_resource type="Script" path="res://scripts/components/inventory_capacity.gd" id="7_capacity"]
+[ext_resource type="Script" path="res://scripts/components/production_batch.gd" id="8_batch"]
+[ext_resource type="Script" path="res://scripts/components/production_profitability.gd" id="9_profit"]
+[ext_resource type="Script" path="res://scripts/components/margin_compression.gd" id="10_margin"]
+[ext_resource type="Script" path="res://scripts/components/inventory_throttle.gd" id="11_throttle"]
+[ext_resource type="Script" path="res://scripts/components/food_reserve.gd" id="12_reserve"]
+
+[node name="Baker" type="CharacterBody2D"]
+script = ExtResource("1_baker")
+
+[node name="BakerSprite" type="ColorRect" parent="."]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+color = Color(0.8, 0.6, 0.2, 1)
+
+[node name="Wallet" type="Node" parent="."]
+script = ExtResource("2_wallet")
+
+[node name="Inventory" type="Node" parent="."]
+script = ExtResource("3_inventory")
+
+[node name="HungerNeed" type="Node" parent="."]
+script = ExtResource("4_hunger")
+
+[node name="FoodStockpile" type="Node" parent="."]
+script = ExtResource("5_stockpile")
+
+[node name="RouteRunner" type="Node" parent="."]
+script = ExtResource("6_route")
+
+[node name="InventoryCapacity" type="Node" parent="."]
+script = ExtResource("7_capacity")
+
+[node name="ProductionBatch" type="Node" parent="."]
+script = ExtResource("8_batch")
+
+[node name="ProductionProfitability" type="Node" parent="."]
+script = ExtResource("9_profit")
+
+[node name="MarginCompression" type="Node" parent="."]
+script = ExtResource("10_margin")
+
+[node name="InventoryThrottle" type="Node" parent="."]
+script = ExtResource("11_throttle")
+
+[node name="FoodReserve" type="Node" parent="."]
+script = ExtResource("12_reserve")

@@ -71,13 +71,14 @@ const MAX_DAILY_PRICE_CHANGE: float = 0.05  # Max 5% daily price movement cap
 const DECAY_DISABLE_DAYS: int = 10  # Disable decay for first N days
 
 # Producer hysteresis configuration - prevents price drift to floors by gating producer behavior at bands
+# PART B: Wheat hysteresis DISABLED to remove hard scarcity amplifiers
 const PRODUCER_HYSTERESIS_CONFIG: Dictionary = {
 	"wheat": {
-		"enabled": true,
-		"stop_sell_at_or_above_upper_band": true,
-		"resume_sell_at_or_below_lower_band": true,
-		"stop_produce_at_or_above_upper_band": true,
-		"resume_produce_at_or_below_lower_band": true
+		"enabled": false,  # DISABLED: No hard stops for wheat
+		"stop_sell_at_or_above_upper_band": false,
+		"resume_sell_at_or_below_lower_band": false,
+		"stop_produce_at_or_above_upper_band": false,
+		"resume_produce_at_or_below_lower_band": false
 	},
 	"bread": {
 		"enabled": true,
@@ -364,16 +365,18 @@ func get_max_buy_qty(good: String) -> int:
 	var upper_band: float = float(target_inv) * (1.0 + TARGET_BAND_PCT)
 	var inv_float: float = float(current_inv)
 	
-	# PART 1: HARD CUTOFF - When inventory >= upper_band, NO market-directed purchases allowed
-	# This prevents prices from drifting downward due to forced clearing at discount bids
-	if inv_float >= upper_band:
-		# Update tracking flag for logging
-		match good:
-			"wheat":
-				wheat_market_buy_blocked = true
-			"bread":
-				bread_market_buy_blocked = true
+	# PART B: Wheat hard cutoff REMOVED - only block bread above upper_band
+	# Wheat uses continuous smooth mechanisms only (bid multipliers, cap scaling, throttle)
+	if good == "bread" and inv_float >= upper_band:
+		# Update tracking flag for logging (bread only)
+		bread_market_buy_blocked = true
 		return 0
+	
+	# For wheat: no hard cutoff, always allow market clearing subject to smooth bid/cap controls
+	if good == "wheat" and inv_float >= upper_band:
+		# Don't block, but apply strong taper via bid curve and cap scaling
+		# This is handled in get_bid_price() and the remaining calculation below
+		pass
 	
 	return max(0, remaining)
 
@@ -895,10 +898,7 @@ func on_day_changed(day: int) -> void:
 	wheat_prev = wheat
 	bread_prev = bread
 	
-	# PART 4: Log market-side hysteresis blocking before reset
-	if wheat_market_buy_blocked and event_bus:
-		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, upper_band])
+	# PART B: Only log bread blocking, wheat hard controls removed
 	if bread_market_buy_blocked and event_bus:
 		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, upper_band])

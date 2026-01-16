@@ -208,10 +208,10 @@ func _on_tick(tick: int) -> void:
 	
 	# Update prosperity meter
 	if prosperity_meter:
-		prosperity_meter.update_prosperity(calendar.current_day)
+		prosperity_meter.update_prosperity(calendar.day_index)
 		
 		# Check if we should spawn a new household
-		if prosperity_meter.should_spawn_household(calendar.current_day):
+		if prosperity_meter.should_spawn_household(calendar.day_index):
 			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
 			spawn_household_at(spawn_pos)
 	
@@ -551,7 +551,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 	
 	if event_bus:
 		event_bus.log("Day %d: Spawned %s at (%d, %d) - prosperity: %.2f" % [
-			calendar.current_day, h.name, pos.x, pos.y, prosperity_meter.prosperity_score
+			calendar.day_index, h.name, pos.x, pos.y, prosperity_meter.prosperity_score
 		])
 	
 	return h

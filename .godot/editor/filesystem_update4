@@ -1,1 +1,16 @@
+res://scripts/field_plot.gd
+res://scripts/main.gd
 res://scripts/market.gd
+res://scripts/components/food_stockpile.gd
+res://scripts/prosperity_meter.gd
+res://scripts/household_agent.gd
+res://scripts/baker.gd
+res://scripts/economy_audit.gd
+res://scripts/market_shocks.gd
+res://scripts/simulation_clock.gd
+res://scripts/components/food_reserve.gd
+res://scripts/components/inventory_throttle.gd
+res://scripts/components/margin_compression.gd
+res://scripts/components/production_batch.gd
+res://scripts/components/production_profitability.gd
+res://scripts/components/route_runner.gd

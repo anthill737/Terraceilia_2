@@ -417,6 +417,43 @@ text = "Wheat Price: $1.00 (floor $0.50)"
 layout_mode = 2
 text = "Bread Price: $2.50 (floor $1.00)"
 
+[node name="HSeparator_Prosperity" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
+layout_mode = 2
+
+[node name="ProsperityCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
+layout_mode = 2
+
+[node name="ProsperityVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard"]
+layout_mode = 2
+
+[node name="ProsperityTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Prosperity System"
+
+[node name="ProsperityScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Prosperity: 0.50"
+
+[node name="WealthScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Wealth: 0.00"
+
+[node name="FoodScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Food: 0.00"
+
+[node name="StarvationScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Starvation: 0.00"
+
+[node name="TradeScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Trade: 0.00"
+
+[node name="PopulationInfo" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
+layout_mode = 2
+text = "Population: 1"
+
 [node name="HSeparator4" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox"]
 layout_mode = 2
 

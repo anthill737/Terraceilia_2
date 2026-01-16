@@ -8,10 +8,17 @@ var clock: SimulationClock = null
 var bus: EventBus = null
 var audit: EconomyAudit = null
 var calendar: Calendar = null
+var prosperity_meter: ProsperityMeter = null
 
 # Field plots
 var field1_plot: FieldPlot = null
 var field2_plot: FieldPlot = null
+
+# Household management
+@export var HouseholdScene: PackedScene
+var households: Array = []
+var market_node: Node2D = null
+var event_bus: EventBus = null
 
 # UI Labels
 var farmer_money_label: Label
@@ -50,6 +57,12 @@ var event_log: RichTextLabel
 var export_log_button: Button
 var jump_to_bottom_button: Button
 var sim_speed_label: Label
+var prosperity_score_label: Label
+var wealth_score_label: Label
+var food_score_label: Label
+var starvation_score_label: Label
+var trade_score_label: Label
+var population_info_label: Label
 
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
@@ -79,11 +92,18 @@ func _ready() -> void:
 	calendar.name = "Calendar"
 	add_child(calendar)
 	
+	prosperity_meter = ProsperityMeter.new()
+	prosperity_meter.name = "ProsperityMeter"
+	add_child(prosperity_meter)
+	
+	# Store EventBus reference for spawn function
+	event_bus = bus
+	
 	# Get references to scene nodes
 	var house = get_node("House")
 	var field1_node = get_node("Field1")
 	var field2_node = get_node("Field2")
-	var market_node = get_node("MarketNode")
+	market_node = get_node("MarketNode")
 	var bakery = get_node("Bakery")
 	var household_home = get_node("HouseholdHome")
 	farmer = get_node("Farmer")
@@ -143,6 +163,9 @@ func _ready() -> void:
 	if household_agent and household_home and market_node:
 		household_agent.set_locations(household_home, market_node)
 	
+	# Add baseline household to households array for prosperity tracking
+	households.append(household_agent)
+	
 	# Get UI label references
 	get_ui_labels()
 	
@@ -167,15 +190,28 @@ func _on_tick(tick: int) -> void:
 	if field2_plot:
 		field2_plot.tick()
 	
-	# Update tick for all agents
+	# Update tick for all agents (including spawned households)
 	if market:
 		market.set_tick(tick)
 	if farmer:
 		farmer.set_tick(tick)
 	if baker:
 		baker.set_tick(tick)
-	if household_agent:
-		household_agent.set_tick(tick)
+	
+	# Tick all households
+	for h in households:
+		if h and is_instance_valid(h):
+			h.set_tick(tick)
+	
+	# Update prosperity meter
+	if prosperity_meter:
+		var agents = [farmer, baker]
+		prosperity_meter.update_prosperity(market, agents, households, calendar.current_day)
+		
+		# Check if we should spawn a new household
+		if prosperity_meter.should_spawn_household(calendar.current_day):
+			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
+			spawn_household_at(spawn_pos)
 	
 	# Run audit checks
 	audit.audit(farmer, baker, market, bus, tick)
@@ -348,6 +384,17 @@ func get_ui_labels() -> void:
 			sim_speed_label = top_bar.get_node("SimSpeedLabel")
 			sim_speed_label.text = "Speed: 1.0x"
 	
+	# Get prosperity panel labels if they exist
+	if has_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard"):
+		var prosperity_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox")
+		if prosperity_card:
+			prosperity_score_label = prosperity_card.get_node_or_null("ProsperityScore")
+			wealth_score_label = prosperity_card.get_node_or_null("WealthScore")
+			food_score_label = prosperity_card.get_node_or_null("FoodScore")
+			starvation_score_label = prosperity_card.get_node_or_null("StarvationScore")
+			trade_score_label = prosperity_card.get_node_or_null("TradeScore")
+			population_info_label = prosperity_card.get_node_or_null("PopulationInfo")
+	
 	# Connect scroll detection for sticky auto-scroll
 	if event_log:
 		# RichTextLabel uses a ScrollBar child for scrolling
@@ -442,3 +489,67 @@ func update_ui() -> void:
 		if household_cap.is_full():
 			household_inv_text += " (FULL)"
 		household_inventory_label.text = household_inv_text
+	
+	# Update prosperity UI
+	if prosperity_meter:
+		if prosperity_score_label:
+			prosperity_score_label.text = "Prosperity: %.2f" % prosperity_meter.prosperity_score
+		if wealth_score_label:
+			var wealth = prosperity_meter.prosperity_inputs.get("wealth_health", 0.0)
+			wealth_score_label.text = "Wealth: %.2f" % wealth
+		if food_score_label:
+			var food = prosperity_meter.prosperity_inputs.get("food_security", 0.0)
+			food_score_label.text = "Food: %.2f" % food
+		if starvation_score_label:
+			var starvation = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
+			starvation_score_label.text = "Starvation: %.2f" % starvation
+		if trade_score_label:
+			var trade = prosperity_meter.prosperity_inputs.get("trade_activity", 0.0)
+			trade_score_label.text = "Trade: %.2f" % trade
+		if population_info_label:
+			population_info_label.text = "Population: %d" % households.size()
+
+
+func spawn_household_at(pos: Vector2) -> Node:
+	if HouseholdScene == null:
+		if event_bus: event_bus.log("ERROR: HouseholdScene not assigned; cannot spawn household.")
+		return null
+
+	var h := HouseholdScene.instantiate()
+	if h == null:
+		if event_bus: event_bus.log("ERROR: HouseholdScene.instantiate() failed.")
+		return null
+
+	h.name = "Household_%d" % (households.size() + 1)
+	h.global_position = pos
+	add_child(h)
+
+	# Allow _ready() to run so child nodes/components exist
+	await get_tree().process_frame
+
+	# Wire required references exactly like the original household uses
+	h.market = market
+	h.event_bus = event_bus
+	
+	# Create a home node for this household at their spawn position
+	var home = Node2D.new()
+	home.name = h.name + "_Home"
+	home.global_position = pos
+	add_child(home)
+	
+	h.set_locations(home, market_node)
+
+	# Register in households array
+	households.append(h)
+	
+	# Add to groups
+	if h.has_method("add_to_group"):
+		h.add_to_group("households")
+		h.add_to_group("agents")
+	
+	if event_bus:
+		event_bus.log("Day %d: Spawned %s at (%d, %d) - prosperity: %.2f" % [
+			calendar.current_day, h.name, pos.x, pos.y, prosperity_meter.prosperity_score
+		])
+	
+	return h

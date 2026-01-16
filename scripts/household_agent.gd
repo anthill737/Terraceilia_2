@@ -37,25 +37,63 @@ var bread_consumed: int = 0
 # Pending target for after waiting
 var pending_target: Node2D = null
 
+# Validation flag - only log missing nodes once
+var _validation_logged: bool = false
+
 
 func _ready() -> void:
+	# Validate critical child nodes exist
+	if not _validation_logged:
+		_validate_components()
+	
 	# Initialize wallet and inventory
-	wallet.money = 5000.0
-	inv.items = {"bread": 0}
+	if wallet:
+		wallet.money = 5000.0
+	if inv:
+		inv.items = {"bread": 0}
 	
 	# Bind capacity to inventory
-	cap.bind(inv)
-	inv.bind_capacity(cap)
+	if cap and inv:
+		cap.bind(inv)
+		inv.bind_capacity(cap)
 	
 	# Bind food stockpile
-	food_stockpile.bind(inv)
+	if food_stockpile and inv:
+		food_stockpile.bind(inv)
 	
 	# Bind RouteRunner
-	route.bind(self)
-	route.speed = SPEED
-	route.arrival_distance = ARRIVAL_DISTANCE
-	route.arrived.connect(_on_arrived)
-	route.wait_finished.connect(_on_wait_finished)
+	if route:
+		route.bind(self)
+		route.speed = SPEED
+		route.arrival_distance = ARRIVAL_DISTANCE
+		route.arrived.connect(_on_arrived)
+		route.wait_finished.connect(_on_wait_finished)
+
+
+func _validate_components() -> void:
+	"""Validate all critical child nodes exist. Log once per instance."""
+	var missing: Array[String] = []
+	
+	if not wallet:
+		missing.append("Wallet")
+	if not inv:
+		missing.append("Inventory")
+	if not hunger:
+		missing.append("HungerNeed")
+	if not food_stockpile:
+		missing.append("FoodStockpile")
+	if not route:
+		missing.append("RouteRunner")
+	if not cap:
+		missing.append("InventoryCapacity")
+	if not food_reserve:
+		missing.append("FoodReserve")
+	
+	if missing.size() > 0:
+		push_error("%s: Missing critical child nodes: %s" % [get_name(), ", ".join(missing)])
+		_validation_logged = true
+	else:
+		_validation_logged = true
 
 
 func _on_ate_meal(qty: int) -> void:

@@ -9,36 +9,26 @@ class_name ProsperityMeter
 ## - Market activity (trade volume/value)
 ## All weights and thresholds are config-driven.
 
-# Configuration - Weights (must sum to 1.0 for proper normalization)
-const WEALTH_WEIGHT: float = 0.25
-const FOOD_WEIGHT: float = 0.30
-const STARVATION_WEIGHT: float = 0.25  # Applied negatively
-const TRADE_WEIGHT: float = 0.20
-
-# Wealth configuration
-const WEALTH_PER_CAPITA: bool = true  # If true, divide by household count
-const WEALTH_TARGET: float = 100.0  # Normalization target (per capita if enabled)
-
-# Food security configuration
-const FOOD_BREAD_TARGET_WEIGHT: float = 0.6  # How much bread inventory matters
-const FOOD_RESERVE_COMPLIANCE_WEIGHT: float = 0.4  # How much reserve compliance matters
-const RESERVE_TARGET_THRESHOLD: float = 0.8  # Agent meets reserve if >= 80% of target
-
-# Starvation configuration
-const STARVATION_WINDOW_DAYS: int = 7  # Track events in last N days
-const HUNGER_SAFE_RATIO: float = 0.5  # Below 50% hunger = safe
-
-# Trade activity configuration
-const TRADE_WINDOW_DAYS: int = 7  # Track trade activity over N days
-const TRADE_VALUE_TARGET: float = 100.0  # Normalization target for daily trade value
-
-# Growth trigger configuration
-const PROSPERITY_THRESHOLD_TO_GROW: float = 0.70  # Spawn when above this
-const PROSPERITY_THRESHOLD_TO_PAUSE: float = 0.60  # Hysteresis to prevent oscillation
-const GROWTH_COOLDOWN_DAYS: int = 1  # Cooldown after spawn (0 = none, 1 = recommended)
-
-# Smoothing configuration
-const SMOOTHING_STRENGTH: float = 0.3  # EMA smoothing (0 = no smoothing, 1 = full smoothing)
+# Configuration - loaded from config/economy_config.json with fallback defaults
+var config: Dictionary = {}
+var WEALTH_WEIGHT: float = 0.25
+var FOOD_WEIGHT: float = 0.30
+var STARVATION_WEIGHT: float = 0.25
+var TRADE_WEIGHT: float = 0.20
+var WEALTH_PER_CAPITA: bool = true
+var WEALTH_TARGET: float = 100.0
+var FOOD_BREAD_TARGET_WEIGHT: float = 0.6
+var FOOD_RESERVE_COMPLIANCE_WEIGHT: float = 0.4
+var RESERVE_TARGET_THRESHOLD: float = 0.8
+var STARVATION_WINDOW_DAYS: int = 7
+var HUNGER_SAFE_RATIO: float = 0.5
+var TRADE_WINDOW_DAYS: int = 7
+var TRADE_VALUE_TARGET: float = 100.0
+var PROSPERITY_THRESHOLD_TO_GROW: float = 0.70
+var PROSPERITY_THRESHOLD_TO_PAUSE: float = 0.60
+var GROWTH_COOLDOWN_DAYS: int = 1
+var SMOOTHING_STRENGTH: float = 0.3
+var LOG_DAILY: bool = true
 
 # State
 var prosperity_score: float = 0.5  # Current smoothed prosperity (0-1)
@@ -52,6 +42,48 @@ var trade_values: Array = []  # Ring buffer of daily trade values
 var event_bus = null
 var market = null
 var households: Array = []  # All active households
+
+
+func _ready() -> void:
+	_load_config()
+
+
+func _load_config() -> void:
+	"""Load prosperity configuration from JSON file with fallback defaults."""
+	var config_path = "res://config/economy_config.json"
+	if FileAccess.file_exists(config_path):
+		var file = FileAccess.open(config_path, FileAccess.READ)
+		if file:
+			var json_text = file.get_as_text()
+			file.close()
+			var json = JSON.new()
+			var parse_result = json.parse(json_text)
+			if parse_result == OK:
+				config = json.data
+				var p = config.get("prosperity", {})
+				WEALTH_WEIGHT = p.get("weights", {}).get("wealth", WEALTH_WEIGHT)
+				FOOD_WEIGHT = p.get("weights", {}).get("food", FOOD_WEIGHT)
+				STARVATION_WEIGHT = p.get("weights", {}).get("starvation", STARVATION_WEIGHT)
+				TRADE_WEIGHT = p.get("weights", {}).get("trade", TRADE_WEIGHT)
+				WEALTH_TARGET = p.get("wealth_target", WEALTH_TARGET)
+				WEALTH_PER_CAPITA = p.get("wealth_per_capita", WEALTH_PER_CAPITA)
+				FOOD_BREAD_TARGET_WEIGHT = p.get("food_bread_target_weight", FOOD_BREAD_TARGET_WEIGHT)
+				FOOD_RESERVE_COMPLIANCE_WEIGHT = p.get("food_reserve_compliance_weight", FOOD_RESERVE_COMPLIANCE_WEIGHT)
+				RESERVE_TARGET_THRESHOLD = p.get("reserve_target_threshold", RESERVE_TARGET_THRESHOLD)
+				STARVATION_WINDOW_DAYS = p.get("starvation_window_days", STARVATION_WINDOW_DAYS)
+				HUNGER_SAFE_RATIO = p.get("hunger_safe_ratio", HUNGER_SAFE_RATIO)
+				TRADE_WINDOW_DAYS = p.get("trade_window_days", TRADE_WINDOW_DAYS)
+				TRADE_VALUE_TARGET = p.get("trade_value_target", TRADE_VALUE_TARGET)
+				PROSPERITY_THRESHOLD_TO_GROW = p.get("growth_threshold", PROSPERITY_THRESHOLD_TO_GROW)
+				PROSPERITY_THRESHOLD_TO_PAUSE = p.get("pause_threshold", PROSPERITY_THRESHOLD_TO_PAUSE)
+				GROWTH_COOLDOWN_DAYS = p.get("growth_cooldown_days", GROWTH_COOLDOWN_DAYS)
+				SMOOTHING_STRENGTH = p.get("smoothing", SMOOTHING_STRENGTH)
+				LOG_DAILY = p.get("log_daily", LOG_DAILY)
+				print("ProsperityMeter: Loaded config from ", config_path)
+			else:
+				push_error("ProsperityMeter: Failed to parse JSON config: " + json.get_error_message())
+	else:
+		print("ProsperityMeter: Config not found at ", config_path, " - using defaults")
 
 
 func bind_references(bus, mkt, household_list: Array) -> void:
@@ -95,18 +127,18 @@ func update_prosperity(day: int) -> void:
 	
 	# Store breakdown for logging
 	prosperity_inputs = {
-		"wealth": wealth_score,
-		"food": food_score,
-		"starvation": starvation_score,
-		"trade": trade_score,
+		"wealth_health": wealth_score,
+		"food_security": food_score,
+		"starvation_pressure": starvation_score,
+		"trade_activity": trade_score,
 		"raw": prosperity_raw,
 		"smoothed": prosperity_score
 	}
 	
-	# Log prosperity summary
-	if event_bus:
-		event_bus.log("Day %d: Prosperity=%.2f (wealth=%.2f food=%.2f hunger=%.2f starvation=%.2f trade=%.2f)" % [
-			day, prosperity_score, wealth_score, food_score, starvation_score, starvation_score, trade_score
+	# Log prosperity summary once per day if enabled
+	if LOG_DAILY and event_bus:
+		event_bus.log("Day %d: Prosperity=%.3f (wealth=%.2f food=%.2f starvation=%.2f trade=%.2f)" % [
+			day, prosperity_score, wealth_score, food_score, starvation_score, trade_score
 		])
 
 

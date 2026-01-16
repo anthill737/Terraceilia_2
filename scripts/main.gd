@@ -19,6 +19,7 @@ var field2_plot: FieldPlot = null
 var households: Array = []
 var market_node: Node2D = null
 var event_bus: EventBus = null
+var economy_config: Dictionary = {}
 
 # UI Labels
 var farmer_money_label: Label
@@ -72,6 +73,9 @@ const SCROLL_THRESHOLD: int = 50  # Pixels from bottom to consider "at bottom"
 
 
 func _ready() -> void:
+	# Load economy config
+	_load_economy_config()
+	
 	# Create simulation systems
 	clock = SimulationClock.new()
 	clock.name = "SimulationClock"
@@ -217,6 +221,25 @@ func _on_tick(tick: int) -> void:
 	
 	# Run audit checks
 	audit.audit(farmer, baker, market, bus, tick)
+
+
+func _load_economy_config() -> void:
+	"""Load economy configuration from JSON file."""
+	var config_path = "res://config/economy_config.json"
+	if FileAccess.file_exists(config_path):
+		var file = FileAccess.open(config_path, FileAccess.READ)
+		if file:
+			var json_text = file.get_as_text()
+			file.close()
+			var json = JSON.new()
+			var parse_result = json.parse(json_text)
+			if parse_result == OK:
+				economy_config = json.data
+				print("Main: Loaded economy config from ", config_path)
+			else:
+				push_error("Main: Failed to parse economy config: " + json.get_error_message())
+	else:
+		print("Main: Economy config not found at ", config_path, " - using defaults")
 
 
 func _input(event: InputEvent) -> void:
@@ -513,23 +536,46 @@ func update_ui() -> void:
 
 
 func spawn_household_at(pos: Vector2) -> Node:
+	"""Spawn a new household from the HouseholdScene PackedScene."""
+	
+	# Ensure HouseholdScene is assigned (export var or fallback load)
 	if HouseholdScene == null:
-		if event_bus: event_bus.log("ERROR: HouseholdScene not assigned; cannot spawn household.")
-		return null
-
+		var pop_config = economy_config.get("population_growth", {})
+		var scene_path = pop_config.get("household_scene_path", "res://scenes/Household.tscn")
+		
+		if event_bus:
+			event_bus.log("WARNING: HouseholdScene not assigned in Inspector. Attempting to load from config: %s" % scene_path)
+		
+		if FileAccess.file_exists(scene_path):
+			HouseholdScene = load(scene_path) as PackedScene
+			if HouseholdScene:
+				if event_bus:
+					event_bus.log("SUCCESS: Loaded HouseholdScene from %s" % scene_path)
+			else:
+				if event_bus:
+					event_bus.log("ERROR: Failed to load HouseholdScene from %s" % scene_path)
+				return null
+		else:
+			if event_bus:
+				event_bus.log("ERROR: HouseholdScene file not found: %s" % scene_path)
+			return null
+	
+	# Instantiate household
 	var h := HouseholdScene.instantiate()
 	if h == null:
-		if event_bus: event_bus.log("ERROR: HouseholdScene.instantiate() failed.")
+		if event_bus:
+			event_bus.log("ERROR: HouseholdScene.instantiate() returned null")
 		return null
-
+	
+	# Setup household
 	h.name = "Household_%d" % (households.size() + 1)
 	h.global_position = pos
 	add_child(h)
-
+	
 	# Allow _ready() to run so child nodes/components exist
 	await get_tree().process_frame
-
-	# Wire required references exactly like the original household uses
+	
+	# Wire required references
 	h.market = market
 	h.event_bus = event_bus
 	
@@ -540,17 +586,16 @@ func spawn_household_at(pos: Vector2) -> Node:
 	add_child(home)
 	
 	h.set_locations(home, market_node)
-
+	
 	# Register in households array
 	households.append(h)
 	
 	# Add to groups
-	if h.has_method("add_to_group"):
-		h.add_to_group("households")
-		h.add_to_group("agents")
+	h.add_to_group("households")
+	h.add_to_group("agents")
 	
 	if event_bus:
-		event_bus.log("Day %d: Spawned %s at (%d, %d) - prosperity: %.2f" % [
+		event_bus.log("Day %d: Spawned %s at (%.0f, %.0f) - prosperity: %.3f" % [
 			calendar.day_index, h.name, pos.x, pos.y, prosperity_meter.prosperity_score
 		])
 	

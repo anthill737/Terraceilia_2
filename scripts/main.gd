@@ -166,6 +166,9 @@ func _ready() -> void:
 	# Add baseline household to households array for prosperity tracking
 	households.append(household_agent)
 	
+	# Bind prosperity meter references
+	prosperity_meter.bind_references(bus, market, households)
+	
 	# Get UI label references
 	get_ui_labels()
 	
@@ -205,8 +208,7 @@ func _on_tick(tick: int) -> void:
 	
 	# Update prosperity meter
 	if prosperity_meter:
-		var agents = [farmer, baker]
-		prosperity_meter.update_prosperity(market, agents, households, calendar.current_day)
+		prosperity_meter.update_prosperity(calendar.current_day)
 		
 		# Check if we should spawn a new household
 		if prosperity_meter.should_spawn_household(calendar.current_day):

@@ -1,0 +1,2 @@
+ERROR: Error opening file 'C:/Users/AnthonyHill/OneDrive - Visionary Wealth Advisors, LLC/Documents/Personal/SCRIPTS/Terraceilia/icon.svg'.
+   at: load_image (core/io/image_loader.cpp:89)

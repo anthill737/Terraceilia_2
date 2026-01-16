@@ -76,6 +76,9 @@ func _ready() -> void:
 	# Load economy config
 	_load_economy_config()
 	
+	# Resolve HouseholdScene (eliminate Inspector dependency)
+	_resolve_household_scene()
+	
 	# Create simulation systems
 	clock = SimulationClock.new()
 	clock.name = "SimulationClock"
@@ -170,6 +173,9 @@ func _ready() -> void:
 	# Add baseline household to households array for prosperity tracking
 	households.append(household_agent)
 	
+	# Connect death signal for baseline household
+	household_agent.household_died.connect(_on_household_died)
+	
 	# Bind prosperity meter references
 	prosperity_meter.bind_references(bus, market, households)
 	
@@ -240,6 +246,30 @@ func _load_economy_config() -> void:
 				push_error("Main: Failed to parse economy config: " + json.get_error_message())
 	else:
 		print("Main: Economy config not found at ", config_path, " - using defaults")
+
+
+func _resolve_household_scene() -> void:
+	"""Auto-resolve HouseholdScene to eliminate Inspector dependency."""
+	if HouseholdScene != null:
+		return
+	
+	var candidate_paths := [
+		"res://scenes/Household.tscn",
+		"res://scenes/agents/HouseholdAgent.tscn",
+		"res://scenes/HouseholdAgent.tscn",
+		"res://scenes/household_agent.tscn"
+	]
+	
+	for p in candidate_paths:
+		if ResourceLoader.exists(p):
+			HouseholdScene = load(p)
+			if event_bus:
+				event_bus.log("HouseholdScene auto-loaded from " + p)
+			else:
+				print("Main: HouseholdScene auto-loaded from ", p)
+			return
+	
+	push_error("FATAL: HouseholdScene could not be resolved. Population growth disabled.")
 
 
 func _input(event: InputEvent) -> void:
@@ -538,33 +568,15 @@ func update_ui() -> void:
 func spawn_household_at(pos: Vector2) -> Node:
 	"""Spawn a new household from the HouseholdScene PackedScene."""
 	
-	# Ensure HouseholdScene is assigned (export var or fallback load)
+	# Fail cleanly if HouseholdScene is not resolved
 	if HouseholdScene == null:
-		var pop_config = economy_config.get("population_growth", {})
-		var scene_path = pop_config.get("household_scene_path", "res://scenes/Household.tscn")
-		
-		if event_bus:
-			event_bus.log("WARNING: HouseholdScene not assigned in Inspector. Attempting to load from config: %s" % scene_path)
-		
-		if FileAccess.file_exists(scene_path):
-			HouseholdScene = load(scene_path) as PackedScene
-			if HouseholdScene:
-				if event_bus:
-					event_bus.log("SUCCESS: Loaded HouseholdScene from %s" % scene_path)
-			else:
-				if event_bus:
-					event_bus.log("ERROR: Failed to load HouseholdScene from %s" % scene_path)
-				return null
-		else:
-			if event_bus:
-				event_bus.log("ERROR: HouseholdScene file not found: %s" % scene_path)
-			return null
+		push_error("Cannot spawn household: HouseholdScene is null.")
+		return null
 	
-	# Instantiate household
+	# Instantiate household from scene file
 	var h := HouseholdScene.instantiate()
 	if h == null:
-		if event_bus:
-			event_bus.log("ERROR: HouseholdScene.instantiate() returned null")
+		push_error("HouseholdScene.instantiate() returned null")
 		return null
 	
 	# Setup household
@@ -575,9 +587,15 @@ func spawn_household_at(pos: Vector2) -> Node:
 	# Allow _ready() to run so child nodes/components exist
 	await get_tree().process_frame
 	
-	# Wire required references
+	# Wire required references (identical to baseline household)
 	h.market = market
 	h.event_bus = event_bus
+	
+	# Wire HungerNeed component for spawned household
+	var spawned_hunger = h.get_node("HungerNeed") as HungerNeed
+	var spawned_inv = h.get_node("Inventory") as Inventory
+	if spawned_hunger and spawned_inv:
+		spawned_hunger.bind(h.name, spawned_inv, event_bus, calendar)
 	
 	# Create a home node for this household at their spawn position
 	var home = Node2D.new()
@@ -587,16 +605,29 @@ func spawn_household_at(pos: Vector2) -> Node:
 	
 	h.set_locations(home, market_node)
 	
-	# Register in households array
+	# Register in ALL simulation loops (identical to baseline)
 	households.append(h)
-	
-	# Add to groups
 	h.add_to_group("households")
 	h.add_to_group("agents")
 	
+	# Connect death signal
+	h.household_died.connect(_on_household_died)
+	
 	if event_bus:
-		event_bus.log("Day %d: Spawned %s at (%.0f, %.0f) - prosperity: %.3f" % [
-			calendar.day_index, h.name, pos.x, pos.y, prosperity_meter.prosperity_score
-		])
+		event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_meter.prosperity_score])
 	
 	return h
+
+
+## Handle household starvation death - remove from all simulation lists.
+func _on_household_died(household: HouseholdAgent) -> void:
+	# Remove from households list
+	var idx := households.find(household)
+	if idx != -1:
+		households.remove_at(idx)
+	
+	# Remove from agent groups
+	household.remove_from_group("households")
+	household.remove_from_group("agents")
+	
+	# household will queue_free() itself, no need to call it here

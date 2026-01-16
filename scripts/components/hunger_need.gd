@@ -100,12 +100,15 @@ func try_auto_eat(current_tick: int) -> bool:
 		return false
 	
 	# Attempt to eat 1 bread
+	var bread_before: int = inv.get_qty(food_item) if inv != null else 0
 	if inv != null and inv.remove(food_item, 1):
+		var bread_after: int = inv.get_qty(food_item)
+		var hunger_before: int = hunger_days
 		hunger_days = min(hunger_max_days, hunger_days + eat_restore_days)
 		last_auto_eat_day = day
 		ate_today = true
 		if bus:
-			bus.log("Tick %d: %s auto-ate 1 %s (hunger %d/%d)" % [current_tick, agent_name, food_item, hunger_days, hunger_max_days])
+			bus.log("Tick %d: %s ate 1 bread (bread %d→%d), hunger %d/%d→%d/%d" % [current_tick, agent_name, bread_before, bread_after, hunger_before, hunger_max_days, hunger_days, hunger_max_days])
 		return true
 	
 	return false

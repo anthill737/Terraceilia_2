@@ -4,9 +4,11 @@ class_name HouseholdAgent
 ## Household agent - buys bread at market, consumes at home.
 ## Movement is handled by RouteRunner component.
 
+signal household_died(household: HouseholdAgent)
+
 enum Phase { AT_MARKET, AT_HOME }
 
-var phase: Phase = Phase.AT_MARKET
+var phase: Phase = Phase.AT_HOME  # Start at home, not market
 
 # Locations
 var home_location: Node2D = null
@@ -16,6 +18,17 @@ var market_location: Node2D = null
 var market: Market = null
 var event_bus: EventBus = null
 var current_tick: int = 0
+
+# Travel Config (tunable survival triggers)
+@export var reserve_target_bread: int = 3  # Target bread reserve
+@export var reserve_min_bread: int = 0  # Emergency threshold
+@export var hunger_buy_threshold_ratio: float = 0.4  # Go to market when hunger <= 40%
+@export var buy_batch_multiplier: float = 1.0  # Buy multiplier (1.0 = exact deficit)
+@export var market_trip_cooldown_ticks: int = 0  # Cooldown between trips (0 = none)
+
+# Travel State
+var last_market_trip_tick: int = -999999  # Last tick household went to market
+var logged_staying_home: bool = false  # Prevent log spam when staying home
 
 # Constants
 const SPEED: float = 100.0
@@ -68,6 +81,10 @@ func _ready() -> void:
 		route.arrival_distance = ARRIVAL_DISTANCE
 		route.arrived.connect(_on_arrived)
 		route.wait_finished.connect(_on_wait_finished)
+	
+	# Connect starvation death signal
+	if hunger:
+		hunger.starved.connect(_on_starved)
 
 
 func _validate_components() -> void:
@@ -119,47 +136,125 @@ func set_locations(home: Node2D, market_node: Node2D) -> void:
 	# Bind food reserve
 	if food_reserve and market:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
-	route.set_target(market_location)
+	# Start at home, not market
+	route.set_target(home_location)
 
 
 func _on_arrived(t: Node2D) -> void:
 	if t == market_location:
-		# Arrived at market
+		# Arrived at market - buy bread
 		attempt_buy_bread()
 		phase = Phase.AT_MARKET
+		# Always return home after market visit
 		pending_target = home_location
 		route.wait(WAIT_TIME)
 	elif t == home_location:
-		# Arrived at home
+		# Arrived at home - consume and decide next action
 		consume_bread_at_home()
 		phase = Phase.AT_HOME
-		pending_target = market_location
+		# Only go to market if survival triggers fire
+		# Fresh evaluation of current state
+		var current_bread: int = inv.get_qty("bread") if inv != null else 0
+		var hunger_ratio: float = float(hunger.hunger_days) / float(hunger.hunger_max_days) if hunger != null and hunger.hunger_max_days > 0 else 1.0
+		
+		if needs_food_trip():
+			pending_target = market_location
+			# Log decision with fresh data
+			if event_bus and not logged_staying_home:
+				event_bus.log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, reserve_target_bread, hunger_ratio * 100])
+		else:
+			pending_target = home_location  # Stay home
+			# Log staying home once per cycle
+			if event_bus and not logged_staying_home:
+				event_bus.log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, reserve_target_bread, hunger_ratio * 100])
+				logged_staying_home = true
 		route.wait(WAIT_TIME)
 
 
 func _on_wait_finished() -> void:
 	if pending_target != null:
+		# Only log travel decisions (not staying home loops)
+		if pending_target == market_location and pending_target != route.target:
+			log_travel_decision("going to market")
 		route.set_target(pending_target)
 		pending_target = null
 
 
 func attempt_buy_bread() -> void:
-	# Buy bread to reach food buffer target
-	var needed: int = food_stockpile.needed_to_reach_target()
-	if needed > 0:
-		var bought: int = market.sell_bread_to_household(self, needed)
-		inv.add("bread", bought)
+	if market and wallet and inv:
+		# Calculate desired purchase quantity with FRESH data
+		var current_bread: int = inv.get_qty("bread")
+		var deficit: int = max(0, reserve_target_bread - current_bread)
+		var desired: int = ceili(deficit * buy_batch_multiplier)
 		
-		if event_bus:
-			if bought > 0:
-				event_bus.log("Tick %d: Household bought %d bread" % [current_tick, bought])
-			else:
-				event_bus.log("Tick %d: Household tried to buy bread, bought 0" % current_tick)
+		if desired == 0:
+			# This should NOT happen if travel decision was correct
+			if event_bus:
+				event_bus.log("Tick %d: %s ERROR - at market but no deficit (%d/%d)! Travel decision bug!" % [current_tick, name, current_bread, reserve_target_bread])
+			return
+		
+		# Attempt to buy desired amount using market's household function
+		var qty_bought: int = market.sell_bread_to_household(self, desired)
+		
+		# Add purchased bread to inventory
+		if qty_bought > 0:
+			inv.add("bread", qty_bought)
+			if event_bus:
+				event_bus.log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [current_tick, name, qty_bought, desired, inv.get_qty("bread")])
+		else:
+			if event_bus:
+				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty)" % [current_tick, name, desired])
 
 
 func consume_bread_at_home() -> void:
 	# Eating handled by HungerNeed auto-eat mechanic
 	pass
+
+
+## Check if household needs to make a food trip to market.
+## Returns true if any survival trigger is met.
+## Uses FRESH data from inventory - single source of truth.
+func needs_food_trip() -> bool:
+	if inv == null or hunger == null:
+		return false
+	
+	# Check cooldown
+	if current_tick - last_market_trip_tick < market_trip_cooldown_ticks:
+		return false
+	
+	# FRESH inventory read - single source of truth
+	var current_bread: int = inv.get_qty("bread")
+	var hunger_ratio: float = float(hunger.hunger_days) / float(hunger.hunger_max_days) if hunger.hunger_max_days > 0 else 1.0
+	
+	# Emergency triggers (hard)
+	if current_bread == 0:
+		return true
+	if hunger.hunger_days == 0:
+		return true
+	
+	# Reserve trigger
+	if current_bread < reserve_target_bread:
+		return true
+	
+	# Hunger trigger
+	if hunger_ratio <= hunger_buy_threshold_ratio:
+		return true
+	
+	return false
+
+
+## Log travel decision with household state.
+func log_travel_decision(action: String) -> void:
+	if event_bus and inv and hunger:
+		var current_bread: int = inv.get_qty("bread")
+		event_bus.log("Tick %d: %s %s (reserve=%d/%d, hunger=%d/%d)" % [
+			current_tick, name, action,
+			current_bread, reserve_target_bread,
+			hunger.hunger_days, hunger.hunger_max_days
+		])
+		
+		if action == "going to market":
+			last_market_trip_tick = current_tick
 
 
 func get_status_text() -> String:
@@ -176,3 +271,18 @@ func get_status_text() -> String:
 		return "Going Home"
 	
 	return route.get_status_text()
+
+
+## Handle starvation death - household has run out of food and hunger reached zero.
+## This is LETHAL and NON-NEGOTIABLE - no survival overrides prevent death.
+func _on_starved(agent_name_param: String) -> void:
+	if event_bus:
+		event_bus.log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
+	
+	# Remove from simulation lists (main.gd will handle this via signal)
+	# Signal to main that this household has died
+	if has_signal("household_died"):
+		emit_signal("household_died", self)
+	
+	# Remove from scene tree
+	queue_free()

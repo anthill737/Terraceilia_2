@@ -1,0 +1,5 @@
+Godot Engine v4.5.1.stable.official.f62fdbde1 - https://godotengine.org
+
+Main: Loaded economy config from res://config/economy_config.json
+Main: HouseholdScene auto-loaded from res://scenes/Household.tscn
+ProsperityMeter: Loaded config from res://config/economy_config.json

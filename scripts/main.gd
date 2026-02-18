@@ -10,9 +10,26 @@ var audit: EconomyAudit = null
 var calendar: Calendar = null
 var prosperity_meter: ProsperityMeter = null
 
-# Field plots
-var field1_plot: FieldPlot = null
-var field2_plot: FieldPlot = null
+# Dynamic entity tracking
+var all_fields: Array = []       # All FieldPlot nodes (for ticking)
+var all_field_nodes: Array = []  # All field Node2D scene nodes
+var all_farmers: Array = []      # All Farmer nodes
+var all_bakers: Array = []       # All Baker nodes
+var next_field_id: int = 3       # Counter for new fields (1 and 2 exist)
+var next_farmer_id: int = 2      # Counter for new farmers
+var next_baker_id: int = 2       # Counter for new bakers
+@export var FarmerScene: PackedScene
+@export var BakerScene: PackedScene
+var spawn_info_label: Label = null
+
+# Placement mode state
+enum PlaceMode { NONE, FIELD, FARMER, BAKER, HOUSEHOLD }
+var place_mode: PlaceMode = PlaceMode.NONE
+var placement_cursor: ColorRect = null  # Ghost preview at mouse
+var place_mode_label: Label = null      # Status text showing current mode
+
+# Field assignment tracking
+var field_assignment_map: Dictionary = {}  # field_node -> farmer_node (or null)
 
 # Household management
 @export var HouseholdScene: PackedScene
@@ -76,8 +93,10 @@ func _ready() -> void:
 	# Load economy config
 	_load_economy_config()
 	
-	# Resolve HouseholdScene (eliminate Inspector dependency)
+	# Resolve packed scenes (eliminate Inspector dependency)
 	_resolve_household_scene()
+	_resolve_farmer_scene()
+	_resolve_baker_scene()
 	
 	# Create simulation systems
 	clock = SimulationClock.new()
@@ -117,9 +136,18 @@ func _ready() -> void:
 	baker = get_node("Baker")
 	household_agent = get_node("HouseholdAgent")
 	
-	# Get field plot scripts
-	field1_plot = field1_node as FieldPlot
-	field2_plot = field2_node as FieldPlot
+	# Get field plot scripts and register in dynamic tracking
+	var field1_plot = field1_node as FieldPlot
+	var field2_plot = field2_node as FieldPlot
+	all_fields.append(field1_plot)
+	all_fields.append(field2_plot)
+	all_field_nodes.append(field1_node)
+	all_field_nodes.append(field2_node)
+	all_farmers.append(farmer)
+	all_bakers.append(baker)
+	# Register initial fields as assigned to baseline farmer
+	field_assignment_map[field1_node] = farmer
+	field_assignment_map[field2_node] = farmer
 	
 	# Create market instance
 	market = Market.new()
@@ -150,8 +178,8 @@ func _ready() -> void:
 	
 	# Connect farmer to market and fields
 	farmer.market = market
-	farmer.set_route_nodes(house, field1_node, field2_node, market_node)
-	farmer.set_fields(field1_plot, field2_plot)
+	farmer.set_route_nodes(house, market_node)
+	farmer.set_fields([field1_plot, field2_plot], [field1_node, field2_node])
 	
 	# Bind farmer food reserve after market is set
 	var farmer_food_reserve = farmer.get_node("FoodReserve") as FoodReserve
@@ -185,31 +213,37 @@ func _ready() -> void:
 	# Initial UI update
 	update_ui()
 	
+	# Build spawn toolbar
+	_build_spawn_toolbar()
+	
 	# Log startup
 	bus.log("Tick 0: START")
 
 
 func _process(_delta: float) -> void:
 	update_ui()
+	_update_spawn_info()
+	_update_placement_cursor()
 
 
 func _on_tick(tick: int) -> void:
 	# Update calendar
 	calendar.set_tick(tick)
 	
-	# Tick field plots
-	if field1_plot:
-		field1_plot.tick()
-	if field2_plot:
-		field2_plot.tick()
+	# Tick all field plots (dynamic)
+	for fp in all_fields:
+		if fp and is_instance_valid(fp):
+			fp.tick()
 	
-	# Update tick for all agents (including spawned households)
+	# Update tick for all agents (dynamic tracking)
 	if market:
 		market.set_tick(tick)
-	if farmer:
-		farmer.set_tick(tick)
-	if baker:
-		baker.set_tick(tick)
+	for f in all_farmers:
+		if f and is_instance_valid(f):
+			f.set_tick(tick)
+	for b in all_bakers:
+		if b and is_instance_valid(b):
+			b.set_tick(tick)
 	
 	# Tick all households
 	for h in households:
@@ -272,6 +306,184 @@ func _resolve_household_scene() -> void:
 	push_error("FATAL: HouseholdScene could not be resolved. Population growth disabled.")
 
 
+func _resolve_farmer_scene() -> void:
+	"""Auto-resolve FarmerScene to eliminate Inspector dependency."""
+	if FarmerScene != null:
+		return
+	var path = "res://scenes/Farmer.tscn"
+	if ResourceLoader.exists(path):
+		FarmerScene = load(path)
+		print("Main: FarmerScene auto-loaded from ", path)
+	else:
+		push_warning("FarmerScene not found at " + path + " - farmer spawning disabled")
+
+
+func _resolve_baker_scene() -> void:
+	"""Auto-resolve BakerScene to eliminate Inspector dependency."""
+	if BakerScene != null:
+		return
+	var path = "res://scenes/Baker.tscn"
+	if ResourceLoader.exists(path):
+		BakerScene = load(path)
+		print("Main: BakerScene auto-loaded from ", path)
+	else:
+		push_warning("BakerScene not found at " + path + " - baker spawning disabled")
+
+
+func _build_spawn_toolbar() -> void:
+	"""Build a game-style spawn toolbar at the top of the world area."""
+	var toolbar = PanelContainer.new()
+	toolbar.name = "SpawnToolbar"
+	toolbar.position = Vector2(10, 10)
+	
+	# Style the panel with a dark semi-transparent background
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.12, 0.15, 0.92)
+	style.border_color = Color(0.4, 0.4, 0.5, 0.8)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(6)
+	toolbar.add_theme_stylebox_override("panel", style)
+	
+	var vbox_outer = VBoxContainer.new()
+	vbox_outer.add_theme_constant_override("separation", 4)
+	toolbar.add_child(vbox_outer)
+	
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	vbox_outer.add_child(hbox)
+	
+	# Build label
+	var title = Label.new()
+	title.text = "BUILD"
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color(0.85, 0.85, 0.65))
+	hbox.add_child(title)
+	
+	# Separator
+	var sep1 = VSeparator.new()
+	hbox.add_child(sep1)
+	
+	# Spawn buttons - click to enter placement mode
+	var field_btn = _create_toolbar_button("Field", Color(0.4, 0.3, 0.1), "Click to place a farm field")
+	field_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.FIELD))
+	hbox.add_child(field_btn)
+	
+	var farmer_btn = _create_toolbar_button("Farmer", Color(0.2, 0.8, 0.2), "Click to place a new farmer")
+	farmer_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.FARMER))
+	hbox.add_child(farmer_btn)
+	
+	var baker_btn = _create_toolbar_button("Baker", Color(0.8, 0.6, 0.2), "Click to place a new baker")
+	baker_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.BAKER))
+	hbox.add_child(baker_btn)
+	
+	var household_btn = _create_toolbar_button("Household", Color(0.8, 0.2, 0.8), "Click to place a new household")
+	household_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.HOUSEHOLD))
+	hbox.add_child(household_btn)
+	
+	# Separator
+	var sep2 = VSeparator.new()
+	hbox.add_child(sep2)
+	
+	# Speed controls
+	var speed_down = Button.new()
+	speed_down.text = "<<"
+	speed_down.tooltip_text = "Slow down simulation"
+	speed_down.pressed.connect(func(): clock.decrease_speed())
+	hbox.add_child(speed_down)
+	
+	var speed_label = Label.new()
+	speed_label.text = "Speed: 1.0x"
+	speed_label.name = "ToolbarSpeedLabel"
+	speed_label.add_theme_font_size_override("font_size", 13)
+	hbox.add_child(speed_label)
+	sim_speed_label = speed_label
+	
+	var speed_up = Button.new()
+	speed_up.text = ">>"
+	speed_up.tooltip_text = "Speed up simulation"
+	speed_up.pressed.connect(func(): clock.increase_speed())
+	hbox.add_child(speed_up)
+	
+	# Separator
+	var sep3 = VSeparator.new()
+	hbox.add_child(sep3)
+	
+	# Entity count label
+	spawn_info_label = Label.new()
+	spawn_info_label.text = ""
+	spawn_info_label.add_theme_font_size_override("font_size", 12)
+	spawn_info_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	hbox.add_child(spawn_info_label)
+	_update_spawn_info()
+	
+	# Second row: placement mode status
+	place_mode_label = Label.new()
+	place_mode_label.text = ""
+	place_mode_label.add_theme_font_size_override("font_size", 12)
+	place_mode_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
+	vbox_outer.add_child(place_mode_label)
+	
+	# Add to WorldSpacer area (left part of the screen)
+	var world_spacer = get_node("UI/HUDRoot/Layout/WorldSpacer")
+	
+	# Create a full-area click receiver FIRST (so it's behind toolbar/panels)
+	# This catches clicks in the world area for placement mode
+	var click_receiver = Control.new()
+	click_receiver.name = "WorldClickReceiver"
+	click_receiver.set_anchors_preset(Control.PRESET_FULL_RECT)
+	click_receiver.mouse_filter = Control.MOUSE_FILTER_STOP  # Catches all clicks in world area
+	click_receiver.gui_input.connect(_on_world_click)
+	world_spacer.add_child(click_receiver)
+	
+	# Toolbar goes AFTER click receiver so it renders on top and gets click priority
+	world_spacer.add_child(toolbar)
+	
+	# Create placement cursor (ghost preview)
+	placement_cursor = ColorRect.new()
+	placement_cursor.name = "PlacementCursor"
+	placement_cursor.size = Vector2(30, 30)
+	placement_cursor.position = Vector2(-100, -100)
+	placement_cursor.color = Color(1, 1, 1, 0.4)
+	placement_cursor.visible = false
+	placement_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	world_spacer.add_child(placement_cursor)
+
+
+func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Button:
+	"""Create a styled toolbar button with a color indicator."""
+	var btn = Button.new()
+	btn.text = text
+	btn.tooltip_text = tooltip
+	btn.custom_minimum_size = Vector2(70, 30)
+	
+	# Style the button
+	var normal_style = StyleBoxFlat.new()
+	normal_style.bg_color = Color(0.2, 0.2, 0.25, 0.9)
+	normal_style.border_color = color
+	normal_style.set_border_width_all(2)
+	normal_style.set_corner_radius_all(4)
+	normal_style.set_content_margin_all(4)
+	btn.add_theme_stylebox_override("normal", normal_style)
+	
+	var hover_style = normal_style.duplicate()
+	hover_style.bg_color = Color(0.3, 0.3, 0.35, 0.95)
+	btn.add_theme_stylebox_override("hover", hover_style)
+	
+	var pressed_style = normal_style.duplicate()
+	pressed_style.bg_color = color.lerp(Color.BLACK, 0.5)
+	btn.add_theme_stylebox_override("pressed", pressed_style)
+	
+	return btn
+
+
+func _update_spawn_info() -> void:
+	if spawn_info_label:
+		spawn_info_label.text = "Fields: %d | Farmers: %d | Bakers: %d | Pop: %d" % [
+			all_fields.size(), all_farmers.size(), all_bakers.size(), households.size()
+		]
+
+
 func _input(event: InputEvent) -> void:
 	if clock == null:
 		return
@@ -281,6 +493,23 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("speed_down"):
 		clock.decrease_speed()
 		get_viewport().set_input_as_handled()
+	
+	# Cancel placement mode with Escape or right-click
+	if place_mode != PlaceMode.NONE:
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+
+
+func _on_world_click(event: InputEvent) -> void:
+	"""Handle clicks on the world area background (behind toolbar/panels)."""
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if place_mode != PlaceMode.NONE:
+			var click_pos: Vector2 = event.position
+			_place_entity_at(click_pos)
 
 
 func _on_speed_changed(new_speed: float) -> void:
@@ -631,3 +860,375 @@ func _on_household_died(household: HouseholdAgent) -> void:
 	household.remove_from_group("agents")
 	
 	# household will queue_free() itself, no need to call it here
+
+
+# ============================================================================
+# PLACEMENT MODE - Click-to-place entities in the world
+# ============================================================================
+
+func _enter_placement_mode(mode: PlaceMode) -> void:
+	"""Enter placement mode for the given entity type."""
+	if place_mode == mode:
+		# Clicking same button again cancels
+		_cancel_placement()
+		return
+	place_mode = mode
+	if placement_cursor:
+		placement_cursor.visible = true
+		match mode:
+			PlaceMode.FIELD:
+				placement_cursor.color = Color(0.4, 0.3, 0.1, 0.5)
+				placement_cursor.size = Vector2(30, 30)
+			PlaceMode.FARMER:
+				placement_cursor.color = Color(0.2, 1, 0.2, 0.5)
+				placement_cursor.size = Vector2(20, 20)
+			PlaceMode.BAKER:
+				placement_cursor.color = Color(0.8, 0.6, 0.2, 0.5)
+				placement_cursor.size = Vector2(20, 20)
+			PlaceMode.HOUSEHOLD:
+				placement_cursor.color = Color(0.8, 0.2, 0.8, 0.5)
+				placement_cursor.size = Vector2(20, 20)
+	_update_placement_label()
+
+
+func _cancel_placement() -> void:
+	"""Exit placement mode."""
+	place_mode = PlaceMode.NONE
+	if placement_cursor:
+		placement_cursor.visible = false
+	_update_placement_label()
+
+
+func _update_placement_cursor() -> void:
+	"""Move the ghost cursor to follow the mouse."""
+	if place_mode == PlaceMode.NONE or placement_cursor == null:
+		return
+	var mouse_pos = get_viewport().get_mouse_position()
+	placement_cursor.position = mouse_pos - placement_cursor.size / 2.0
+
+
+func _update_placement_label() -> void:
+	if place_mode_label == null:
+		return
+	match place_mode:
+		PlaceMode.NONE:
+			place_mode_label.text = ""
+		PlaceMode.FIELD:
+			place_mode_label.text = "PLACING FIELD - Click world to place. Right-click or Esc to cancel."
+		PlaceMode.FARMER:
+			place_mode_label.text = "PLACING FARMER - Click world to place. Right-click or Esc to cancel."
+		PlaceMode.BAKER:
+			place_mode_label.text = "PLACING BAKER - Click world to place. Right-click or Esc to cancel."
+		PlaceMode.HOUSEHOLD:
+			place_mode_label.text = "PLACING HOUSEHOLD - Click world to place. Right-click or Esc to cancel."
+
+
+func _place_entity_at(pos: Vector2) -> void:
+	"""Place the selected entity type at the given world position."""
+	match place_mode:
+		PlaceMode.FIELD:
+			spawn_field_at(pos)
+		PlaceMode.FARMER:
+			spawn_farmer_at(pos)
+		PlaceMode.BAKER:
+			spawn_baker_at(pos)
+		PlaceMode.HOUSEHOLD:
+			spawn_household_at(pos)
+	# Stay in placement mode so user can place multiple of the same type
+	# (click the button again or press Esc to stop)
+
+
+# ============================================================================
+# SPAWN SYSTEM - Entity creation with full wiring
+# ============================================================================
+
+func spawn_field_at(pos: Vector2) -> Node2D:
+	"""Spawn a new field at the given position. Unassigned by default (user assigns via panel)."""
+	# Create field node with FieldPlot script
+	var field_node = Node2D.new()
+	field_node.name = "Field%d" % next_field_id
+	next_field_id += 1
+	field_node.set_script(load("res://scripts/field_plot.gd"))
+	field_node.global_position = pos
+	
+	# Add visual marker (matches existing field style)
+	var marker = ColorRect.new()
+	marker.name = "FieldMarker"
+	marker.offset_left = -15.0
+	marker.offset_top = -15.0
+	marker.offset_right = 15.0
+	marker.offset_bottom = 15.0
+	marker.color = Color(0.4, 0.3, 0.1, 1)
+	field_node.add_child(marker)
+	
+	# Add a label underneath showing the field name
+	var name_label = Label.new()
+	name_label.name = "FieldLabel"
+	name_label.text = field_node.name
+	name_label.position = Vector2(-20, 18)
+	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_color_override("font_color", Color(0.8, 0.7, 0.4))
+	field_node.add_child(name_label)
+	
+	add_child(field_node)
+	
+	# Register in dynamic tracking
+	all_fields.append(field_node)
+	all_field_nodes.append(field_node)
+	field_assignment_map[field_node] = null
+	
+	if event_bus:
+		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
+	
+	# Show assignment popup (unless only 1 farmer — auto-assign that case)
+	if all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
+		_assign_field_to_farmer(field_node, all_farmers[0])
+	else:
+		_show_field_assignment_popup(field_node, pos)
+	
+	return field_node
+
+
+func spawn_farmer_at(pos: Vector2) -> Node:
+	"""Spawn a new farmer at the given position."""
+	if FarmerScene == null:
+		if event_bus:
+			event_bus.log("[ERROR] Cannot spawn farmer: FarmerScene not found")
+		return null
+	
+	var f = FarmerScene.instantiate()
+	f.name = "Farmer_%d" % next_farmer_id
+	next_farmer_id += 1
+	f.global_position = pos
+	add_child(f)
+	
+	# Allow _ready() to run so child nodes/components exist
+	await get_tree().process_frame
+	
+	# Wire references
+	f.market = market
+	f.event_bus = event_bus
+	
+	# Wire HungerNeed
+	var f_hunger = f.get_node("HungerNeed") as HungerNeed
+	var f_inv = f.get_node("Inventory") as Inventory
+	if f_hunger and f_inv:
+		f_hunger.bind(f.name, f_inv, event_bus, calendar)
+	
+	# Wire FoodReserve
+	var f_reserve = f.get_node("FoodReserve") as FoodReserve
+	if f_reserve:
+		f_reserve.bind(f_inv, f_hunger, market, f.get_node("Wallet"), event_bus, f.name)
+	
+	# Create a home node at spawn position
+	var home = Node2D.new()
+	home.name = f.name + "_Home"
+	home.global_position = pos
+	
+	# Add home visual marker
+	var home_marker = ColorRect.new()
+	home_marker.name = "HomeMarker"
+	home_marker.offset_left = -12.0
+	home_marker.offset_top = -12.0
+	home_marker.offset_right = 12.0
+	home_marker.offset_bottom = 12.0
+	home_marker.color = Color(0.2, 0.5, 1, 0.6)
+	home.add_child(home_marker)
+	add_child(home)
+	
+	# Set route nodes (no fields yet - user assigns via panel)
+	f.set_route_nodes(home, market_node)
+	
+	# Register
+	all_farmers.append(f)
+	
+	# Auto-assign any orphaned fields to this new farmer
+	var absorbed = 0
+	for fn in all_field_nodes:
+		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == null:
+			_assign_field_to_farmer(fn, f)
+			absorbed += 1
+	
+	if event_bus:
+		var msg = "PLACED: %s at (%d, %d)" % [f.name, int(pos.x), int(pos.y)]
+		if absorbed > 0:
+			msg += " → absorbed %d unassigned field(s)" % absorbed
+		event_bus.log(msg)
+	
+	return f
+
+
+func spawn_baker_at(pos: Vector2) -> Node:
+	"""Spawn a new baker at the given position."""
+	if BakerScene == null:
+		if event_bus:
+			event_bus.log("[ERROR] Cannot spawn baker: BakerScene not found")
+		return null
+	
+	var b = BakerScene.instantiate()
+	b.name = "Baker_%d" % next_baker_id
+	next_baker_id += 1
+	b.global_position = pos
+	add_child(b)
+	
+	# Allow _ready() to run so child nodes/components exist
+	await get_tree().process_frame
+	
+	# Wire references
+	b.market = market
+	b.event_bus = event_bus
+	
+	# Wire HungerNeed
+	var b_hunger = b.get_node("HungerNeed") as HungerNeed
+	var b_inv = b.get_node("Inventory") as Inventory
+	if b_hunger and b_inv:
+		b_hunger.bind(b.name, b_inv, event_bus, calendar)
+	
+	# Create a bakery spot for this baker
+	var bakery_spot = Node2D.new()
+	bakery_spot.name = b.name + "_Bakery"
+	bakery_spot.global_position = pos
+	
+	# Add bakery visual marker
+	var bakery_marker = ColorRect.new()
+	bakery_marker.name = "BakeryMarker"
+	bakery_marker.offset_left = -12.0
+	bakery_marker.offset_top = -12.0
+	bakery_marker.offset_right = 12.0
+	bakery_marker.offset_bottom = 12.0
+	bakery_marker.color = Color(1, 0.8, 0.2, 0.6)
+	bakery_spot.add_child(bakery_marker)
+	add_child(bakery_spot)
+	
+	# set_locations handles ALL bakery bindings (profitability, throttle, margin, food_reserve)
+	b.set_locations(bakery_spot, market_node)
+	
+	# Register
+	all_bakers.append(b)
+	
+	if event_bus:
+		event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
+	
+	return b
+
+
+# ============================================================================
+# FIELD ASSIGNMENT POPUP
+# ============================================================================
+
+func _assign_field_to_farmer(field_node: Node2D, new_farmer) -> void:
+	"""Assign a field to a farmer, removing it from any previous owner."""
+	var old_farmer = field_assignment_map.get(field_node, null)
+	if old_farmer and is_instance_valid(old_farmer) and old_farmer != new_farmer:
+		old_farmer.remove_field(field_node)
+	field_assignment_map[field_node] = new_farmer
+	if new_farmer and is_instance_valid(new_farmer):
+		new_farmer.add_field(field_node, field_node)
+	if event_bus:
+		var fname = new_farmer.name if new_farmer else "(none)"
+		event_bus.log("ASSIGNED: %s → %s" % [field_node.name, fname])
+
+
+func _show_field_assignment_popup(field_node: Node2D, world_pos: Vector2) -> void:
+	"""Show a popup near the placed field asking which farmer to assign it to."""
+	if all_farmers.size() == 0:
+		return  # No farmers yet, nothing to assign
+	
+	# Convert world position to canvas/UI position
+	var vp_size = get_viewport().get_visible_rect().size
+	var screen_pos = world_pos + Vector2(20, -60)  # Offset so popup is above/right of field
+	screen_pos = screen_pos.clamp(Vector2(4, 4), vp_size - Vector2(180, 20))
+	
+	# Build popup on the CanvasLayer (always on top)
+	var ui_layer = get_node_or_null("UI")
+	if ui_layer == null:
+		return
+	
+	var popup = PanelContainer.new()
+	popup.name = "FieldAssignPopup"
+	popup.position = screen_pos
+	
+	var bg = StyleBoxFlat.new()
+	bg.bg_color = Color(0.08, 0.1, 0.13, 0.97)
+	bg.border_color = Color(0.5, 0.7, 0.4, 1.0)
+	bg.set_border_width_all(2)
+	bg.set_corner_radius_all(6)
+	bg.set_content_margin_all(10)
+	popup.add_theme_stylebox_override("panel", bg)
+	
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 5)
+	popup.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "Assign %s to:" % field_node.name
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6))
+	vbox.add_child(title)
+	
+	var sep = HSeparator.new()
+	vbox.add_child(sep)
+	
+	# One button per farmer
+	var farmer_colors = [Color(0.3, 0.7, 1.0), Color(1.0, 0.6, 0.2), Color(0.4, 1.0, 0.5), Color(1.0, 0.4, 0.7)]
+	for i in range(all_farmers.size()):
+		var f = all_farmers[i]
+		if not is_instance_valid(f):
+			continue
+		var btn = Button.new()
+		btn.text = f.name
+		btn.custom_minimum_size = Vector2(140, 28)
+		var fc = farmer_colors[i % farmer_colors.size()]
+		var btn_style = StyleBoxFlat.new()
+		btn_style.bg_color = fc.lerp(Color.BLACK, 0.55)
+		btn_style.border_color = fc
+		btn_style.set_border_width_all(1)
+		btn_style.set_corner_radius_all(3)
+		btn_style.set_content_margin_all(4)
+		btn.add_theme_stylebox_override("normal", btn_style)
+		var hover_style = btn_style.duplicate()
+		hover_style.bg_color = fc.lerp(Color.BLACK, 0.35)
+		btn.add_theme_stylebox_override("hover", hover_style)
+		var fn_ref = field_node
+		var farmer_ref = f
+		btn.pressed.connect(func():
+			_assign_field_to_farmer(fn_ref, farmer_ref)
+			popup.queue_free()
+		)
+		vbox.add_child(btn)
+	
+	# Skip button
+	var skip_btn = Button.new()
+	skip_btn.text = "Skip (no farmer)"
+	skip_btn.custom_minimum_size = Vector2(140, 24)
+	skip_btn.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	skip_btn.pressed.connect(func(): popup.queue_free())
+	vbox.add_child(skip_btn)
+	
+	ui_layer.add_child(popup)
+
+
+# ============================================================================
+# SPAWN HELPERS - Positioning
+# ============================================================================
+
+func _get_next_farmer_position() -> Vector2:
+	"""Position new farmers near the house area."""
+	var base_x = 80.0
+	var base_y = 480.0
+	var offset = (all_farmers.size()) * 40
+	var col = offset % 200
+	@warning_ignore("integer_division")
+	var row = (offset / 200) * 60
+	return Vector2(base_x + col, base_y + row)
+
+
+func _get_next_baker_position() -> Vector2:
+	"""Position new bakers near the bakery area."""
+	var base_x = 350.0
+	var base_y = 410.0
+	var offset = (all_bakers.size()) * 40
+	var col = offset % 200
+	@warning_ignore("integer_division")
+	var row = (offset / 200) * 60
+	return Vector2(base_x + col, base_y + row)

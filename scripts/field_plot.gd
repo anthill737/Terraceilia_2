@@ -1,4 +1,4 @@
-extends Node
+extends Node2D
 class_name FieldPlot
 
 enum State { EMPTY, PLANTED }

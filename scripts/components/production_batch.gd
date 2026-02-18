@@ -20,7 +20,7 @@ func available_space() -> int:
 	return cap.remaining_space()
 
 
-func compute_batch(max_batch: int, input_item: String, output_item: String, output_per_input: int) -> int:
+func compute_batch(max_batch: int, input_item: String, _output_item: String, output_per_input: int) -> int:
 	"""
 	Compute how many input units can be processed this cycle.
 	Limited by:

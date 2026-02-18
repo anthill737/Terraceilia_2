@@ -1,3 +1,7 @@
-res://scripts/household_agent.gd
+res://scripts/farmer.gd
 res://scripts/main.gd
-res://scripts/components/hunger_need.gd
+res://scripts/market.gd
+res://scripts/field_plot.gd
+res://scripts/baker.gd
+res://scripts/prosperity_meter.gd
+res://scripts/components/production_batch.gd

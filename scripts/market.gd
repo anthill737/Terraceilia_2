@@ -6,8 +6,8 @@ var seeds: int = 100000
 var wheat: int = 0
 var bread: int = 0
 
-var wheat_capacity: int = 100
-var bread_capacity: int = 200
+var wheat_capacity: int = 999999999
+var bread_capacity: int = 999999999
 
 const SEED_PRICE: float = 0.5
 const WHEAT_PRICE_CEILING: float = 5.00
@@ -897,11 +897,11 @@ func on_day_changed(day: int) -> void:
 	
 	# PART 4: Log market-side hysteresis blocking before reset
 	if wheat_market_buy_blocked and event_bus:
-		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, upper_band])
+		var wheat_upper: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, wheat_upper])
 	if bread_market_buy_blocked and event_bus:
-		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, upper_band])
+		var bread_upper: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, bread_upper])
 	
 	# Reset daily flow counters
 	wheat_sold_today = 0
@@ -935,7 +935,7 @@ func _apply_inventory_decay(day: int) -> void:
 		
 		# Get current inventory, target, and upper band for this good
 		var current_inventory: int = 0
-		var target_inventory: int = 0
+		var _target_inventory: int = 0
 		var upper_band: int = 0
 		var current_decay_rate: float = 0.0
 		var decay_days_remaining: int = 0
@@ -943,19 +943,19 @@ func _apply_inventory_decay(day: int) -> void:
 		match good_name:
 			"wheat":
 				current_inventory = wheat
-				target_inventory = wheat_target
+				_target_inventory = wheat_target
 				upper_band = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 				current_decay_rate = wheat_decay_rate
 				decay_days_remaining = wheat_decay_days_remaining
 			"bread":
 				current_inventory = bread
-				target_inventory = bread_target
+				_target_inventory = bread_target
 				upper_band = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 				current_decay_rate = bread_decay_rate
 				decay_days_remaining = bread_decay_days_remaining
 			"seeds":
 				current_inventory = seeds
-				target_inventory = 0  # Seeds have no target
+				_target_inventory = 0  # Seeds have no target
 				upper_band = 0
 				current_decay_rate = 0.0
 				decay_days_remaining = 0
@@ -1031,6 +1031,8 @@ func _adjust_wheat_price(day: int) -> void:
 	var new_price: float = old_price
 	var cap_applied: bool = false
 	var update_reason: String = ""
+	var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+	var lower_band: int = int(float(wheat_target) * (1.0 - TARGET_BAND_PCT))
 	
 	if has_clearing_data:
 		# PRICE DISCOVERY MODE: Anchor reference to actual clearing prices
@@ -1048,7 +1050,6 @@ func _adjust_wheat_price(day: int) -> void:
 			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 		
 		# Change 1: Downward pressure on recovery (only when inventory >= upper_band)
-		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 		if wheat > wheat_prev and wheat >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
@@ -1065,7 +1066,6 @@ func _adjust_wheat_price(day: int) -> void:
 		update_reason = "cleared"
 	elif wheat_total_cleared == 0:
 		# PART 2: Distinguish market-blocked from no-demand
-		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 		
 		if wheat_market_buy_blocked:
 			# Market buying is intentionally blocked due to hysteresis
@@ -1083,7 +1083,6 @@ func _adjust_wheat_price(day: int) -> void:
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 		
 		if wheat_market_buy_blocked:
 			# Market buying is blocked - hold price steady
@@ -1109,8 +1108,6 @@ func _adjust_wheat_price(day: int) -> void:
 	wheat_price = clamp(new_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
 	
 	# Calculate band status for logging
-	var lower_band: int = int(float(wheat_target) * (1.0 - TARGET_BAND_PCT))
-	var upper_band: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 	var bid_mult: float = get_bid_price("wheat") / wheat_price if wheat_price > 0 else 1.0
 	var max_buy: int = get_max_buy_qty("wheat")
 	
@@ -1141,6 +1138,8 @@ func _adjust_bread_price(day: int) -> void:
 	var new_price: float = old_price
 	var cap_applied: bool = false
 	var update_reason: String = ""
+	var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
+	var lower_band: int = int(float(bread_target) * (1.0 - TARGET_BAND_PCT))
 	
 	if has_clearing_data:
 		# PRICE DISCOVERY MODE: Anchor reference to actual clearing prices
@@ -1158,7 +1157,6 @@ func _adjust_bread_price(day: int) -> void:
 			inventory_nudge = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 		
 		# Change 1: Downward pressure on recovery (only when inventory >= upper_band)
-		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 		if bread > bread_prev and bread >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
@@ -1175,7 +1173,6 @@ func _adjust_bread_price(day: int) -> void:
 		update_reason = "cleared"
 	elif bread_total_cleared == 0:
 		# PART 2: Distinguish market-blocked from no-demand
-		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 		
 		if bread_market_buy_blocked:
 			# Market buying is intentionally blocked due to hysteresis
@@ -1193,7 +1190,6 @@ func _adjust_bread_price(day: int) -> void:
 			update_reason = "no-demand cap"
 	else:
 		# Trades below threshold: allow only neutral or downward movement
-		var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 		
 		if bread_market_buy_blocked:
 			# Market buying is blocked - hold price steady
@@ -1219,8 +1215,6 @@ func _adjust_bread_price(day: int) -> void:
 	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
 	
 	# Calculate band status for logging
-	var lower_band: int = int(float(bread_target) * (1.0 - TARGET_BAND_PCT))
-	var upper_band: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 	var bid_mult: float = get_bid_price("bread") / bread_price if bread_price > 0 else 1.0
 	var max_buy: int = get_max_buy_qty("bread")
 	

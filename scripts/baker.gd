@@ -106,6 +106,7 @@ func set_tick(t: int) -> void:
 		food_reserve.update_survival_override()
 	
 	# Daily diagnostic: check if baker produced 0 bread while having wheat and being at bakery
+	@warning_ignore("integer_division")
 	var current_day: int = t / 100  # Assuming 100 ticks per day
 	if current_day != last_diagnostic_day:
 		if last_diagnostic_day >= 0 and bread_produced_today == 0:
@@ -115,7 +116,7 @@ func set_tick(t: int) -> void:
 			if has_wheat and at_bakery and event_bus:
 				event_bus.log("Tick %d: [DIAGNOSTIC] Baker produced 0 bread on day %d (wheat=%d, at_bakery=%s, profit=%s, override=%s)" % [
 					t, last_diagnostic_day, inv.get_qty("wheat"), at_bakery, 
-					(profit.is_production_profitable(BREAD_RECIPE) if profit else "N/A"),
+					(str(profit.is_production_profitable(BREAD_RECIPE)) if profit else "N/A"),
 					(food_reserve.survival_override_active if food_reserve else false)
 				])
 		last_diagnostic_day = current_day
@@ -212,7 +213,7 @@ func _on_wait_finished() -> void:
 		pending_target = null
 
 
-func _on_travel_timeout(t: Node2D) -> void:
+func _on_travel_timeout(_t: Node2D) -> void:
 	# Handle travel timeout - force recovery to RESTOCK phase
 	if event_bus:
 		event_bus.log("Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % current_tick)

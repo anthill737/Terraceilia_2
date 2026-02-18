@@ -169,7 +169,7 @@ func record_starvation_event(day: int) -> void:
 		starvation_events.pop_front()
 
 
-func record_trade_value(day: int, value: float) -> void:
+func record_trade_value(_day: int, value: float) -> void:
 	"""Track daily trade value for prosperity calculation."""
 	trade_values.append(value)
 	# Trim to window
@@ -309,7 +309,7 @@ func _track_starvation_events(day: int) -> void:
 		starvation_events.pop_front()
 
 
-func _track_trade_value(day: int) -> void:
+func _track_trade_value(_day: int) -> void:
 	"""Record today's total trade value from market."""
 	if market == null:
 		return

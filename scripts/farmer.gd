@@ -6,15 +6,13 @@ class_name Farmer
 
 # Route nodes
 var house_node: Node2D = null
-var field1_node: Node2D = null
-var field2_node: Node2D = null
 var market_node: Node2D = null
 var route_targets: Array[Node2D] = []
 var route_index: int = 0
 
-# Field references
-var field1_plot: FieldPlot = null
-var field2_plot: FieldPlot = null
+# Dynamic field references
+var fields: Array = []  # Array of FieldPlot
+var field_nodes: Array = []  # Array of Node2D (field scene nodes)
 
 const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
@@ -100,25 +98,58 @@ func _ready() -> void:
 	route.wait_finished.connect(_on_wait_finished)
 
 
-func set_route_nodes(house: Node2D, field1: Node2D, field2: Node2D, market_pos: Node2D) -> void:
+func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
 	house_node = house
-	field1_node = field1
-	field2_node = field2
 	market_node = market_pos
-	route_targets = [house_node, field1_node, field2_node, market_node]
-	route_index = 0
 	# Bind profitability to market
 	if profit and self.market and event_bus:
 		profit.bind(self.market, event_bus, get_display_name())
 	# Bind inventory throttle (smooth production scaling based on wheat inventory)
 	if inventory_throttle and self.market and event_bus:
 		inventory_throttle.bind(self.market, event_bus, get_display_name())
-	route.set_target(route_targets[route_index])
+	_rebuild_route()
 
 
-func set_fields(field1: FieldPlot, field2: FieldPlot) -> void:
-	field1_plot = field1
-	field2_plot = field2
+func _rebuild_route() -> void:
+	route_targets.clear()
+	if house_node:
+		route_targets.append(house_node)
+	for fn in field_nodes:
+		route_targets.append(fn)
+	if market_node:
+		route_targets.append(market_node)
+	route_index = 0
+	if route_targets.size() > 0:
+		route.set_target(route_targets[route_index])
+
+
+func set_fields(field_plots: Array, nodes: Array) -> void:
+	fields = field_plots.duplicate()
+	field_nodes = nodes.duplicate()
+	_rebuild_route()
+
+
+func add_field(field_node: Node2D, field_plot: FieldPlot) -> void:
+	if field_node not in field_nodes:
+		field_nodes.append(field_node)
+		fields.append(field_plot)
+		_rebuild_route()
+		if event_bus:
+			event_bus.log("%s: New field assigned (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
+
+
+func remove_field(field_node: Node2D) -> void:
+	var idx = field_nodes.find(field_node)
+	if idx != -1:
+		field_nodes.remove_at(idx)
+		fields.remove_at(idx)
+		_rebuild_route()
+		if event_bus:
+			event_bus.log("%s: Field removed (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
+
+
+func get_field_count() -> int:
+	return fields.size()
 
 
 func _physics_process(_delta: float) -> void:
@@ -150,12 +181,13 @@ func get_next_target() -> Node2D:
 func handle_arrival(t: Node2D) -> void:
 	if t == house_node:
 		handle_house_arrival()
-	elif t == field1_node:
-		handle_field_arrival(field1_plot, "Field1")
-	elif t == field2_node:
-		handle_field_arrival(field2_plot, "Field2")
 	elif t == market_node:
 		handle_market_arrival()
+	else:
+		# Check if it's one of our assigned fields
+		var idx = field_nodes.find(t)
+		if idx != -1:
+			handle_field_arrival(fields[idx], t.name)
 
 
 func handle_house_arrival() -> void:
@@ -199,7 +231,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 func handle_market_arrival() -> void:
 	# PRIORITY 1: Survival mode - buy food if reserve is critical AND market has food
 	if food_reserve and food_reserve.is_survival_mode:
-		var bought: int = food_reserve.attempt_survival_purchase()
+		var _bought: int = food_reserve.attempt_survival_purchase()
 		# If bought == 0, market has no food - continue with normal logic
 		# Farmer cannot produce food, so will rely on baker producing bread
 	
@@ -236,17 +268,14 @@ func get_status_text() -> String:
 		if route.is_waiting:
 			return "Waiting at House"
 		return "Walking to House"
-	elif route.target == field1_node:
-		if route.is_waiting:
-			return "Waiting at Field1"
-		return "Walking to Field1"
-	elif route.target == field2_node:
-		if route.is_waiting:
-			return "Waiting at Field2"
-		return "Walking to Field2"
 	elif route.target == market_node:
 		if route.is_waiting:
 			return "At Market (trading)"
 		return "Walking to Market"
+	elif route.target in field_nodes:
+		var field_name = route.target.name
+		if route.is_waiting:
+			return "Waiting at %s" % field_name
+		return "Walking to %s" % field_name
 	
 	return route.get_status_text()

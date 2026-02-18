@@ -83,6 +83,13 @@ var maintenance_cost_per_day: float = 0.3      # Coin/day upkeep deducted at day
 var consecutive_days_negative_cashflow: int = 0 # Tracked by on_day_changed
 var day_money_start: float = -1.0              # Sentinel: -1 = not yet initialized
 
+# [BUGFIX] Travel and idle watchdog state
+var travel_ticks: int = 0
+const MAX_TRAVEL_TICKS: int = 300
+var hysteresis_cooldown_ticks: int = 0
+var idle_ticks: int = 0
+const MAX_IDLE_TICKS: int = 10
+
 
 func get_display_name() -> String:
 	return "Baker"
@@ -130,6 +137,12 @@ func set_tick(t: int) -> void:
 	
 	if t == 0 and event_bus:
 		event_bus.log("Tick 0: Baker starting food=%d" % inv.get_qty("bread"))
+	
+	# [BUGFIX] Defensive state guards
+	if hysteresis_cooldown_ticks > 0:
+		hysteresis_cooldown_ticks -= 1
+	_check_travel_timeout()
+	_check_idle_and_pause_guard()
 
 
 func _ready() -> void:
@@ -203,6 +216,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _on_arrived(t: Node2D) -> void:
+	# [BUGFIX] Reset travel watchdog on arrival
+	travel_ticks = 0
+	idle_ticks = 0
 	if t == market_location and market != null:
 		perform_market_transactions()
 		# After market, go to bakery
@@ -220,9 +236,12 @@ func _on_wait_finished() -> void:
 
 
 func _on_travel_timeout(_t: Node2D) -> void:
-	# Handle travel timeout - force recovery to RESTOCK phase
+	# [BUGFIX] Reset tick-based watchdog on time-based timeout
+	travel_ticks = 0
+	idle_ticks = 0
+	print("[BUGFIX] Baker: travel timeout, forcing RESTOCK")
 	if event_bus:
-		event_bus.log("Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % current_tick)
+		event_bus.log("[TRAVEL] Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % current_tick)
 	production_state = ProductionState.IDLE
 	phase = Phase.RESTOCK
 	pending_target = market_location
@@ -250,9 +269,11 @@ func perform_market_transactions() -> void:
 		Phase.RESTOCK:
 			# HYSTERESIS PROCUREMENT COUPLING: Don't buy wheat if bread production is paused
 			if not market.can_producer_produce("bread"):
-				# Production paused by hysteresis - don't buy inputs, transition to production (will idle)
+				# [BUGFIX] Add cooldown to prevent immediate market retry spin
+				hysteresis_cooldown_ticks = randi_range(5, 15)
+				print("[BUGFIX] Baker BUY blocked by hysteresis → cooldown %d ticks" % hysteresis_cooldown_ticks)
 				if event_bus:
-					event_bus.log("Tick %d: Baker skipping wheat purchase - bread production paused by hysteresis" % current_tick)
+					event_bus.log("[HYSTERESIS] Tick %d: Baker BUY blocked → cooldown %d ticks (bread production paused)" % [current_tick, hysteresis_cooldown_ticks])
 				phase = Phase.PRODUCE
 				pending_target = bakery_location
 				route.wait(WAIT_TIME)
@@ -276,6 +297,17 @@ func perform_market_transactions() -> void:
 				route.wait(WAIT_TIME)
 		
 		Phase.SELL:
+			# [BUGFIX] If selling is gated by hysteresis, back off with cooldown instead of spinning
+			if not market.can_producer_sell("bread"):
+				hysteresis_cooldown_ticks = randi_range(5, 15)
+				print("[BUGFIX] Baker SELL blocked by hysteresis → cooldown %d ticks" % hysteresis_cooldown_ticks)
+				if event_bus:
+					event_bus.log("[HYSTERESIS] Tick %d: Baker SELL blocked → cooldown %d ticks" % [current_tick, hysteresis_cooldown_ticks])
+				phase = Phase.PRODUCE
+				pending_target = bakery_location
+				route.wait(WAIT_TIME)
+				return
+			
 			# Check margin compression FIRST - throttle selling if margins too thin
 			if margin_compression and margin_compression.should_throttle_selling(BREAD_RECIPE):
 				# Margins compressed - don't sell, go back to produce more inventory
@@ -652,6 +684,61 @@ func on_day_changed(_day: int) -> void:
 	
 	# Reset daily production counter (authoritative reset on real day boundary)
 	bread_produced_today = 0
+
+
+func _check_travel_timeout() -> void:
+	if route == null:
+		return
+	if route.is_traveling:
+		travel_ticks += 1
+		if travel_ticks > MAX_TRAVEL_TICKS:
+			var tname: String = route.target.name if route.target else "null"
+			print("[BUGFIX] Baker: travel timeout reset after %d ticks (target=%s)" % [travel_ticks, tname])
+			if event_bus:
+				event_bus.log("[TRAVEL] Tick %d: Baker travel timeout reset (travel_ticks=%d, target=%s)" % [current_tick, travel_ticks, tname])
+			route.stop()
+			travel_ticks = 0
+			production_state = ProductionState.IDLE
+			phase = Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
+	else:
+		travel_ticks = 0
+
+
+func _check_idle_and_pause_guard() -> void:
+	if hunger == null or hunger.is_starving:
+		idle_ticks = 0
+		return
+	if hysteresis_cooldown_ticks > 0:
+		idle_ticks = 0
+		return
+	if route == null:
+		return
+	if route.is_traveling or route.is_waiting or route.target != null or pending_target != null:
+		idle_ticks = 0
+		return
+	if production_state != ProductionState.IDLE:
+		idle_ticks = 0
+		return
+	idle_ticks += 1
+	if idle_ticks < MAX_IDLE_TICKS:
+		return
+	idle_ticks = 0
+	# [BUGFIX] Production pause safety: if paused by hysteresis, back off with cooldown
+	if market and not market.can_producer_produce("bread"):
+		hysteresis_cooldown_ticks = randi_range(5, 15)
+		print("[BUGFIX] Baker: idle during production pause → cooldown %d ticks" % hysteresis_cooldown_ticks)
+		if event_bus:
+			event_bus.log("[HYSTERESIS] Tick %d: Baker idle during production pause, cooldown %d ticks" % [current_tick, hysteresis_cooldown_ticks])
+	else:
+		# [BUGFIX] Idle guard: not blocked - force dispatch toward market
+		print("[STATE] Baker: idle guard triggered, forcing RESTOCK")
+		if event_bus:
+			event_bus.log("[STATE] Tick %d: Baker idle guard triggered, forcing RESTOCK" % current_tick)
+		phase = Phase.RESTOCK
+		pending_target = market_location
+		route.wait(WAIT_TIME)
 
 
 func get_status_text() -> String:

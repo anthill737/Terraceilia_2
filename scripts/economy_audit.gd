@@ -3,6 +3,14 @@ class_name EconomyAudit
 
 
 func audit(farmer: Farmer, baker: Baker, market: Market, bus: EventBus, tick: int) -> void:
+	# [BUGFIX] Guard against freed instances — agents may have migrated since last tick
+	if farmer == null or not is_instance_valid(farmer):
+		return
+	if baker == null or not is_instance_valid(baker):
+		return
+	if market == null or not is_instance_valid(market):
+		return
+
 	var errors: Array[String] = []
 	
 	# Check farmer

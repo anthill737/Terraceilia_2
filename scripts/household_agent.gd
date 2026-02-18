@@ -70,6 +70,12 @@ var pending_target: Node2D = null
 # Validation flag - only log missing nodes once
 var _validation_logged: bool = false
 
+# [BUGFIX] Travel and idle watchdog state
+var travel_ticks: int = 0
+const MAX_TRAVEL_TICKS: int = 300
+var idle_ticks: int = 0
+const MAX_IDLE_TICKS: int = 10
+
 
 func _ready() -> void:
 	# Validate critical child nodes exist
@@ -98,6 +104,7 @@ func _ready() -> void:
 		route.arrival_distance = ARRIVAL_DISTANCE
 		route.arrived.connect(_on_arrived)
 		route.wait_finished.connect(_on_wait_finished)
+		route.travel_timeout.connect(_on_travel_timeout)
 	
 	# Connect starvation death signal
 	if hunger:
@@ -179,6 +186,10 @@ func set_tick(t: int) -> void:
 		food_reserve.check_survival_mode()
 		# Update survival override (though household doesn't produce food)
 		food_reserve.update_survival_override()
+	
+	# [BUGFIX] Defensive state guards
+	_check_travel_timeout()
+	_check_idle_guard()
 
 
 func set_locations(home: Node2D, market_node: Node2D) -> void:
@@ -192,6 +203,9 @@ func set_locations(home: Node2D, market_node: Node2D) -> void:
 
 
 func _on_arrived(t: Node2D) -> void:
+	# [BUGFIX] Reset travel watchdog on arrival
+	travel_ticks = 0
+	idle_ticks = 0
 	if t == market_location:
 		# Arrived at market - buy bread
 		attempt_buy_bread()
@@ -325,6 +339,57 @@ func log_travel_decision(action: String) -> void:
 		
 		if action == "going to market":
 			last_market_trip_tick = current_tick
+
+
+func _on_travel_timeout(_t: Node2D) -> void:
+	travel_ticks = 0
+	idle_ticks = 0
+	print("[BUGFIX] %s: travel timeout recovery - returning home" % get_display_name())
+	if event_bus:
+		event_bus.log("[TRAVEL] Tick %d: %s travel timeout recovery - returning home" % [current_tick, name])
+	phase = Phase.AT_HOME
+	pending_target = home_location
+	if route:
+		route.wait(WAIT_TIME)
+
+
+func _check_travel_timeout() -> void:
+	if route == null:
+		return
+	if route.is_traveling:
+		travel_ticks += 1
+		if travel_ticks > MAX_TRAVEL_TICKS:
+			var tname: String = route.target.name if route.target else "null"
+			print("[BUGFIX] %s: travel timeout reset after %d ticks (target=%s)" % [get_display_name(), travel_ticks, tname])
+			if event_bus:
+				event_bus.log("[TRAVEL] Tick %d: %s travel timeout reset (travel_ticks=%d, target=%s)" % [current_tick, name, travel_ticks, tname])
+			route.stop()
+			travel_ticks = 0
+			phase = Phase.AT_HOME
+			pending_target = home_location
+			route.wait(WAIT_TIME)
+	else:
+		travel_ticks = 0
+
+
+func _check_idle_guard() -> void:
+	if route == null:
+		return
+	if route.is_traveling or route.is_waiting or route.target != null or pending_target != null:
+		idle_ticks = 0
+		return
+	idle_ticks += 1
+	if idle_ticks < MAX_IDLE_TICKS:
+		return
+	idle_ticks = 0
+	print("[BUGFIX] %s: idle guard triggered" % get_display_name())
+	if event_bus:
+		event_bus.log("[STATE] Tick %d: %s idle guard triggered" % [current_tick, name])
+	if needs_food_trip():
+		pending_target = market_location
+	else:
+		pending_target = home_location
+	route.wait(WAIT_TIME)
 
 
 func get_status_text() -> String:

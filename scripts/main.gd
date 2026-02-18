@@ -273,15 +273,31 @@ func _on_tick(tick: int) -> void:
 	if prosperity_meter:
 		prosperity_meter.update_prosperity(calendar.day_index)
 		
-		# Check if we should spawn a new household
-		# [SCARCITY GUARD] Suppress pop growth during food scarcity to avoid famine amplification
-		var suppress_spawn: bool = labor_market != null and labor_market.should_suppress_spawn()
+		# [SCARCITY GUARD] Suppress pop growth during food scarcity — but NEVER when
+		# population is already zero (we need at least one household to create demand).
+		var suppress_spawn: bool = (
+			labor_market != null and
+			labor_market.should_suppress_spawn() and
+			households.size() > 0
+		)
+		
+		# Log spawn decision every 5 days to aid debugging
+		if event_bus and calendar.day_index % 5 == 0:
+			event_bus.log("[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
+				calendar.day_index,
+				prosperity_meter.prosperity_score,
+				prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW,
+				suppress_spawn,
+				households.size()
+			])
+		
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
 			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
 			spawn_household_at(spawn_pos)
 	
-	# Run audit checks
-	audit.audit(farmer, baker, market, bus, tick)
+	# Run audit checks — skip if either base agent has been freed by migration
+	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
+		audit.audit(farmer, baker, market, bus, tick)
 
 
 func _load_economy_config() -> void:
@@ -904,6 +920,17 @@ func _on_calendar_day_changed(day: int) -> void:
 		if h and is_instance_valid(h):
 			h.on_day_changed(day)
 	
+	# PART 4: Emergency respawn — prevent permanent dead-equilibrium.
+	# If the entire household population has been lost but the food supply chain
+	# is working, immediately bring in one new household rather than waiting for
+	# prosperity to tick up from a state it can't evaluate without any agents.
+	if households.size() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
+		if labor_market != null and labor_market.ever_had_bread_supply:
+			if event_bus:
+				event_bus.log("[SPAWN] Emergency respawn: population=0, food supply established (day=%d)" % day)
+			var emergency_pos := Vector2(randf_range(100, 700), randf_range(100, 500))
+			spawn_household_at(emergency_pos)
+
 	# Process pending role conversions (decrement countdown, spawn when ready)
 	var still_pending: Array = []
 	for entry in pending_conversions:
@@ -953,7 +980,11 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	# Also remove from pending_conversions if present
 	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
 	
+	var _migrated_name: String = agent.name
 	agent.queue_free()
+	print("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
+	if event_bus:
+		event_bus.log("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
 
 
 ## Handle a role_switch_requested signal from LaborMarket.
@@ -996,7 +1027,11 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		households.remove_at(h_idx)
 		household.remove_from_group("households")
 		household.remove_from_group("agents")
+	var _converting_name: String = household.name
 	household.queue_free()
+	print("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
+	if event_bus:
+		event_bus.log("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
 	
 	# Spawn the new producer; transfer money after spawn wires the Wallet
 	if role == "farmer":

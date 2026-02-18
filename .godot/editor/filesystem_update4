@@ -1,8 +1,4 @@
-res://scripts/farmer.gd
+res://scripts/labor_market.gd
+res://scripts/economy_audit.gd
 res://scripts/main.gd
-res://scripts/market.gd
-res://scripts/field_plot.gd
-res://scripts/baker.gd
 res://scripts/prosperity_meter.gd
-res://scripts/components/production_batch.gd
-res://scripts/household_agent.gd

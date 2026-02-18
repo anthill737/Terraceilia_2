@@ -23,6 +23,11 @@ const MIGRATION_NO_FOOD_DAYS: int = 4      # Consecutive days without food → m
 const MIGRATION_NEG_PROFIT_DAYS: int = 8  # Consecutive days negative cashflow → migrate
 const MIGRATION_SURVIVAL_DAYS: int = 5    # Days in survival mode → migrate
 
+# ─── Startup grace period ─────────────────────────────────────────────────────
+## Days at sim start during which household migration is suppressed.
+## Matches SimulationRunner.STARTUP_GRACE_DAYS — keep in sync if tuning.
+const STARTUP_GRACE_DAYS: int = 5
+
 # ─── Spawn suppression ────────────────────────────────────────────────────────
 const SPAWN_SUPPRESS_SCARCITY: float = 0.5  # Suppress new household spawn above this
 
@@ -48,6 +53,12 @@ var market = null
 var event_bus = null
 
 var _initialized: bool = false
+
+# ── Startup bootstrap tracking ────────────────────────────────────────────────
+## Set to true the first time the market holds any bread inventory.
+## Migration is suppressed until this is true AND the startup grace period expires.
+## See SimulationRunner.STARTUP_GRACE_DAYS for the grace window.
+var ever_had_bread_supply: bool = false
 
 
 ## Call after instantiation to wire market and event bus.
@@ -81,6 +92,14 @@ func update_daily(day: int) -> void:
 		event_bus.log("[LaborMkt] Day %d | f_profit=%.2f b_profit=%.2f bread_scar=%.2f wheat_scar=%.2f" % [
 			day, farmer_profit_ema, baker_profit_ema, bread_scarcity_ema, wheat_scarcity_ema])
 
+	# Track first-ever bread supply (checked before household evaluation each day).
+	# market.on_day_changed fires before update_daily, so market.bread reflects
+	# current inventory after yesterday's trading and overnight decay.
+	if not ever_had_bread_supply and market != null and market.bread > 0:
+		ever_had_bread_supply = true
+		if event_bus:
+			event_bus.log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
+
 	# Evaluate each household for role switch or migration
 	# Iterate a duplicate to guard against array modification during iteration
 	for h in all_households.duplicate():
@@ -93,8 +112,8 @@ func update_daily(day: int) -> void:
 
 # ─── Household evaluation ────────────────────────────────────────────────────
 
-## Evaluate a single household: migration first, then role switch.
-func _evaluate_household(h: Node, _day: int) -> void:
+## Evaluate a single household: migration first (with grace gate), then role switch.
+func _evaluate_household(h: Node, day: int) -> void:
 	# Tick down switch cooldown
 	if h.switch_cooldown_days > 0:
 		h.switch_cooldown_days -= 1
@@ -105,18 +124,56 @@ func _evaluate_household(h: Node, _day: int) -> void:
 	else:
 		h.days_in_survival_mode = 0
 
+	# ── Startup grace / bootstrap gate ───────────────────────────────────────
+	# Migration is suppressed during the startup grace window, and also until
+	# bread has ever existed at market (prevents evicting households before the
+	# supply chain has had any chance to bootstrap).
+	var in_grace: bool = (day < STARTUP_GRACE_DAYS)
+	var allow_migration: bool = (not in_grace) and ever_had_bread_supply
+
+	# During startup grace: log any would-be migration, bypass switch cooldown
+	# so role mobility can still fire (EMA-based), then reset streaks so
+	# households get a clean measurement after grace expires.
+	if in_grace:
+		if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS or \
+				h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
+			if event_bus:
+				event_bus.log("[MIGRATION] suppressed (startup grace) - day=%d fail_streak=%d survival=%d" % [
+					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
+			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
+		h.consecutive_failed_food_days = 0
+		h.days_in_survival_mode = 0
+		# Fall through to role switch evaluation (EMA-driven, not streak-driven)
+
 	# ── Migration check (priority over role switch) ──────────────────────────
 	if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS:
-		if event_bus:
-			event_bus.log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
-		migrate_requested.emit(h, "survival")
-		return
+		if allow_migration:
+			if event_bus:
+				event_bus.log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
+			migrate_requested.emit(h, "survival")
+			return
+		else:
+			# Post-grace but bread never established - suppress and reset
+			if event_bus:
+				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d survival=%d" % [
+					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
+			h.consecutive_failed_food_days = 0
+			h.days_in_survival_mode = 0
+			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 
 	if h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
-		if event_bus:
-			event_bus.log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
-		migrate_requested.emit(h, "no_food")
-		return
+		if allow_migration:
+			if event_bus:
+				event_bus.log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
+			migrate_requested.emit(h, "no_food")
+			return
+		else:
+			if event_bus:
+				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d" % [
+					day, h.consecutive_failed_food_days])
+			h.consecutive_failed_food_days = 0
+			h.days_in_survival_mode = 0
+			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 
 	# ── Role switch check (only if cooldown elapsed) ─────────────────────────
 	if h.switch_cooldown_days > 0:

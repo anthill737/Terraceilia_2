@@ -56,6 +56,13 @@ var maintenance_cost_per_day: float = 0.2      # Coin/day upkeep deducted at day
 var consecutive_days_negative_cashflow: int = 0 # Tracked by on_day_changed
 var day_money_start: float = -1.0              # Sentinel: -1 = not yet initialized
 
+# [BUGFIX] Travel and idle watchdog state
+var travel_ticks: int = 0
+const MAX_TRAVEL_TICKS: int = 300
+var hysteresis_cooldown_ticks: int = 0
+var idle_ticks: int = 0
+const MAX_IDLE_TICKS: int = 10
+
 
 func get_display_name() -> String:
 	return "Farmer"
@@ -77,6 +84,12 @@ func set_tick(t: int) -> void:
 		food_reserve.update_survival_override()
 	if t == 0 and event_bus:
 		event_bus.log("Tick 0: Farmer starting food=%d" % inv.get_qty("bread"))
+	
+	# [BUGFIX] Defensive state guards
+	if hysteresis_cooldown_ticks > 0:
+		hysteresis_cooldown_ticks -= 1
+	_check_travel_timeout()
+	_check_idle_guard()
 
 
 func _ready() -> void:
@@ -103,6 +116,7 @@ func _ready() -> void:
 	route.arrival_distance = ARRIVAL_DISTANCE
 	route.arrived.connect(_on_arrived)
 	route.wait_finished.connect(_on_wait_finished)
+	route.travel_timeout.connect(_on_travel_timeout)
 
 
 func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
@@ -166,6 +180,9 @@ func _physics_process(_delta: float) -> void:
 
 
 func _on_arrived(t: Node2D) -> void:
+	# [BUGFIX] Reset travel watchdog on arrival
+	travel_ticks = 0
+	idle_ticks = 0
 	# Handle arrival actions
 	handle_arrival(t)
 	
@@ -292,6 +309,58 @@ func on_day_changed(_day: int) -> void:
 	
 	# Reset daily field-work counter
 	fields_worked_today = 0
+
+
+func _on_travel_timeout(_t: Node2D) -> void:
+	travel_ticks = 0
+	print("[BUGFIX] Farmer: travel timeout, restarting route")
+	if event_bus:
+		event_bus.log("[TRAVEL] Tick %d: Farmer travel timeout recovery - restarting route" % current_tick)
+	pending_target = route_targets[route_index] if route_targets.size() > 0 else null
+	if pending_target:
+		route.wait(WAIT_TIME)
+
+
+func _check_travel_timeout() -> void:
+	if route == null:
+		return
+	if route.is_traveling:
+		travel_ticks += 1
+		if travel_ticks > MAX_TRAVEL_TICKS:
+			var tname: String = route.target.name if route.target else "null"
+			print("[BUGFIX] Farmer: travel timeout reset after %d ticks (target=%s)" % [travel_ticks, tname])
+			if event_bus:
+				event_bus.log("[TRAVEL] Tick %d: Farmer travel timeout reset (travel_ticks=%d, target=%s)" % [current_tick, travel_ticks, tname])
+			route.stop()
+			travel_ticks = 0
+			pending_target = route_targets[route_index] if route_targets.size() > 0 else null
+			if pending_target:
+				route.wait(WAIT_TIME)
+	else:
+		travel_ticks = 0
+
+
+func _check_idle_guard() -> void:
+	if hunger == null or hunger.is_starving:
+		idle_ticks = 0
+		return
+	if hysteresis_cooldown_ticks > 0:
+		idle_ticks = 0
+		return
+	if route == null:
+		return
+	if route.is_traveling or route.is_waiting or route.target != null or pending_target != null:
+		idle_ticks = 0
+		return
+	idle_ticks += 1
+	if idle_ticks < MAX_IDLE_TICKS:
+		return
+	idle_ticks = 0
+	print("[BUGFIX] Farmer: idle guard triggered, restarting route")
+	if event_bus:
+		event_bus.log("[STATE] Tick %d: Farmer idle guard triggered, restarting route" % current_tick)
+	if route_targets.size() > 0:
+		route.set_target(route_targets[route_index])
 
 
 func get_status_text() -> String:

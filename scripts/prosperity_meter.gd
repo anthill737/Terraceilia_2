@@ -24,7 +24,7 @@ var STARVATION_WINDOW_DAYS: int = 7
 var HUNGER_SAFE_RATIO: float = 0.5
 var TRADE_WINDOW_DAYS: int = 7
 var TRADE_VALUE_TARGET: float = 100.0
-var PROSPERITY_THRESHOLD_TO_GROW: float = 0.70
+var PROSPERITY_THRESHOLD_TO_GROW: float = 0.60
 var PROSPERITY_THRESHOLD_TO_PAUSE: float = 0.60
 var GROWTH_COOLDOWN_DAYS: int = 1
 var SMOOTHING_STRENGTH: float = 0.3
@@ -95,7 +95,9 @@ func bind_references(bus, mkt, household_list: Array) -> void:
 
 func update_prosperity(day: int) -> void:
 	"""Compute prosperity score from current economic conditions. Call once per day."""
-	if market == null or households.size() == 0:
+	# Only skip if market is absent — allow prosperity to update even with zero households
+	# so that spawning can still trigger when the economy is healthy after population loss.
+	if market == null:
 		return
 	
 	# Track current starvation events
@@ -182,7 +184,9 @@ func record_trade_value(_day: int, value: float) -> void:
 func _compute_wealth_health() -> float:
 	"""Compute normalized wealth health score (0-1)."""
 	if households.size() == 0:
-		return 0.0
+		# No households to measure — return neutral so empty-population doesn't
+		# permanently suppress prosperity and block respawning.
+		return 0.5
 	
 	var total_wealth: float = 0.0
 	for household in households:

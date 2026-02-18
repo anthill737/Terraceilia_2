@@ -38,6 +38,10 @@ var market_node: Node2D = null
 var event_bus: EventBus = null
 var economy_config: Dictionary = {}
 
+# Labor market (occupational mobility + migration)
+var labor_market: LaborMarket = null
+var pending_conversions: Array = []  # [{household, role, days_remaining}]
+
 # UI Labels
 var farmer_money_label: Label
 var farmer_seeds_label: Label
@@ -156,6 +160,8 @@ func _ready() -> void:
 	
 	# Wire calendar day_changed to market for daily price adjustments
 	calendar.day_changed.connect(market.on_day_changed)
+	# Wire calendar day_changed to labor market handler
+	calendar.day_changed.connect(_on_calendar_day_changed)
 	
 	# Wire event bus to all agents
 	market.event_bus = bus
@@ -207,6 +213,19 @@ func _ready() -> void:
 	# Bind prosperity meter references
 	prosperity_meter.bind_references(bus, market, households)
 	
+	# Initialize labor market
+	labor_market = LaborMarket.new()
+	labor_market.name = "LaborMarket"
+	add_child(labor_market)
+	labor_market.bind(market, bus)
+	# Share the SAME array objects so labor_market always sees current population
+	labor_market.all_farmers = all_farmers
+	labor_market.all_bakers = all_bakers
+	labor_market.all_households = households
+	# Connect labor market signals
+	labor_market.migrate_requested.connect(_on_migrate_requested)
+	labor_market.role_switch_requested.connect(_on_role_switch_requested)
+	
 	# Get UI label references
 	get_ui_labels()
 	
@@ -255,7 +274,9 @@ func _on_tick(tick: int) -> void:
 		prosperity_meter.update_prosperity(calendar.day_index)
 		
 		# Check if we should spawn a new household
-		if prosperity_meter.should_spawn_household(calendar.day_index):
+		# [SCARCITY GUARD] Suppress pop growth during food scarcity to avoid famine amplification
+		var suppress_spawn: bool = labor_market != null and labor_market.should_suppress_spawn()
+		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
 			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
 			spawn_household_at(spawn_pos)
 	
@@ -860,6 +881,136 @@ func _on_household_died(household: HouseholdAgent) -> void:
 	household.remove_from_group("agents")
 	
 	# household will queue_free() itself, no need to call it here
+
+
+# ============================================================================
+# LABOR MARKET - Occupational mobility, migration, and role conversion
+# ============================================================================
+
+## Called once per game day when the calendar emits day_changed.
+func _on_calendar_day_changed(day: int) -> void:
+	# Update labor market EMA signals
+	if labor_market:
+		labor_market.update_daily(day)
+	
+	# Propagate day change to all agents
+	for f in all_farmers:
+		if f and is_instance_valid(f):
+			f.on_day_changed(day)
+	for b in all_bakers:
+		if b and is_instance_valid(b):
+			b.on_day_changed(day)
+	for h in households:
+		if h and is_instance_valid(h):
+			h.on_day_changed(day)
+	
+	# Process pending role conversions (decrement countdown, spawn when ready)
+	var still_pending: Array = []
+	for entry in pending_conversions:
+		var h = entry["household"]
+		var role: String = entry["role"]
+		var days_left: int = entry["days_remaining"] - 1
+		if not is_instance_valid(h):
+			continue  # Household already removed (e.g. starved during training)
+		if days_left <= 0:
+			_perform_role_conversion(h, role)
+		else:
+			entry["days_remaining"] = days_left
+			still_pending.append(entry)
+	pending_conversions = still_pending
+
+
+## Handle a migrate_requested signal from LaborMarket.
+## Removes the agent from tracking arrays and eliminates it from the world.
+func _on_migrate_requested(agent: Node, reason: String) -> void:
+	if not is_instance_valid(agent):
+		return
+	if event_bus:
+		event_bus.log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
+	
+	# Remove from households if it's a household agent
+	var h_idx := households.find(agent)
+	if h_idx != -1:
+		households.remove_at(h_idx)
+		agent.remove_from_group("households")
+		agent.remove_from_group("agents")
+	
+	# Remove from farmers if it's a farmer
+	var f_idx := all_farmers.find(agent)
+	if f_idx != -1:
+		all_farmers.remove_at(f_idx)
+		# Release all assigned fields back to unassigned pool
+		for fn in all_field_nodes:
+			if is_instance_valid(fn) and field_assignment_map.get(fn, null) == agent:
+				field_assignment_map[fn] = null
+				agent.remove_field(fn)
+	
+	# Remove from bakers if it's a baker
+	var b_idx := all_bakers.find(agent)
+	if b_idx != -1:
+		all_bakers.remove_at(b_idx)
+	
+	# Also remove from pending_conversions if present
+	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
+	
+	agent.queue_free()
+
+
+## Handle a role_switch_requested signal from LaborMarket.
+## Queues a pending conversion that will resolve after a training delay.
+func _on_role_switch_requested(household: Node, new_role: String) -> void:
+	if not is_instance_valid(household):
+		return
+	
+	# Skip if this household is already queued for conversion
+	for entry in pending_conversions:
+		if entry["household"] == household:
+			return
+	
+	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
+	if event_bus:
+		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
+	
+	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
+
+
+## Perform the actual role conversion: despawn household, spawn producer.
+## Transfers wallet funds to give the new agent a starting stake.
+func _perform_role_conversion(household: Node, role: String) -> void:
+	if not is_instance_valid(household):
+		return
+	
+	var pos: Vector2 = household.global_position
+	var starting_money: float = 0.0
+	var w = household.get_node_or_null("Wallet")
+	if w:
+		starting_money = w.money
+	
+	if event_bus:
+		event_bus.log("[MOBILITY] %s → converting to %s at (%.0f, %.0f) with $%.2f" % [
+			household.name, role, pos.x, pos.y, starting_money])
+	
+	# Remove household from tracking BEFORE spawning to avoid labor_market counting it twice
+	var h_idx := households.find(household)
+	if h_idx != -1:
+		households.remove_at(h_idx)
+		household.remove_from_group("households")
+		household.remove_from_group("agents")
+	household.queue_free()
+	
+	# Spawn the new producer; transfer money after spawn wires the Wallet
+	if role == "farmer":
+		var new_farmer = await spawn_farmer_at(pos)
+		if new_farmer and is_instance_valid(new_farmer):
+			var fw = new_farmer.get_node_or_null("Wallet")
+			if fw:
+				fw.money = starting_money
+	elif role == "baker":
+		var new_baker = await spawn_baker_at(pos)
+		if new_baker and is_instance_valid(new_baker):
+			var bw = new_baker.get_node_or_null("Wallet")
+			if bw:
+				bw.money = starting_money
 
 
 # ============================================================================

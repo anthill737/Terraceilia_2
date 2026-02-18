@@ -77,6 +77,12 @@ var phase_error_cooldown: int = 100  # Only log phase errors once per 100 ticks
 var last_diagnostic_day: int = -1
 var bread_produced_today: int = 0
 
+# Capital constraints (B) - maintenance costs and production capacity
+var oven_capacity_per_day: int = 15            # Max bread baked per day
+var maintenance_cost_per_day: float = 0.3      # Coin/day upkeep deducted at day start
+var consecutive_days_negative_cashflow: int = 0 # Tracked by on_day_changed
+var day_money_start: float = -1.0              # Sentinel: -1 = not yet initialized
+
 
 func get_display_name() -> String:
 	return "Baker"
@@ -534,6 +540,17 @@ func process_baking(delta: float) -> void:
 			route.wait(WAIT_TIME)
 			return
 		
+		# Capital constraint: respect daily oven capacity cap
+		if bread_produced_today >= oven_capacity_per_day:
+			if event_bus:
+				event_bus.log("Tick %d: Baker [CAP] oven capacity reached (%d/%d) - going to sell" % [
+					current_tick, bread_produced_today, oven_capacity_per_day])
+			production_state = ProductionState.IDLE
+			phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
+			pending_target = market_location
+			route.wait(WAIT_TIME)
+			return
+		
 		# Compute safe batch size with inventory throttling
 		var target_batch: int = BAKE_BATCH_SIZE
 		
@@ -614,6 +631,27 @@ func process_baking(delta: float) -> void:
 						phase = Phase.RESTOCK
 					pending_target = market_location
 					route.wait(WAIT_TIME)
+
+
+## Called once per game day by main._on_calendar_day_changed.
+func on_day_changed(_day: int) -> void:
+	# Evaluate yesterday's cashflow BEFORE paying today's maintenance
+	var cur_money: float = wallet.money if wallet else 0.0
+	if day_money_start >= 0.0:  # Skip the very first call (sentinel -1.0)
+		if cur_money <= day_money_start:
+			consecutive_days_negative_cashflow += 1
+		else:
+			consecutive_days_negative_cashflow = 0
+	
+	# Pay maintenance cost for today
+	if wallet and maintenance_cost_per_day > 0.0:
+		wallet.debit(maintenance_cost_per_day)
+	
+	# Snapshot money after maintenance for next day's comparison
+	day_money_start = wallet.money if wallet else 0.0
+	
+	# Reset daily production counter (authoritative reset on real day boundary)
+	bread_produced_today = 0
 
 
 func get_status_text() -> String:

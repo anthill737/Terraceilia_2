@@ -41,6 +41,12 @@ var last_logged_price_adjustment_tick: int = -999999  # Prevent log spam
 var last_market_trip_tick: int = -999999  # Last tick household went to market
 var logged_staying_home: bool = false  # Prevent log spam when staying home
 
+# Labor-market tracking (read/written by LaborMarket and main.gd)
+var switch_cooldown_days: int = 0          # Days remaining before this household can switch roles
+var training_days_remaining: int = 0       # Days until role conversion completes
+var days_in_survival_mode: int = 0         # Consecutive days in survival mode (updated by LaborMarket)
+var consecutive_failed_food_days: int = 0  # Days in a row with zero bread purchased at market
+
 # Constants
 const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
@@ -218,6 +224,12 @@ func _on_arrived(t: Node2D) -> void:
 
 func _on_wait_finished() -> void:
 	if pending_target != null:
+		# [BUGFIX] Re-check if we still need to go to market before committing.
+		# Conditions may have changed (e.g. bread delivered home) while waiting.
+		if pending_target == market_location and not needs_food_trip():
+			pending_target = home_location
+			if event_bus:
+				event_bus.log("Tick %d: %s [BUGFIX] market trip cancelled - need resolved during wait" % [current_tick, name])
 		# Only log travel decisions (not staying home loops)
 		if pending_target == market_location and pending_target != route.target:
 			log_travel_decision("going to market")
@@ -241,9 +253,10 @@ func attempt_buy_bread() -> void:
 		var desired: int = ceili(deficit * buy_batch_multiplier)
 		
 		if desired == 0:
-			# This should NOT happen if travel decision was correct
+			# [BUGFIX] This can occur if needs_food_trip() wasn't re-checked before travel.
+			# Demoted from ERROR to a soft warning to suppress log spam.
 			if event_bus:
-				event_bus.log("Tick %d: %s ERROR - at market but no deficit (%d/%d)! Travel decision bug!" % [current_tick, name, current_bread, effective_reserve_target])
+				event_bus.log("Tick %d: %s [BUGFIX] at market but no deficit (%d/%d) - returning home" % [current_tick, name, current_bread, effective_reserve_target])
 			return
 		
 		# Attempt to buy desired amount using market's household function
@@ -252,11 +265,13 @@ func attempt_buy_bread() -> void:
 		# Add purchased bread to inventory
 		if qty_bought > 0:
 			inv.add("bread", qty_bought)
+			consecutive_failed_food_days = 0  # Reset streak on any successful purchase
 			if event_bus:
 				event_bus.log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [current_tick, name, qty_bought, desired, inv.get_qty("bread")])
 		else:
+			consecutive_failed_food_days += 1  # Count days market had no bread for us
 			if event_bus:
-				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty)" % [current_tick, name, desired])
+				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [current_tick, name, desired, consecutive_failed_food_days])
 
 
 func consume_bread_at_home() -> void:
@@ -326,6 +341,13 @@ func get_status_text() -> String:
 		return "Going Home"
 	
 	return route.get_status_text()
+
+
+## Called once per game day by main._on_calendar_day_changed.
+func on_day_changed(_day: int) -> void:
+	# Tick down training countdown (used by main.gd for pending conversions)
+	if training_days_remaining > 0:
+		training_days_remaining -= 1
 
 
 ## Handle starvation death - household has run out of food and hunger reached zero.

@@ -20,11 +20,22 @@ var event_bus: EventBus = null
 var current_tick: int = 0
 
 # Travel Config (tunable survival triggers)
-@export var reserve_target_bread: int = 3  # Target bread reserve
+@export var reserve_target_bread: int = 3  # Target bread reserve (base level)
 @export var reserve_min_bread: int = 0  # Emergency threshold
 @export var hunger_buy_threshold_ratio: float = 0.4  # Go to market when hunger <= 40%
 @export var buy_batch_multiplier: float = 1.0  # Buy multiplier (1.0 = exact deficit)
 @export var market_trip_cooldown_ticks: int = 0  # Cooldown between trips (0 = none)
+
+# Demand Elasticity Config (price sensitivity)
+@export var bread_price_soft_cap: float = 4.0  # Price above which reserve target begins reducing
+@export var bread_price_hard_cap: float = 7.0  # Price above which non-emergency purchases stop
+@export var emergency_hunger_threshold: float = 0.2  # Hunger ratio below which emergency buying triggers (20%)
+@export var reserve_target_base: int = 3  # Base reserve target at normal prices
+@export var reserve_target_min: int = 1  # Minimum reserve target at high prices
+
+# Effective reserve target (dynamically adjusted based on price)
+var effective_reserve_target: int = 3
+var last_logged_price_adjustment_tick: int = -999999  # Prevent log spam
 
 # Travel State
 var last_market_trip_tick: int = -999999  # Last tick household went to market
@@ -113,6 +124,38 @@ func _validate_components() -> void:
 		_validation_logged = true
 
 
+func _calculate_effective_reserve_target() -> int:
+	"""Calculate effective reserve target based on current bread price (demand elasticity).
+	Returns adjusted target: higher prices = lower target, preserving price sensitivity."""
+	if market == null:
+		return reserve_target_base
+	
+	var current_price: float = market.bread_price
+	
+	# Below soft cap: full reserve target
+	if current_price <= bread_price_soft_cap:
+		return reserve_target_base
+	
+	# Above hard cap: minimum reserve target (emergency only)
+	if current_price >= bread_price_hard_cap:
+		return reserve_target_min
+	
+	# Between soft and hard cap: linear interpolation
+	var price_range: float = bread_price_hard_cap - bread_price_soft_cap
+	var price_excess: float = current_price - bread_price_soft_cap
+	var reduction_ratio: float = price_excess / price_range
+	var target_range: float = float(reserve_target_base - reserve_target_min)
+	var adjusted_target: int = reserve_target_base - int(reduction_ratio * target_range)
+	
+	# Log occasionally when price causes adjustment (not every tick)
+	if adjusted_target != reserve_target_base and current_tick - last_logged_price_adjustment_tick > 100:
+		if event_bus:
+			event_bus.log("%s high price $%.2f: reserve_target %d→%d" % [name, current_price, reserve_target_base, adjusted_target])
+		last_logged_price_adjustment_tick = current_tick
+	
+	return clamp(adjusted_target, reserve_target_min, reserve_target_base)
+
+
 func _on_ate_meal(qty: int) -> void:
 	bread_consumed += qty
 
@@ -123,6 +166,8 @@ func get_display_name() -> String:
 
 func set_tick(t: int) -> void:
 	current_tick = t
+	# Recalculate effective reserve target based on current bread price
+	effective_reserve_target = _calculate_effective_reserve_target()
 	if food_reserve:
 		food_reserve.set_tick(t)
 		food_reserve.check_survival_mode()
@@ -161,12 +206,12 @@ func _on_arrived(t: Node2D) -> void:
 			pending_target = market_location
 			# Log decision with fresh data
 			if event_bus and not logged_staying_home:
-				event_bus.log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, reserve_target_bread, hunger_ratio * 100])
+				event_bus.log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, effective_reserve_target, hunger_ratio * 100])
 		else:
 			pending_target = home_location  # Stay home
 			# Log staying home once per cycle
 			if event_bus and not logged_staying_home:
-				event_bus.log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, reserve_target_bread, hunger_ratio * 100])
+				event_bus.log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [current_tick, name, current_bread, effective_reserve_target, hunger_ratio * 100])
 				logged_staying_home = true
 		route.wait(WAIT_TIME)
 
@@ -184,13 +229,21 @@ func attempt_buy_bread() -> void:
 	if market and wallet and inv:
 		# Calculate desired purchase quantity with FRESH data
 		var current_bread: int = inv.get_qty("bread")
-		var deficit: int = max(0, reserve_target_bread - current_bread)
+		var hunger_ratio: float = float(hunger.hunger_days) / float(hunger.hunger_max_days) if hunger != null and hunger.hunger_max_days > 0 else 1.0
+		
+		# Determine effective target: use emergency override if critical hunger or zero reserve
+		var target_to_use: int = effective_reserve_target
+		if hunger_ratio <= emergency_hunger_threshold or current_bread == 0:
+			# Emergency: always try to buy at least 1, ignore price caps
+			target_to_use = max(reserve_target_base, 1)
+		
+		var deficit: int = max(0, target_to_use - current_bread)
 		var desired: int = ceili(deficit * buy_batch_multiplier)
 		
 		if desired == 0:
 			# This should NOT happen if travel decision was correct
 			if event_bus:
-				event_bus.log("Tick %d: %s ERROR - at market but no deficit (%d/%d)! Travel decision bug!" % [current_tick, name, current_bread, reserve_target_bread])
+				event_bus.log("Tick %d: %s ERROR - at market but no deficit (%d/%d)! Travel decision bug!" % [current_tick, name, current_bread, effective_reserve_target])
 			return
 		
 		# Attempt to buy desired amount using market's household function
@@ -226,14 +279,16 @@ func needs_food_trip() -> bool:
 	var current_bread: int = inv.get_qty("bread")
 	var hunger_ratio: float = float(hunger.hunger_days) / float(hunger.hunger_max_days) if hunger.hunger_max_days > 0 else 1.0
 	
-	# Emergency triggers (hard)
+	# Emergency triggers (hard) - override price sensitivity
 	if current_bread == 0:
 		return true
 	if hunger.hunger_days == 0:
 		return true
+	if hunger_ratio <= emergency_hunger_threshold:
+		return true
 	
-	# Reserve trigger
-	if current_bread < reserve_target_bread:
+	# Reserve trigger - uses effective (price-adjusted) target
+	if current_bread < effective_reserve_target:
 		return true
 	
 	# Hunger trigger
@@ -249,7 +304,7 @@ func log_travel_decision(action: String) -> void:
 		var current_bread: int = inv.get_qty("bread")
 		event_bus.log("Tick %d: %s %s (reserve=%d/%d, hunger=%d/%d)" % [
 			current_tick, name, action,
-			current_bread, reserve_target_bread,
+			current_bread, effective_reserve_target,
 			hunger.hunger_days, hunger.hunger_max_days
 		])
 		

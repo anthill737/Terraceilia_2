@@ -132,6 +132,13 @@ func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
 
 
 func _rebuild_route() -> void:
+	# [BUGFIX] Safety: a farmer with no fields enters a silent economic dead zone
+	# (house → market loop with no wheat production). Log clearly so it is findable.
+	if fields.size() == 0:
+		print("[ERROR] Farmer %s has no fields — will loop house/market without producing" % get_display_name())
+		if event_bus:
+			event_bus.log("[ERROR] Farmer %s has no fields assigned" % get_display_name())
+	
 	route_targets.clear()
 	if house_node:
 		route_targets.append(house_node)
@@ -220,6 +227,12 @@ func handle_house_arrival() -> void:
 
 
 func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
+	# [BUGFIX] Defensive guard — should never be zero when this function is called,
+	# but catches data-integrity problems early with a clear error message.
+	if fields.size() == 0:
+		print("[ERROR] Farmer has no fields")
+		return
+	
 	# Capital constraint: respect daily field-work capacity
 	if fields_worked_today >= field_work_capacity_per_day:
 		if event_bus:

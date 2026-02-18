@@ -10,6 +10,11 @@ var audit: EconomyAudit = null
 var calendar: Calendar = null
 var prosperity_meter: ProsperityMeter = null
 
+# ── Land capacity ─────────────────────────────────────────────────────────────
+## Maximum number of fields allowed in the simulation simultaneously.
+## Farmer role-conversions are blocked when this limit is reached.
+const MAX_FIELDS: int = 10
+
 # Dynamic entity tracking
 var all_fields: Array = []       # All FieldPlot nodes (for ticking)
 var all_field_nodes: Array = []  # All field Node2D scene nodes
@@ -1011,6 +1016,15 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	if not is_instance_valid(household):
 		return
 	
+	# [LAND] Gate farmer conversions on field capacity BEFORE removing the household.
+	# If we are at the land cap we cancel the conversion; the household stays alive
+	# and the pending_conversions entry is simply dropped for this cycle.
+	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
+		if event_bus:
+			event_bus.log("[MOBILITY] farmer conversion blocked — land cap reached (%d/%d fields)" % [
+				all_field_nodes.size(), MAX_FIELDS])
+		return
+	
 	var pos: Vector2 = household.global_position
 	var starting_money: float = 0.0
 	var w = household.get_node_or_null("Wallet")
@@ -1040,6 +1054,21 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			var fw = new_farmer.get_node_or_null("Wallet")
 			if fw:
 				fw.money = starting_money
+			
+			# [LAND] Spawn one field and assign it directly to the new farmer.
+			# Position it within ~150 px of the farmer's home, clamped to play area.
+			var field_pos := Vector2(
+				clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
+				clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
+			)
+			var new_field := spawn_field_at(field_pos, new_farmer)
+			if new_field and is_instance_valid(new_field):
+				if event_bus:
+					event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
+						new_farmer.name, field_pos.x, field_pos.y])
+			else:
+				if event_bus:
+					event_bus.log("[LAND] WARNING: field spawn failed for farmer %s" % new_farmer.name)
 	elif role == "baker":
 		var new_baker = await spawn_baker_at(pos)
 		if new_baker and is_instance_valid(new_baker):
@@ -1128,8 +1157,10 @@ func _place_entity_at(pos: Vector2) -> void:
 # SPAWN SYSTEM - Entity creation with full wiring
 # ============================================================================
 
-func spawn_field_at(pos: Vector2) -> Node2D:
-	"""Spawn a new field at the given position. Unassigned by default (user assigns via panel)."""
+func spawn_field_at(pos: Vector2, assign_to: Node = null) -> Node2D:
+	"""Spawn a new field at the given position.
+	If assign_to is provided the field is assigned directly (no popup).
+	Otherwise falls back to auto-assign (single farmer) or popup (multiple farmers)."""
 	# Create field node with FieldPlot script
 	var field_node = Node2D.new()
 	field_node.name = "Field%d" % next_field_id
@@ -1166,8 +1197,13 @@ func spawn_field_at(pos: Vector2) -> Node2D:
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
 	
-	# Show assignment popup (unless only 1 farmer — auto-assign that case)
-	if all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
+	# Resolve assignment:
+	# 1) Explicit target (labour-mobility conversion) — no popup, no auto-assign ambiguity.
+	# 2) Single farmer in world — auto-assign silently.
+	# 3) Multiple farmers — show the user a popup to choose.
+	if assign_to != null and is_instance_valid(assign_to):
+		_assign_field_to_farmer(field_node, assign_to)
+	elif all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
 		_assign_field_to_farmer(field_node, all_farmers[0])
 	else:
 		_show_field_assignment_popup(field_node, pos)

@@ -113,6 +113,10 @@ var pop_inspector_panel: Control = null
 var pop_inspector_title: Label = null
 var pop_inspector_role: Label = null
 var pop_inspector_body: RichTextLabel = null
+var pop_history_label: RichTextLabel = null
+
+# Persistent identity counter — incremented each time a pop is born
+var _next_person_id: int = 1
 
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
@@ -137,28 +141,35 @@ func _ready() -> void:
 	_resolve_baker_scene()
 	
 	# Create simulation systems
+	# All simulation nodes are marked PAUSABLE so get_tree().paused = true stops them.
+	# (Main node itself is PROCESS_MODE_ALWAYS so _input/_process keep working for UI.)
 	clock = SimulationClock.new()
 	clock.name = "SimulationClock"
 	add_child(clock)
+	clock.process_mode = Node.PROCESS_MODE_PAUSABLE
 	clock.ticked.connect(_on_tick)
 	clock.speed_changed.connect(_on_speed_changed)
 	
 	bus = EventBus.new()
 	bus.name = "EventBus"
 	add_child(bus)
+	bus.process_mode = Node.PROCESS_MODE_PAUSABLE
 	bus.event_logged.connect(_on_event_logged)
 	
 	audit = EconomyAudit.new()
 	audit.name = "EconomyAudit"
 	add_child(audit)
+	audit.process_mode = Node.PROCESS_MODE_PAUSABLE
 	
 	calendar = Calendar.new()
 	calendar.name = "Calendar"
 	add_child(calendar)
+	calendar.process_mode = Node.PROCESS_MODE_PAUSABLE
 	
 	prosperity_meter = ProsperityMeter.new()
 	prosperity_meter.name = "ProsperityMeter"
 	add_child(prosperity_meter)
+	prosperity_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
 	
 	# Store EventBus reference for spawn function
 	event_bus = bus
@@ -191,7 +202,8 @@ func _ready() -> void:
 	market = Market.new()
 	market.name = "Market"
 	add_child(market)
-	
+	market.process_mode = Node.PROCESS_MODE_PAUSABLE
+
 	# Wire calendar day_changed to market for daily price adjustments
 	calendar.day_changed.connect(market.on_day_changed)
 	# Wire calendar day_changed to labor market handler
@@ -251,6 +263,7 @@ func _ready() -> void:
 	labor_market = LaborMarket.new()
 	labor_market.name = "LaborMarket"
 	add_child(labor_market)
+	labor_market.process_mode = Node.PROCESS_MODE_PAUSABLE
 	labor_market.bind(market, bus)
 	# Share the SAME array objects so labor_market always sees current population
 	labor_market.all_farmers = all_farmers
@@ -260,6 +273,11 @@ func _ready() -> void:
 	labor_market.migrate_requested.connect(_on_migrate_requested)
 	labor_market.role_switch_requested.connect(_on_role_switch_requested)
 	
+	# Assign persistent identities to the initial scene pops
+	_assign_new_identity(farmer)
+	_assign_new_identity(baker)
+	_assign_new_identity(household_agent)
+
 	# Get UI label references
 	get_ui_labels()
 	
@@ -857,6 +875,46 @@ func export_log() -> void:
 			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
 
 
+# ── Persistent identity helpers ──────────────────────────────────────────────
+
+func _new_person_id() -> int:
+	var id: int = _next_person_id
+	_next_person_id += 1
+	return id
+
+
+func _assign_new_identity(pop: Node) -> void:
+	"""Assign a fresh person_id and person_name to a newly spawned pop."""
+	if not is_instance_valid(pop) or not pop.has_method("log_event"):
+		return
+	pop.person_id   = _new_person_id()
+	pop.person_name = "Pop %d" % pop.person_id
+	pop.log_event("Born: role=%s" % pop.get_class())
+
+
+func _transfer_identity(from_pop: Node, to_pop: Node, new_role: String) -> void:
+	"""Copy identity + history from old node to new node on conversion."""
+	if not is_instance_valid(from_pop) or not is_instance_valid(to_pop):
+		return
+	if not from_pop.has_method("log_event") or not to_pop.has_method("log_event"):
+		return
+	to_pop.person_id    = from_pop.person_id
+	to_pop.person_name  = from_pop.person_name
+	to_pop.life_events  = from_pop.life_events.duplicate()
+	to_pop.log_event("Role changed → %s" % new_role)
+
+
+func _transfer_identity_data(to_pop: Node, pid: int, pname: String,
+		events: Array, new_role: String) -> void:
+	"""Set pre-captured identity data on a newly spawned node (used when old node is gone)."""
+	if not is_instance_valid(to_pop) or not to_pop.has_method("log_event"):
+		return
+	to_pop.person_id   = pid
+	to_pop.person_name = pname
+	to_pop.life_events = events.duplicate()
+	to_pop.log_event("Role changed → %s" % new_role)
+
+
 func get_ui_labels() -> void:
 	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
 	if log_vbox:
@@ -883,6 +941,33 @@ func get_ui_labels() -> void:
 		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
 		if close_btn:
 			close_btn.pressed.connect(_on_inspector_close)
+
+		# ── Scrollable life-events history (added below the stat body) ──────────
+		var stat_col := pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as VBoxContainer
+		if stat_col != null and pop_inspector_body != null:
+			# Auto-size to content height — no scrollbar on the stat block
+			pop_inspector_body.fit_content = true
+			pop_inspector_body.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+			var hsep_hist := HSeparator.new()
+			stat_col.add_child(hsep_hist)
+
+			var scroll := ScrollContainer.new()
+			scroll.name = "HistoryScroll"
+			scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			scroll.size_flags_vertical   = Control.SIZE_EXPAND_FILL
+			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			stat_col.add_child(scroll)
+
+			pop_history_label = RichTextLabel.new()
+			pop_history_label.name = "LifeHistory"
+			pop_history_label.bbcode_enabled = true
+			pop_history_label.fit_content = true
+			pop_history_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			pop_history_label.add_theme_font_size_override("normal_font_size", 10)
+			pop_history_label.add_theme_color_override("default_color", Color(0.72, 0.72, 0.72, 1.0))
+			scroll.add_child(pop_history_label)
+
 		# Dark semi-transparent panel background
 		var panel_style := StyleBoxFlat.new()
 		panel_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
@@ -1016,7 +1101,7 @@ func update_inspector() -> void:
 	var d: Dictionary = selected_pop.get_inspector_data()
 
 	if pop_inspector_title:
-		pop_inspector_title.text = d.get("name", "?")
+		pop_inspector_title.text = d.get("person_name", d.get("name", "?"))
 	if pop_inspector_role:
 		pop_inspector_role.text = d.get("role", "?")
 
@@ -1033,15 +1118,39 @@ func update_inspector() -> void:
 	var starve_tag: String = "  [color=red]☠ STARVING[/color]" if starving else ""
 	var surv_tag: String   = "  [color=orange][SURVIVAL][/color]" if surv else ""
 
+	# Wealth tier — its own dedicated line with icon + colour
+	var wealth: String = d.get("wealth_tier", "")
+	var wealth_col: String
+	var wealth_icon: String
+	match wealth:
+		"Poor":
+			wealth_col  = "#aaaaaa"
+			wealth_icon = "▪"
+		"Working":
+			wealth_col  = "#e8b800"
+			wealth_icon = "◆"
+		"Wealthy":
+			wealth_col  = "#33dd33"
+			wealth_icon = "★"
+		_:
+			wealth_col  = "#888888"
+			wealth_icon = "·"
+	var wealth_line: String = "[color=%s][b]%s %s[/b][/color]%s" % [
+		wealth_col, wealth_icon, wealth, surv_tag
+	] if wealth != "" else ""
+
 	# Line 1: core vitals
 	var line1: String = "[b]$%.0f[/b]    Bread: [b]%d[/b]    Hunger: [b]%s[/b]%s" % [
 		cash, bread, hunger_str, starve_tag
 	]
 
-	# Line 2: state + survival flag
-	var line2: String = "[color=#aaaaaa]%s[/color]%s" % [state, surv_tag]
+	# Line 2: wealth tier (prominent)  +  survival flag
+	var line2: String = wealth_line
 
-	# Line 3: role-specific extras (compact inline)
+	# Line 3: current state (dim)
+	var line3: String = "[color=#aaaaaa]%s[/color]" % state
+
+	# Line 4: role-specific extras (compact inline)
 	var extras: Array[String] = []
 	if d.has("seeds"):
 		extras.append("Seeds:%d" % d.get("seeds"))
@@ -1060,11 +1169,28 @@ func update_inspector() -> void:
 	if d.has("training_days"):
 		extras.append("[color=#88ccff]Training:%dd[/color]" % d.get("training_days"))
 
-	var lines: Array[String] = [line1, line2]
+	var lines: Array[String] = [line1]
+	if wealth_line != "":
+		lines.append(line2)
+	lines.append(line3)
 	if extras.size() > 0:
 		lines.append("[color=#888888]" + "   ".join(extras) + "[/color]")
 
 	pop_inspector_body.text = "\n".join(lines)
+
+	# ── Scrollable life history ────────────────────────────────────────────────
+	if pop_history_label != null:
+		var events: Array = []
+		if selected_pop.has_method("log_event"):
+			events = selected_pop.life_events
+		if events.is_empty():
+			pop_history_label.text = "[color=#444444](no events yet)[/color]"
+		else:
+			var start: int = max(0, events.size() - 200)
+			var hist_lines: Array[String] = []
+			for i: int in range(start, events.size()):
+				hist_lines.append("[color=#888888]" + events[i] + "[/color]")
+			pop_history_label.text = "\n".join(hist_lines)
 
 
 func spawn_household_at(pos: Vector2) -> Node:
@@ -1097,6 +1223,8 @@ func spawn_household_at(pos: Vector2) -> Node:
 	# Allow _ready() to run so child nodes/components exist
 	await get_tree().process_frame
 	
+	_assign_new_identity(h)
+
 	# Wire required references (identical to baseline household)
 	h.market = market
 	h.event_bus = event_bus
@@ -1234,6 +1362,8 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	# Also remove from pending_conversions if present
 	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
 	
+	if agent.has_method("log_event"):
+		agent.log_event("Migrated: reason=%s" % reason)
 	var _migrated_name: String = agent.name
 	agent.queue_free()
 	print("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
@@ -1255,7 +1385,9 @@ func _on_role_switch_requested(household: Node, new_role: String) -> void:
 	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
 	if event_bus:
 		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
-	
+	if household.has_method("log_event"):
+		household.log_event("Training started: → %s (%d days)" % [new_role.capitalize(), training_days])
+
 	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
 
 
@@ -1287,6 +1419,16 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	if w:
 		starting_money = w.money
 	
+	# Save identity BEFORE freeing the old node so we can transfer it to the successor
+	var _saved_pid: int = 0
+	var _saved_pname: String = ""
+	var _saved_events: Array = []
+	if household.has_method("log_event"):
+		household.log_event("Converting: Household → %s" % role.capitalize())
+		_saved_pid    = household.person_id
+		_saved_pname  = household.person_name
+		_saved_events = household.life_events.duplicate()
+
 	if event_bus:
 		event_bus.log("[MOBILITY] %s → converting to %s at (%.0f, %.0f) with $%.2f" % [
 			household.name, role, pos.x, pos.y, starting_money])
@@ -1327,6 +1469,9 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			var fw = new_farmer.get_node_or_null("Wallet")
 			if fw:
 				fw.money = starting_money
+			# Restore persistent identity from the converted household
+			if _saved_pid > 0:
+				_transfer_identity_data(new_farmer, _saved_pid, _saved_pname, _saved_events, "Farmer")
 			if event_bus:
 				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
 					new_farmer.name, field_pos.x, field_pos.y])
@@ -1349,6 +1494,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			var bw = new_baker.get_node_or_null("Wallet")
 			if bw:
 				bw.money = starting_money
+			if _saved_pid > 0:
+				_transfer_identity_data(new_baker, _saved_pid, _saved_pname, _saved_events, "Baker")
 
 
 # ============================================================================
@@ -1519,7 +1666,9 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	
 	# Allow _ready() to run so child nodes/components exist
 	await get_tree().process_frame
-	
+
+	_assign_new_identity(f)
+
 	# Wire references
 	f.market = market
 	f.event_bus = event_bus
@@ -1607,7 +1756,9 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	
 	# Allow _ready() to run so child nodes/components exist
 	await get_tree().process_frame
-	
+
+	_assign_new_identity(b)
+
 	# Wire references
 	b.market = market
 	b.event_bus = event_bus

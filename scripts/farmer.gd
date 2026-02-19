@@ -72,7 +72,18 @@ var warned_no_field_today: bool = false
 
 signal pop_clicked(pop: Node)
 
-var _health_bar_fg: ColorRect = null
+# Persistent identity — never reset, survives role conversions
+var person_id: int = 0
+var person_name: String = ""
+var life_events: Array[String] = []
+var _person_day: int = 0
+
+# Wealth tier thresholds (visual-only, no effect on economy)
+const WEALTH_POOR_THRESHOLD: float    = 1000.0
+const WEALTH_WEALTHY_THRESHOLD: float = 4000.0
+
+var _health_bar_fg: ColorRect  = null
+var _wealth_indicator: ColorRect = null
 
 
 func _create_health_bar() -> void:
@@ -93,12 +104,48 @@ func _create_health_bar() -> void:
 	add_child(_health_bar_fg)
 
 
+func _create_wealth_indicator() -> void:
+	_wealth_indicator = ColorRect.new()
+	_wealth_indicator.name = "WealthIndicator"
+	_wealth_indicator.position     = Vector2(-15.0, -15.0)
+	_wealth_indicator.size         = Vector2(30.0, 30.0)
+	_wealth_indicator.color        = Color(0.45, 0.45, 0.45, 0.88)
+	_wealth_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_wealth_indicator)
+	move_child(_wealth_indicator, 0)  # Render behind the sprite
+
+
+func log_event(msg: String) -> void:
+	life_events.append("Day %d: %s" % [_person_day, msg])
+	if life_events.size() > 5000:
+		life_events.pop_front()
+
+
+func get_cash() -> float:
+	return wallet.money if wallet else 0.0
+
+
+func get_wealth_tier() -> String:
+	var cash: float = get_cash()
+	if cash >= WEALTH_WEALTHY_THRESHOLD:
+		return "Wealthy"
+	if cash >= WEALTH_POOR_THRESHOLD:
+		return "Working"
+	return "Poor"
+
+
 func _process(_delta: float) -> void:
 	if _health_bar_fg == null or hunger == null or hunger.hunger_max_days <= 0:
 		return
 	var ratio: float = clamp(float(hunger.hunger_days) / float(hunger.hunger_max_days), 0.0, 1.0)
 	_health_bar_fg.size.x = 20.0 * ratio
 	_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0) if ratio > 0.25 else Color(0.50, 0.06, 0.06, 1.0)
+	# Update wealth indicator
+	if _wealth_indicator != null:
+		match get_wealth_tier():
+			"Poor":    _wealth_indicator.color = Color(0.45, 0.45, 0.45, 0.88)
+			"Working": _wealth_indicator.color = Color(0.90, 0.72, 0.04, 0.88)
+			"Wealthy": _wealth_indicator.color = Color(0.08, 0.80, 0.08, 0.88)
 
 
 func get_display_name() -> String:
@@ -122,8 +169,10 @@ func get_inspector_data() -> Dictionary:
 			state_str = "waiting→" + pending_target.name
 	return {
 		"name": name,
+		"person_name": person_name if person_name != "" else name,
 		"role": "Farmer",
-		"cash": wallet.money if wallet else 0.0,
+		"cash": get_cash(),
+		"wealth_tier": get_wealth_tier(),
 		"hunger": "%d/%d" % [hunger.hunger_days, hunger.hunger_max_days] if hunger else "?/?",
 		"starving": hunger.is_starving if hunger else false,
 		"bread": inv.get_qty("bread") if inv else 0,
@@ -161,8 +210,11 @@ func set_tick(t: int) -> void:
 
 
 func _ready() -> void:
+	# Stop processing (movement, ticks) while the simulation is paused
+	process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_to_group("farmers")
 	_create_health_bar()
+	_create_wealth_indicator()
 	# Initialize wallet and inventory
 	wallet.money = 1000.0
 	inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
@@ -320,6 +372,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		inv.add("seeds", harvest_result.seeds)
 		if event_bus:
 			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds)" % [current_tick, field_name, harvest_result.wheat, harvest_result.seeds])
+		log_event("Harvested %d wheat + %d seeds" % [harvest_result.wheat, harvest_result.seeds])
 	# Otherwise try to plant if field is empty and we have seeds
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
 		# HYSTERESIS PROCUREMENT COUPLING: Don't plant if wheat production is paused
@@ -340,6 +393,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 			inv.remove("seeds", 5)
 			if event_bus:
 				event_bus.log("Tick %d: Farmer planted %s (-5 seeds)" % [current_tick, field_name])
+			log_event("Planted field")
 		elif inventory_throttle and not should_plant:
 			if event_bus:
 				event_bus.log("Tick %d: Farmer SKIPPED planting %s (throttle %.0f%%)" % [current_tick, field_name, inventory_throttle.production_throttle * 100.0])
@@ -361,7 +415,9 @@ func handle_market_arrival() -> void:
 		else:
 			# Fallback: 150% of seed cost (rough profit margin)
 			min_price = market.SEED_PRICE * 1.5
-		market.buy_wheat_from_farmer(self, min_price)
+		var _ws: int = market.buy_wheat_from_farmer(self, min_price)
+		if _ws > 0:
+			log_event("Sold %d wheat" % _ws)
 	
 	# Buy seeds if below threshold
 	if inv.get_qty("seeds") < 20:
@@ -374,10 +430,22 @@ func handle_market_arrival() -> void:
 		inv.add("bread", bought)
 		if bought > 0 and event_bus:
 			event_bus.log("Tick %d: Farmer bought %d bread for food buffer" % [current_tick, bought])
+		# Log to personal life events for inspector history
+		var _mkt_inv: int = market.bread if market else -1
+		if bought == 0:
+			var _br: String = "empty" if _mkt_inv == 0 else "insufficient_funds"
+			log_event("Bread buy: wanted=%d, got=0, mkt=%d, reason=%s" % [needed, _mkt_inv, _br])
+		else:
+			log_event("Bread buy: got=%d/%d" % [bought, needed])
 
 
 ## Called once per game day by main._on_calendar_day_changed.
 func on_day_changed(_day: int) -> void:
+	_person_day = _day
+	# Daily snapshot for life-history panel
+	var _w: float = inv.get_qty("wheat") if inv else 0
+	var _b: int   = inv.get_qty("bread") if inv else 0
+	log_event("── $%.0f  wht=%d  br=%d" % [get_cash(), _w, _b])
 	# Evaluate yesterday's cashflow BEFORE paying today's maintenance
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:  # Skip the very first call (sentinel -1.0)

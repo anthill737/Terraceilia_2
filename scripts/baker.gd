@@ -93,7 +93,18 @@ const MAX_IDLE_TICKS: int = 10
 
 signal pop_clicked(pop: Node)
 
-var _health_bar_fg: ColorRect = null
+# Persistent identity — never reset, survives role conversions
+var person_id: int = 0
+var person_name: String = ""
+var life_events: Array[String] = []
+var _person_day: int = 0
+
+# Wealth tier thresholds (visual-only, no effect on economy)
+const WEALTH_POOR_THRESHOLD: float    = 1000.0
+const WEALTH_WEALTHY_THRESHOLD: float = 4000.0
+
+var _health_bar_fg: ColorRect  = null
+var _wealth_indicator: ColorRect = null
 
 
 func _create_health_bar() -> void:
@@ -114,12 +125,47 @@ func _create_health_bar() -> void:
 	add_child(_health_bar_fg)
 
 
+func _create_wealth_indicator() -> void:
+	_wealth_indicator = ColorRect.new()
+	_wealth_indicator.name = "WealthIndicator"
+	_wealth_indicator.position     = Vector2(-15.0, -15.0)
+	_wealth_indicator.size         = Vector2(30.0, 30.0)
+	_wealth_indicator.color        = Color(0.45, 0.45, 0.45, 0.88)
+	_wealth_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_wealth_indicator)
+	move_child(_wealth_indicator, 0)
+
+
+func log_event(msg: String) -> void:
+	life_events.append("Day %d: %s" % [_person_day, msg])
+	if life_events.size() > 5000:
+		life_events.pop_front()
+
+
+func get_cash() -> float:
+	return wallet.money if wallet else 0.0
+
+
+func get_wealth_tier() -> String:
+	var cash: float = get_cash()
+	if cash >= WEALTH_WEALTHY_THRESHOLD:
+		return "Wealthy"
+	if cash >= WEALTH_POOR_THRESHOLD:
+		return "Working"
+	return "Poor"
+
+
 func _process(_delta: float) -> void:
 	if _health_bar_fg == null or hunger == null or hunger.hunger_max_days <= 0:
 		return
 	var ratio: float = clamp(float(hunger.hunger_days) / float(hunger.hunger_max_days), 0.0, 1.0)
 	_health_bar_fg.size.x = 20.0 * ratio
 	_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0) if ratio > 0.25 else Color(0.50, 0.06, 0.06, 1.0)
+	if _wealth_indicator != null:
+		match get_wealth_tier():
+			"Poor":    _wealth_indicator.color = Color(0.45, 0.45, 0.45, 0.88)
+			"Working": _wealth_indicator.color = Color(0.90, 0.72, 0.04, 0.88)
+			"Wealthy": _wealth_indicator.color = Color(0.08, 0.80, 0.08, 0.88)
 
 
 func get_display_name() -> String:
@@ -145,8 +191,10 @@ func get_inspector_data() -> Dictionary:
 			state_str = phase_str + " (waiting→" + pending_target.name + ")"
 	return {
 		"name": name,
+		"person_name": person_name if person_name != "" else name,
 		"role": "Baker",
-		"cash": wallet.money if wallet else 0.0,
+		"cash": get_cash(),
+		"wealth_tier": get_wealth_tier(),
 		"hunger": "%d/%d" % [hunger.hunger_days, hunger.hunger_max_days] if hunger else "?/?",
 		"starving": hunger.is_starving if hunger else false,
 		"bread": inv.get_qty("bread") if inv else 0,
@@ -209,8 +257,10 @@ func set_tick(t: int) -> void:
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_to_group("bakers")
 	_create_health_bar()
+	_create_wealth_indicator()
 	# Initialize wallet and inventory
 	wallet.money = 500.0
 	inv.items = {"wheat": 0, "flour": 0, "bread": 2}
@@ -355,7 +405,9 @@ func perform_market_transactions() -> void:
 						var throttle_factor: float = inventory_throttle.production_throttle
 						adjusted_target = max(1, int(float(base_target) * throttle_factor))
 					
-					market.sell_wheat_to_baker(self, adjusted_target)
+					var _bw: int = market.sell_wheat_to_baker(self, adjusted_target)
+					if _bw > 0:
+						log_event("Bought %d wheat" % _bw)
 				# Transition to production phase
 				phase = Phase.PRODUCE
 				pending_target = bakery_location
@@ -403,7 +455,9 @@ func perform_market_transactions() -> void:
 				var min_price: float = 0.0
 				if profit:
 					min_price = profit.get_min_acceptable_price(BREAD_RECIPE)
-				market.buy_bread_from_agent(self, sellable, min_price)
+				var _bs: int = market.buy_bread_from_agent(self, sellable, min_price)
+				if _bs > 0:
+					log_event("Sold %d bread" % _bs)
 			
 			# After selling, decide next action
 			var current_wheat: int = inv.get_qty("wheat")
@@ -552,6 +606,7 @@ func process_grinding(delta: float) -> void:
 				var flour_produced: int = units * FLOUR_PER_WHEAT
 				if event_bus:
 					event_bus.log("Tick %d: Baker ground %d wheat into %d flour" % [current_tick, units, flour_produced])
+				log_event("Ground %d wheat → %d flour" % [units, flour_produced])
 				
 				# Decide next action: continue production or go to market
 				var current_bread: int = inv.get_qty("bread")
@@ -689,6 +744,7 @@ func process_baking(delta: float) -> void:
 				bread_produced_today += bread_produced  # Track production for diagnostics
 				if event_bus:
 					event_bus.log("Tick %d: Baker baked %d flour into %d bread" % [current_tick, units, bread_produced])
+				log_event("Baked %d bread" % bread_produced)
 				
 				# Decide next action: continue production or go to market
 				var current_bread: int = inv.get_qty("bread")
@@ -732,6 +788,11 @@ func process_baking(delta: float) -> void:
 
 ## Called once per game day by main._on_calendar_day_changed.
 func on_day_changed(_day: int) -> void:
+	_person_day = _day
+	# Daily snapshot for life-history panel
+	var _br: int  = inv.get_qty("bread") if inv else 0
+	var _fl: int  = inv.get_qty("flour") if inv else 0
+	log_event("── $%.0f  br=%d  fl=%d" % [get_cash(), _br, _fl])
 	# Evaluate yesterday's cashflow BEFORE paying today's maintenance
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:  # Skip the very first call (sentinel -1.0)

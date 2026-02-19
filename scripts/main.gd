@@ -10,10 +10,12 @@ var audit: EconomyAudit = null
 var calendar: Calendar = null
 var prosperity_meter: ProsperityMeter = null
 
-# ── Land capacity ─────────────────────────────────────────────────────────────
+# ── Village hard caps ─────────────────────────────────────────────────────────
 ## Maximum number of fields allowed in the simulation simultaneously.
 ## Farmer role-conversions are blocked when this limit is reached.
 const MAX_FIELDS: int = 10
+## Maximum combined head-count of all living agents (households + farmers + bakers).
+const MAX_TOTAL_POP: int = 50
 
 # Dynamic entity tracking
 var all_fields: Array = []       # All FieldPlot nodes (for ticking)
@@ -836,12 +838,25 @@ func update_ui() -> void:
 			population_info_label.text = "Population: %d" % households.size()
 
 
+func get_total_population() -> int:
+	"""Combined head-count of all living agents (households + farmers + bakers)."""
+	return households.size() + all_farmers.size() + all_bakers.size()
+
+
 func spawn_household_at(pos: Vector2) -> Node:
 	"""Spawn a new household from the HouseholdScene PackedScene."""
 	
 	# Fail cleanly if HouseholdScene is not resolved
 	if HouseholdScene == null:
 		push_error("Cannot spawn household: HouseholdScene is null.")
+		return null
+	
+	# Hard population cap
+	var total_pop := get_total_population()
+	if total_pop >= MAX_TOTAL_POP:
+		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
+		if event_bus:
+			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 	
 	# Instantiate household from scene file
@@ -910,6 +925,12 @@ func _on_household_died(household: HouseholdAgent) -> void:
 
 ## Called once per game day when the calendar emits day_changed.
 func _on_calendar_day_changed(day: int) -> void:
+	# Daily village-capacity status (always visible in log to aid debugging)
+	print("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
+	print("[POP STATUS] total=%d/%d (households=%d farmers=%d bakers=%d)" % [
+		get_total_population(), MAX_TOTAL_POP,
+		households.size(), all_farmers.size(), all_bakers.size()])
+	
 	# Update labor market EMA signals
 	if labor_market:
 		labor_market.update_daily(day)
@@ -1016,9 +1037,16 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	if not is_instance_valid(household):
 		return
 	
+	# [POP] Hard population cap — bail before touching the household so it stays alive.
+	var total_pop := get_total_population()
+	if total_pop >= MAX_TOTAL_POP:
+		if event_bus:
+			event_bus.log("[POP] Conversion of %s blocked — pop cap (%d/%d)" % [
+				household.name, total_pop, MAX_TOTAL_POP])
+		return
+	
 	# [LAND] Gate farmer conversions on field capacity BEFORE removing the household.
-	# If we are at the land cap we cancel the conversion; the household stays alive
-	# and the pending_conversions entry is simply dropped for this cycle.
+	# If we are at the land cap we cancel; the household stays alive.
 	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
 		if event_bus:
 			event_bus.log("[MOBILITY] farmer conversion blocked — land cap reached (%d/%d fields)" % [
@@ -1049,26 +1077,44 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	
 	# Spawn the new producer; transfer money after spawn wires the Wallet
 	if role == "farmer":
-		var new_farmer = await spawn_farmer_at(pos)
+		# [LAND] ATOMIC ORDERING: create the field FIRST (skip_auto_assign=true so it
+		# is left unassigned), then pass it into spawn_farmer_at.  Inside spawn_farmer_at
+		# the field is assigned BEFORE set_route_nodes fires, which means _rebuild_route
+		# always sees >= 1 field and never emits a false "[ERROR] Farmer has no fields".
+		var field_pos := Vector2(
+			clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
+			clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
+		)
+		var pre_field := spawn_field_at(field_pos, null, true)
+		if pre_field == null:
+			# spawn_field_at returned null despite our earlier cap check (race / edge-case).
+			# The household is already freed; log and abort cleanly.
+			print("[MOBILITY] Farmer conversion aborted — land cap reached")
+			if event_bus:
+				event_bus.log("[MOBILITY] Farmer conversion aborted — land cap (field spawn returned null)")
+			return
+		
+		var new_farmer = await spawn_farmer_at(pos, pre_field)
 		if new_farmer and is_instance_valid(new_farmer):
 			var fw = new_farmer.get_node_or_null("Wallet")
 			if fw:
 				fw.money = starting_money
-			
-			# [LAND] Spawn one field and assign it directly to the new farmer.
-			# Position it within ~150 px of the farmer's home, clamped to play area.
-			var field_pos := Vector2(
-				clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
-				clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
-			)
-			var new_field := spawn_field_at(field_pos, new_farmer)
-			if new_field and is_instance_valid(new_field):
-				if event_bus:
-					event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
-						new_farmer.name, field_pos.x, field_pos.y])
-			else:
-				if event_bus:
-					event_bus.log("[LAND] WARNING: field spawn failed for farmer %s" % new_farmer.name)
+			if event_bus:
+				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
+					new_farmer.name, field_pos.x, field_pos.y])
+		else:
+			# Farmer spawn failed — clean up the pre-created orphan field so it doesn't
+			# sit in the world unassigned and skew the field count.
+			var fi := all_field_nodes.find(pre_field)
+			if fi != -1:
+				all_field_nodes.remove_at(fi)
+			var fai := all_fields.find(pre_field)
+			if fai != -1:
+				all_fields.remove_at(fai)
+			field_assignment_map.erase(pre_field)
+			pre_field.queue_free()
+			if event_bus:
+				event_bus.log("[LAND] WARNING: farmer spawn failed; orphan field cleaned up")
 	elif role == "baker":
 		var new_baker = await spawn_baker_at(pos)
 		if new_baker and is_instance_valid(new_baker):
@@ -1157,10 +1203,17 @@ func _place_entity_at(pos: Vector2) -> void:
 # SPAWN SYSTEM - Entity creation with full wiring
 # ============================================================================
 
-func spawn_field_at(pos: Vector2, assign_to: Node = null) -> Node2D:
+func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool = false) -> Node2D:
 	"""Spawn a new field at the given position.
 	If assign_to is provided the field is assigned directly (no popup).
+	skip_auto_assign=true leaves the field unassigned (used for atomic farmer conversion).
 	Otherwise falls back to auto-assign (single farmer) or popup (multiple farmers)."""
+	# Hard land cap — never exceed MAX_FIELDS
+	if all_field_nodes.size() >= MAX_FIELDS:
+		print("[LAND] Spawn blocked — cap reached (%d/%d)" % [all_field_nodes.size(), MAX_FIELDS])
+		if event_bus:
+			event_bus.log("[LAND] Spawn blocked — cap reached (%d/%d)" % [all_field_nodes.size(), MAX_FIELDS])
+		return null
 	# Create field node with FieldPlot script
 	var field_node = Node2D.new()
 	field_node.name = "Field%d" % next_field_id
@@ -1197,25 +1250,37 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null) -> Node2D:
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
 	
-	# Resolve assignment:
-	# 1) Explicit target (labour-mobility conversion) — no popup, no auto-assign ambiguity.
-	# 2) Single farmer in world — auto-assign silently.
-	# 3) Multiple farmers — show the user a popup to choose.
-	if assign_to != null and is_instance_valid(assign_to):
-		_assign_field_to_farmer(field_node, assign_to)
-	elif all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
-		_assign_field_to_farmer(field_node, all_farmers[0])
-	else:
-		_show_field_assignment_popup(field_node, pos)
+	# Resolve assignment unless caller requests deferred assignment (atomic conversion path).
+	# 1) skip_auto_assign=true  → leave unassigned; caller assigns externally.
+	# 2) Explicit assign_to     → assign directly, no popup.
+	# 3) Single farmer in world → auto-assign silently.
+	# 4) Multiple farmers       → show user popup to choose.
+	if not skip_auto_assign:
+		if assign_to != null and is_instance_valid(assign_to):
+			_assign_field_to_farmer(field_node, assign_to)
+		elif all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
+			_assign_field_to_farmer(field_node, all_farmers[0])
+		else:
+			_show_field_assignment_popup(field_node, pos)
 	
 	return field_node
 
 
-func spawn_farmer_at(pos: Vector2) -> Node:
-	"""Spawn a new farmer at the given position."""
+func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
+	"""Spawn a new farmer at the given position.
+	initial_field_node, when provided, is assigned BEFORE set_route_nodes so that
+	_rebuild_route never sees an empty fields array during construction."""
 	if FarmerScene == null:
 		if event_bus:
 			event_bus.log("[ERROR] Cannot spawn farmer: FarmerScene not found")
+		return null
+	
+	# Hard population cap
+	var total_pop := get_total_population()
+	if total_pop >= MAX_TOTAL_POP:
+		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
+		if event_bus:
+			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 	
 	var f = FarmerScene.instantiate()
@@ -1258,13 +1323,20 @@ func spawn_farmer_at(pos: Vector2) -> Node:
 	home.add_child(home_marker)
 	add_child(home)
 	
-	# Set route nodes (no fields yet - user assigns via panel)
+	# Assign initial field BEFORE set_route_nodes so _rebuild_route sees >= 1 field.
+	# For conversion-spawned farmers this eliminates the construction-time "no fields" warning.
+	# For UI-placed farmers (initial_field_node == null) behaviour is unchanged.
+	if initial_field_node != null and is_instance_valid(initial_field_node):
+		_assign_field_to_farmer(initial_field_node, f)
+	
+	# Set route nodes (field already registered if initial_field_node was provided)
 	f.set_route_nodes(home, market_node)
 	
-	# Register
+	# Register — only after field assignment so farmer never ticks field-less
 	all_farmers.append(f)
 	
-	# Auto-assign any orphaned fields to this new farmer
+	# Auto-assign any OTHER orphaned fields (initial_field_node is already assigned so
+	# field_assignment_map[initial_field_node] != null and the loop skips it automatically)
 	var absorbed = 0
 	for fn in all_field_nodes:
 		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == null:
@@ -1285,6 +1357,14 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	if BakerScene == null:
 		if event_bus:
 			event_bus.log("[ERROR] Cannot spawn baker: BakerScene not found")
+		return null
+	
+	# Hard population cap
+	var total_pop := get_total_population()
+	if total_pop >= MAX_TOTAL_POP:
+		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
+		if event_bus:
+			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 	
 	var b = BakerScene.instantiate()

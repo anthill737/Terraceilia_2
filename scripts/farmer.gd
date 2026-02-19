@@ -63,6 +63,12 @@ var hysteresis_cooldown_ticks: int = 0
 var idle_ticks: int = 0
 const MAX_IDLE_TICKS: int = 10
 
+# Construction guard: suppresses _rebuild_route "no fields" warning until the farmer
+# has received at least one field via add_field().
+var _initialized: bool = false
+# Per-day throttle: prevents spamming the production-skip warning more than once per day.
+var warned_no_field_today: bool = false
+
 
 func get_display_name() -> String:
 	return "Farmer"
@@ -132,12 +138,13 @@ func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
 
 
 func _rebuild_route() -> void:
-	# [BUGFIX] Safety: a farmer with no fields enters a silent economic dead zone
-	# (house → market loop with no wheat production). Log clearly so it is findable.
-	if fields.size() == 0:
-		print("[ERROR] Farmer %s has no fields — will loop house/market without producing" % get_display_name())
+	# Only warn once the farmer has been fully initialised (i.e. has had at least one
+	# field assigned via add_field).  This suppresses the false-positive that fires
+	# during spawn_farmer_at → set_route_nodes before the initial field is attached.
+	if fields.size() == 0 and _initialized:
+		print("[ERROR] Farmer %s lost all fields — economic dead zone" % get_display_name())
 		if event_bus:
-			event_bus.log("[ERROR] Farmer %s has no fields assigned" % get_display_name())
+			event_bus.log("[ERROR] Farmer %s lost all fields" % get_display_name())
 	
 	route_targets.clear()
 	if house_node:
@@ -161,6 +168,7 @@ func add_field(field_node: Node2D, field_plot: FieldPlot) -> void:
 	if field_node not in field_nodes:
 		field_nodes.append(field_node)
 		fields.append(field_plot)
+		_initialized = true  # Farmer now has at least one field; enable full warnings
 		_rebuild_route()
 		if event_bus:
 			event_bus.log("%s: New field assigned (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
@@ -227,10 +235,11 @@ func handle_house_arrival() -> void:
 
 
 func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
-	# [BUGFIX] Defensive guard — should never be zero when this function is called,
-	# but catches data-integrity problems early with a clear error message.
+	# [BUGFIX] Defensive guard — throttled to once per day to prevent log spam.
 	if fields.size() == 0:
-		print("[ERROR] Farmer has no fields")
+		if not warned_no_field_today:
+			print("[ERROR] Farmer_%s has no fields; skipping production" % name)
+			warned_no_field_today = true
 		return
 	
 	# Capital constraint: respect daily field-work capacity
@@ -322,6 +331,8 @@ func on_day_changed(_day: int) -> void:
 	
 	# Reset daily field-work counter
 	fields_worked_today = 0
+	# Reset per-day warning throttle
+	warned_no_field_today = false
 
 
 func _on_travel_timeout(_t: Node2D) -> void:

@@ -5,6 +5,35 @@ class_name HouseholdAgent
 ## Movement is handled by RouteRunner component.
 
 signal household_died(household: HouseholdAgent)
+signal pop_clicked(pop: Node)
+
+var _health_bar_fg: ColorRect = null
+
+
+func _create_health_bar() -> void:
+	var bg := ColorRect.new()
+	bg.name = "HealthBarBG"
+	bg.position = Vector2(-10.0, -24.0)
+	bg.size     = Vector2(20.0, 4.0)
+	bg.color    = Color(0.18, 0.05, 0.05, 0.85)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
+
+	_health_bar_fg = ColorRect.new()
+	_health_bar_fg.name = "HealthBar"
+	_health_bar_fg.position = Vector2(-10.0, -24.0)
+	_health_bar_fg.size     = Vector2(20.0, 4.0)
+	_health_bar_fg.color    = Color(0.85, 0.12, 0.12, 1.0)
+	_health_bar_fg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_health_bar_fg)
+
+
+func _process(_delta: float) -> void:
+	if _health_bar_fg == null or hunger == null or hunger.hunger_max_days <= 0:
+		return
+	var ratio: float = clamp(float(hunger.hunger_days) / float(hunger.hunger_max_days), 0.0, 1.0)
+	_health_bar_fg.size.x = 20.0 * ratio
+	_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0) if ratio > 0.25 else Color(0.50, 0.06, 0.06, 1.0)
 
 enum Phase { AT_MARKET, AT_HOME }
 
@@ -78,6 +107,8 @@ const MAX_IDLE_TICKS: int = 10
 
 
 func _ready() -> void:
+	add_to_group("households")
+	_create_health_bar()
 	# Validate critical child nodes exist
 	if not _validation_logged:
 		_validate_components()
@@ -428,3 +459,38 @@ func _on_starved(agent_name_param: String) -> void:
 	
 	# Remove from scene tree
 	queue_free()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if get_local_mouse_position().length() <= 15.0:
+				pop_clicked.emit(self)
+				get_viewport().set_input_as_handled()
+
+
+func get_inspector_data() -> Dictionary:
+	var phase_str := "AT_HOME" if phase == Phase.AT_HOME else "AT_MARKET"
+	var state_str := phase_str
+	if route:
+		if route.is_traveling:
+			state_str = "traveling→" + (route.target.name if route.target else "?")
+		elif pending_target != null:
+			state_str = phase_str + " (waiting→" + pending_target.name + ")"
+	var d: Dictionary = {
+		"name": name,
+		"role": "Household",
+		"cash": wallet.money if wallet else 0.0,
+		"hunger": "%d/%d" % [hunger.hunger_days, hunger.hunger_max_days] if hunger else "?/?",
+		"starving": hunger.is_starving if hunger else false,
+		"bread": inv.get_qty("bread") if inv else 0,
+		"bread_consumed": bread_consumed,
+		"effective_reserve": effective_reserve_target,
+		"survival": food_reserve.is_survival_mode if food_reserve else false,
+		"state": state_str,
+		"failed_food_days": consecutive_failed_food_days,
+		"switch_cooldown": switch_cooldown_days,
+	}
+	if training_days_remaining > 0:
+		d["training_days"] = training_days_remaining
+	return d

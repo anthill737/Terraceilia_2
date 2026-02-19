@@ -224,7 +224,7 @@ size_flags_vertical = 3
 mouse_filter = 1
 
 [node name="Sidebar" type="PanelContainer" parent="UI/HUDRoot/Layout"]
-custom_minimum_size = Vector2(360, 0)
+custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -232,233 +232,6 @@ size_flags_vertical = 3
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-
-[node name="CardsScroll" type="ScrollContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox"]
-custom_minimum_size = Vector2(0, 260)
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-
-[node name="Cards" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="FarmerCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="FarmerVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard"]
-layout_mode = 2
-
-[node name="FarmerTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer"
-
-[node name="FarmerStatus" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Status: Waiting"
-
-[node name="FarmerMoney" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Money: $0.00"
-
-[node name="FarmerSeeds" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Seeds: 0"
-
-[node name="FarmerWheat" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Wheat: 0"
-
-[node name="FarmerBread" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Bread: 0"
-
-[node name="FarmerDaysUntilStarve" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Days Until Starve: 3"
-
-[node name="FarmerStarving" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Farmer Starving: No"
-
-[node name="FarmerInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox"]
-layout_mode = 2
-text = "Inventory: 0 / 50"
-
-[node name="HSeparator1" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="BakerCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="BakerVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard"]
-layout_mode = 2
-
-[node name="BakerTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker"
-
-[node name="BakerStatus" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Status: Waiting"
-
-[node name="BakerMoney" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Money: $0.00"
-
-[node name="BakerWheat" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Wheat: 0"
-
-[node name="BakerFlour" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Flour: 0"
-
-[node name="BakerBread" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Bread: 0"
-
-[node name="BakerFoodBread" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Food Bread: 0"
-
-[node name="BakerDaysUntilStarve" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Days Until Starve: 3"
-
-[node name="BakerStarving" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Baker Starving: No"
-
-[node name="BakerInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox"]
-layout_mode = 2
-text = "Inventory: 0 / 50"
-
-[node name="HSeparator2" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="HouseholdCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="HouseholdVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard"]
-layout_mode = 2
-
-[node name="HouseholdTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household"
-
-[node name="HouseholdStatus" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Status: Waiting"
-
-[node name="HouseholdMoney" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household Money: $0.00"
-
-[node name="HouseholdBread" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household Bread: 0"
-
-[node name="HouseholdBreadConsumed" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household Bread Consumed: 0"
-
-[node name="HouseholdHunger" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household Hunger: 5/5"
-
-[node name="HouseholdStarving" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Household Starving: No"
-
-[node name="HouseholdInventory" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox"]
-layout_mode = 2
-text = "Inventory: 0 / 50"
-
-[node name="HSeparator3" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="MarketCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="MarketVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard"]
-layout_mode = 2
-
-[node name="MarketTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market"
-
-[node name="MarketMoney" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Money: $0.00"
-
-[node name="MarketSeeds" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Seeds: 0"
-
-[node name="MarketWheat" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Wheat: 0"
-
-[node name="MarketWheatCap" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Wheat: 0/100"
-
-[node name="MarketBread" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Bread: 0"
-
-[node name="MarketBreadCap" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Market Bread: 0/200"
-
-[node name="WheatPrice" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Wheat Price: $1.00 (floor $0.50)"
-
-[node name="BreadPrice" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox"]
-layout_mode = 2
-text = "Bread Price: $2.50 (floor $1.00)"
-
-[node name="HSeparator_Prosperity" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="ProsperityCard" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards"]
-layout_mode = 2
-
-[node name="ProsperityVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard"]
-layout_mode = 2
-
-[node name="ProsperityTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Prosperity System"
-
-[node name="ProsperityScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Prosperity: 0.50"
-
-[node name="WealthScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Wealth: 0.00"
-
-[node name="FoodScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Food: 0.00"
-
-[node name="StarvationScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Starvation: 0.00"
-
-[node name="TradeScore" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Trade: 0.00"
-
-[node name="PopulationInfo" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox"]
-layout_mode = 2
-text = "Population: 1"
-
-[node name="HSeparator4" type="HSeparator" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox"]
-layout_mode = 2
 
 [node name="LogPanel" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox"]
 custom_minimum_size = Vector2(0, 220)
@@ -481,4 +254,61 @@ scroll_following = false
 [node name="ExportLogButton" type="Button" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox"]
 layout_mode = 2
 text = "Export Log"
+
+[node name="PopInspector" type="PanelContainer" parent="UI"]
+layout_mode = 3
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -130.0
+offset_bottom = 0.0
+grow_horizontal = 2
+grow_vertical = 0
+visible = false
+
+[node name="ContentRow" type="HBoxContainer" parent="UI/PopInspector"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="NameCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(190, 0)
+size_flags_vertical = 1
+theme_override_constants/separation = 4
+
+[node name="PopInspectorTitle" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Name"
+
+[node name="PopInspectorRole" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
+text = "Role"
+
+[node name="VSep1" type="VSeparator" parent="UI/PopInspector/ContentRow"]
+layout_mode = 2
+
+[node name="StatCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+bbcode_enabled = true
+fit_content = true
+text = ""
+
+[node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+layout_mode = 2
+
+[node name="PopInspectorClose" type="Button" parent="UI/PopInspector/ContentRow/CloseCol"]
+layout_mode = 2
+text = "✕"
 

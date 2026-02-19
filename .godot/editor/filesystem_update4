@@ -1,2 +1,4 @@
 res://scripts/farmer.gd
 res://scripts/main.gd
+res://scripts/baker.gd
+res://scripts/household_agent.gd

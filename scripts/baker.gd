@@ -91,8 +91,71 @@ var idle_ticks: int = 0
 const MAX_IDLE_TICKS: int = 10
 
 
+signal pop_clicked(pop: Node)
+
+var _health_bar_fg: ColorRect = null
+
+
+func _create_health_bar() -> void:
+	var bg := ColorRect.new()
+	bg.name = "HealthBarBG"
+	bg.position = Vector2(-10.0, -22.0)
+	bg.size     = Vector2(20.0, 4.0)
+	bg.color    = Color(0.18, 0.05, 0.05, 0.85)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
+
+	_health_bar_fg = ColorRect.new()
+	_health_bar_fg.name = "HealthBar"
+	_health_bar_fg.position = Vector2(-10.0, -22.0)
+	_health_bar_fg.size     = Vector2(20.0, 4.0)
+	_health_bar_fg.color    = Color(0.85, 0.12, 0.12, 1.0)
+	_health_bar_fg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_health_bar_fg)
+
+
+func _process(_delta: float) -> void:
+	if _health_bar_fg == null or hunger == null or hunger.hunger_max_days <= 0:
+		return
+	var ratio: float = clamp(float(hunger.hunger_days) / float(hunger.hunger_max_days), 0.0, 1.0)
+	_health_bar_fg.size.x = 20.0 * ratio
+	_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0) if ratio > 0.25 else Color(0.50, 0.06, 0.06, 1.0)
+
+
 func get_display_name() -> String:
 	return "Baker"
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			if get_local_mouse_position().length() <= 15.0:
+				pop_clicked.emit(self)
+				get_viewport().set_input_as_handled()
+
+
+func get_inspector_data() -> Dictionary:
+	var phase_names: Array[String] = ["RESTOCK", "PRODUCE", "SELL"]
+	var phase_str: String = phase_names[phase] if phase < phase_names.size() else "?"
+	var state_str := phase_str
+	if route:
+		if route.is_traveling:
+			state_str = "traveling→" + (route.target.name if route.target else "?")
+		elif pending_target != null:
+			state_str = phase_str + " (waiting→" + pending_target.name + ")"
+	return {
+		"name": name,
+		"role": "Baker",
+		"cash": wallet.money if wallet else 0.0,
+		"hunger": "%d/%d" % [hunger.hunger_days, hunger.hunger_max_days] if hunger else "?/?",
+		"starving": hunger.is_starving if hunger else false,
+		"bread": inv.get_qty("bread") if inv else 0,
+		"wheat": inv.get_qty("wheat") if inv else 0,
+		"flour": inv.get_qty("flour") if inv else 0,
+		"survival": food_reserve.is_survival_mode if food_reserve else false,
+		"state": state_str,
+		"neg_cashflow_days": consecutive_days_negative_cashflow,
+	}
 
 
 func _bread_for_food() -> int:
@@ -146,6 +209,8 @@ func set_tick(t: int) -> void:
 
 
 func _ready() -> void:
+	add_to_group("bakers")
+	_create_health_bar()
 	# Initialize wallet and inventory
 	wallet.money = 500.0
 	inv.items = {"wheat": 0, "flour": 0, "bread": 2}

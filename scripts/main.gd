@@ -92,6 +92,27 @@ var food_score_label: Label
 var starvation_score_label: Label
 var trade_score_label: Label
 var population_info_label: Label
+var total_pop_label: Label
+
+# Economy HUD bar (replaces scrollable sidebar cards)
+var eco_sim_label: Label        = null   # Day · Speed
+var eco_village_label: Label    = null   # Pop + Fields
+var eco_market_label: Label     = null   # Wheat/Bread prices + inventory
+var eco_prosperity_label: Label = null   # Prosperity score + inputs
+var eco_farmer_label: Label     = null   # Baseline farmer compact stats
+var eco_baker_label: Label      = null   # Baseline baker compact stats
+var _current_speed: float = 1.0          # Tracks sim speed for eco bar
+
+# Pause control
+var _is_paused: bool = false
+var _pause_btn: Button = null
+
+# Pop Inspector
+var selected_pop: Node = null
+var pop_inspector_panel: Control = null
+var pop_inspector_title: Label = null
+var pop_inspector_role: Label = null
+var pop_inspector_body: RichTextLabel = null
 
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
@@ -101,6 +122,12 @@ const SCROLL_THRESHOLD: int = 50  # Pixels from bottom to consider "at bottom"
 
 
 func _ready() -> void:
+	# Keep main node + UI alive (responsive) while simulation is paused
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	var ui_node := get_node_or_null("UI")
+	if ui_node != null:
+		ui_node.process_mode = Node.PROCESS_MODE_ALWAYS
+
 	# Load economy config
 	_load_economy_config()
 	
@@ -239,9 +266,10 @@ func _ready() -> void:
 	# Initial UI update
 	update_ui()
 	
-	# Build spawn toolbar
+	# Build spawn toolbar and economy HUD bar
 	_build_spawn_toolbar()
-	
+	_build_economy_bar()
+
 	# Log startup
 	bus.log("Tick 0: START")
 
@@ -460,7 +488,28 @@ func _build_spawn_toolbar() -> void:
 	spawn_info_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	hbox.add_child(spawn_info_label)
 	_update_spawn_info()
-	
+
+	# ── Pause button ──────────────────────────────────────────────────────────
+	var sep_pause := VSeparator.new()
+	hbox.add_child(sep_pause)
+
+	_pause_btn = Button.new()
+	_pause_btn.text = "⏸ Pause"
+	_pause_btn.tooltip_text = "Pause / resume simulation  [P]"
+	_pause_btn.custom_minimum_size = Vector2(88, 30)
+	var pb_style := StyleBoxFlat.new()
+	pb_style.bg_color = Color(0.18, 0.18, 0.23, 0.92)
+	pb_style.border_color = Color(0.82, 0.72, 0.28, 0.85)
+	pb_style.set_border_width_all(2)
+	pb_style.set_corner_radius_all(4)
+	pb_style.set_content_margin_all(5)
+	_pause_btn.add_theme_stylebox_override("normal", pb_style)
+	var pb_hover := pb_style.duplicate() as StyleBoxFlat
+	pb_hover.bg_color = Color(0.26, 0.26, 0.32, 0.95)
+	_pause_btn.add_theme_stylebox_override("hover", pb_hover)
+	_pause_btn.pressed.connect(_toggle_pause)
+	hbox.add_child(_pause_btn)
+
 	# Second row: placement mode status
 	place_mode_label = Label.new()
 	place_mode_label.text = ""
@@ -470,14 +519,12 @@ func _build_spawn_toolbar() -> void:
 	
 	# Add to WorldSpacer area (left part of the screen)
 	var world_spacer = get_node("UI/HUDRoot/Layout/WorldSpacer")
-	
-	# Create a full-area click receiver FIRST (so it's behind toolbar/panels)
-	# This catches clicks in the world area for placement mode
-	var click_receiver = Control.new()
+
+	# Transparent pass-through so UI layout fills correctly but clicks reach agents
+	var click_receiver := Control.new()
 	click_receiver.name = "WorldClickReceiver"
 	click_receiver.set_anchors_preset(Control.PRESET_FULL_RECT)
-	click_receiver.mouse_filter = Control.MOUSE_FILTER_STOP  # Catches all clicks in world area
-	click_receiver.gui_input.connect(_on_world_click)
+	click_receiver.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	world_spacer.add_child(click_receiver)
 	
 	# Toolbar goes AFTER click receiver so it renders on top and gets click priority
@@ -492,6 +539,84 @@ func _build_spawn_toolbar() -> void:
 	placement_cursor.visible = false
 	placement_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	world_spacer.add_child(placement_cursor)
+
+
+func _build_economy_bar() -> void:
+	"""Build the economy HUD strip anchored just below the spawn toolbar."""
+	var world_spacer := get_node("UI/HUDRoot/Layout/WorldSpacer")
+
+	var bar := PanelContainer.new()
+	bar.name = "EcoBar"
+	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_top    = 82
+	bar.offset_bottom = 152
+	bar.offset_left   = 10
+	bar.offset_right  = -10
+	bar.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+
+	var bar_style := StyleBoxFlat.new()
+	bar_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
+	bar_style.border_color = Color(0.28, 0.28, 0.42, 0.85)
+	bar_style.set_border_width_all(1)
+	bar_style.set_corner_radius_all(5)
+	bar_style.content_margin_left   = 6
+	bar_style.content_margin_right  = 6
+	bar_style.content_margin_top    = 4
+	bar_style.content_margin_bottom = 4
+	bar.add_theme_stylebox_override("panel", bar_style)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 0)
+	hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bar.add_child(hbox)
+
+	eco_sim_label        = _add_eco_section(hbox, "SIM",        Color(0.65, 0.75, 1.00), false)
+	eco_village_label    = _add_eco_section(hbox, "VILLAGE",    Color(0.40, 0.90, 0.50), false)
+	eco_market_label     = _add_eco_section(hbox, "MARKET",     Color(0.95, 0.65, 0.25), true)
+	eco_prosperity_label = _add_eco_section(hbox, "PROSPERITY", Color(1.00, 0.85, 0.25), false)
+	eco_farmer_label     = _add_eco_section(hbox, "FARMER",     Color(0.20, 1.00, 0.20), true)
+	eco_baker_label      = _add_eco_section(hbox, "BAKER",      Color(1.00, 0.75, 0.20), true)
+
+	world_spacer.add_child(bar)
+
+
+func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, expand: bool) -> Label:
+	"""Add one labelled section to the economy bar and return its content Label."""
+	if hbox.get_child_count() > 0:
+		var sep := VSeparator.new()
+		var sep_style := StyleBoxFlat.new()
+		sep_style.bg_color = Color(0.30, 0.30, 0.45, 0.55)
+		sep_style.content_margin_top    = 5
+		sep_style.content_margin_bottom = 5
+		sep.add_theme_stylebox_override("separator", sep_style)
+		hbox.add_child(sep)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left",  10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top",   3)
+	margin.add_theme_constant_override("margin_bottom", 3)
+	if expand:
+		margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 1)
+	margin.add_child(vbox)
+
+	var title_lbl := Label.new()
+	title_lbl.text = title_text
+	title_lbl.add_theme_font_size_override("font_size", 9)
+	title_lbl.add_theme_color_override("font_color", accent)
+	vbox.add_child(title_lbl)
+
+	var content_lbl := Label.new()
+	content_lbl.text = "..."
+	content_lbl.add_theme_font_size_override("font_size", 11)
+	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
+	vbox.add_child(content_lbl)
+
+	return content_lbl
 
 
 func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Button:
@@ -529,36 +654,115 @@ func _update_spawn_info() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if clock == null:
-		return
-	if event.is_action_pressed("speed_up"):
-		clock.increase_speed()
-		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("speed_down"):
-		clock.decrease_speed()
-		get_viewport().set_input_as_handled()
-	
-	# Cancel placement mode with Escape or right-click
+	# ── Keyboard shortcuts ────────────────────────────────────────────────────
+	if clock != null:
+		if event.is_action_pressed("speed_up"):
+			clock.increase_speed()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("speed_down"):
+			clock.decrease_speed()
+			get_viewport().set_input_as_handled()
+			return
+
+	# P key: toggle pause
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
+			_toggle_pause()
+			get_viewport().set_input_as_handled()
+			return
+
+	# ── Right-click / Escape: cancel placement ────────────────────────────────
 	if place_mode != PlaceMode.NONE:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			_cancel_placement()
 			get_viewport().set_input_as_handled()
+			return
 		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 			_cancel_placement()
 			get_viewport().set_input_as_handled()
+			return
 
-
-func _on_world_click(event: InputEvent) -> void:
-	"""Handle clicks on the world area background (behind toolbar/panels)."""
+	# ── Left-click: pop selection + placement ─────────────────────────────────
+	# Runs even when paused (main node is PROCESS_MODE_ALWAYS).
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		# Skip if the cursor is over a solid UI control (button, panel, etc.)
+		var hovered := get_viewport().gui_get_hovered_control()
+		if hovered != null and hovered.mouse_filter == Control.MOUSE_FILTER_STOP:
+			return
+
+		var click_pos: Vector2 = event.position
+
+		# Find the closest pop within 15 px of the click
+		var best_pop: Node = null
+		var best_dist: float = 15.0
+		for group_name: String in ["farmers", "bakers", "households"]:
+			for pop: Node in get_tree().get_nodes_in_group(group_name):
+				if not is_instance_valid(pop):
+					continue
+				var pop2d := pop as Node2D
+				if pop2d == null:
+					continue
+				var d: float = click_pos.distance_to(pop2d.global_position)
+				if d < best_dist:
+					best_dist = d
+					best_pop = pop
+
+		if best_pop != null:
+			select_pop(best_pop)
+			get_viewport().set_input_as_handled()
+			return
+
+		# Nothing was clicked — handle placement if active
 		if place_mode != PlaceMode.NONE:
-			var click_pos: Vector2 = event.position
 			_place_entity_at(click_pos)
+			get_viewport().set_input_as_handled()
+
+
+func _on_world_click(_event: InputEvent) -> void:
+	pass  # Superseded by _input() above; kept so old signal connections don't crash
 
 
 func _on_speed_changed(new_speed: float) -> void:
-	if sim_speed_label:
+	_current_speed = new_speed
+	if sim_speed_label and not _is_paused:
 		sim_speed_label.text = "Speed: %.1fx" % new_speed
+
+
+func _toggle_pause() -> void:
+	_is_paused = !_is_paused
+	get_tree().paused = _is_paused
+
+	# Update pause button appearance
+	if _pause_btn != null:
+		if _is_paused:
+			_pause_btn.text = "▶ Resume"
+			var s := StyleBoxFlat.new()
+			s.bg_color        = Color(0.28, 0.14, 0.02, 0.95)
+			s.border_color    = Color(1.00, 0.60, 0.10, 0.95)
+			s.set_border_width_all(2)
+			s.set_corner_radius_all(4)
+			s.set_content_margin_all(5)
+			_pause_btn.add_theme_stylebox_override("normal", s)
+			var sh := s.duplicate() as StyleBoxFlat
+			sh.bg_color = Color(0.36, 0.20, 0.04, 1.0)
+			_pause_btn.add_theme_stylebox_override("hover", sh)
+		else:
+			_pause_btn.text = "⏸ Pause"
+			var s := StyleBoxFlat.new()
+			s.bg_color        = Color(0.18, 0.18, 0.23, 0.92)
+			s.border_color    = Color(0.82, 0.72, 0.28, 0.85)
+			s.set_border_width_all(2)
+			s.set_corner_radius_all(4)
+			s.set_content_margin_all(5)
+			_pause_btn.add_theme_stylebox_override("normal", s)
+			var sh := s.duplicate() as StyleBoxFlat
+			sh.bg_color = Color(0.26, 0.26, 0.32, 0.95)
+			_pause_btn.add_theme_stylebox_override("hover", sh)
+
+	# Update speed label
+	if sim_speed_label != null:
+		sim_speed_label.text = "PAUSED" if _is_paused else "Speed: %.1fx" % _current_speed
 
 
 func _on_event_logged(msg: String) -> void:
@@ -654,193 +858,213 @@ func export_log() -> void:
 
 
 func get_ui_labels() -> void:
-	var farmer_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/FarmerCard/FarmerVBox")
-	var baker_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/BakerCard/BakerVBox")
-	var household_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/HouseholdCard/HouseholdVBox")
-	var market_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/MarketCard/MarketVBox")
-	var log_vbox = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
-	
-	farmer_status_label = farmer_card.get_node("FarmerStatus")
-	farmer_money_label = farmer_card.get_node("FarmerMoney")
-	farmer_seeds_label = farmer_card.get_node("FarmerSeeds")
-	farmer_wheat_label = farmer_card.get_node("FarmerWheat")
-	farmer_bread_label = farmer_card.get_node("FarmerBread")
-	farmer_days_until_starve_label = farmer_card.get_node("FarmerDaysUntilStarve")
-	farmer_starving_label = farmer_card.get_node("FarmerStarving")
-	farmer_inventory_label = farmer_card.get_node("FarmerInventory")
-	
-	baker_status_label = baker_card.get_node("BakerStatus")
-	baker_money_label = baker_card.get_node("BakerMoney")
-	baker_wheat_label = baker_card.get_node("BakerWheat")
-	baker_flour_label = baker_card.get_node("BakerFlour")
-	baker_bread_label = baker_card.get_node("BakerBread")
-	baker_food_bread_label = baker_card.get_node("BakerFoodBread")
-	baker_days_until_starve_label = baker_card.get_node("BakerDaysUntilStarve")
-	baker_starving_label = baker_card.get_node("BakerStarving")
-	baker_inventory_label = baker_card.get_node("BakerInventory")
-	
-	household_status_label = household_card.get_node("HouseholdStatus")
-	household_money_label = household_card.get_node("HouseholdMoney")
-	household_bread_label = household_card.get_node("HouseholdBread")
-	household_bread_consumed_label = household_card.get_node("HouseholdBreadConsumed")
-	household_hunger_label = household_card.get_node("HouseholdHunger")
-	household_starving_label = household_card.get_node("HouseholdStarving")
-	household_inventory_label = household_card.get_node("HouseholdInventory")
-	
-	market_money_label = market_card.get_node("MarketMoney")
-	market_seeds_label = market_card.get_node("MarketSeeds")
-	market_wheat_label = market_card.get_node("MarketWheat")
-	market_wheat_cap_label = market_card.get_node("MarketWheatCap")
-	market_bread_label = market_card.get_node("MarketBread")
-	market_bread_cap_label = market_card.get_node("MarketBreadCap")
-	wheat_price_label = market_card.get_node("WheatPrice")
-	bread_price_label = market_card.get_node("BreadPrice")
-	
-	event_log = log_vbox.get_node("EventLog")
-	export_log_button = log_vbox.get_node("ExportLogButton")
-	export_log_button.pressed.connect(export_log)
-	
-	# Add Jump to Bottom button if it exists in scene
-	if log_vbox.has_node("JumpToBottomButton"):
-		jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
-		jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
-	
-	# Add simulation speed label if it exists in scene
-	if has_node("UI/HUDRoot/Layout/TopBar"):
-		var top_bar = get_node("UI/HUDRoot/Layout/TopBar")
-		if top_bar and top_bar.has_node("SimSpeedLabel"):
-			sim_speed_label = top_bar.get_node("SimSpeedLabel")
-			sim_speed_label.text = "Speed: 1.0x"
-	
-	# Get prosperity panel labels if they exist
-	if has_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard"):
-		var prosperity_card = get_node("UI/HUDRoot/Layout/Sidebar/SidebarVBox/CardsScroll/Cards/ProsperityCard/ProsperityVBox")
-		if prosperity_card:
-			prosperity_score_label = prosperity_card.get_node_or_null("ProsperityScore")
-			wealth_score_label = prosperity_card.get_node_or_null("WealthScore")
-			food_score_label = prosperity_card.get_node_or_null("FoodScore")
-			starvation_score_label = prosperity_card.get_node_or_null("StarvationScore")
-			trade_score_label = prosperity_card.get_node_or_null("TradeScore")
-			population_info_label = prosperity_card.get_node_or_null("PopulationInfo")
-	
+	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
+	if log_vbox:
+		event_log = log_vbox.get_node_or_null("EventLog")
+		export_log_button = log_vbox.get_node_or_null("ExportLogButton")
+		if export_log_button:
+			export_log_button.pressed.connect(export_log)
+		if log_vbox.has_node("JumpToBottomButton"):
+			jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
+			jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
+
 	# Connect scroll detection for sticky auto-scroll
 	if event_log:
-		# RichTextLabel uses a ScrollBar child for scrolling
 		var vscroll = event_log.get_v_scroll_bar()
 		if vscroll:
 			vscroll.value_changed.connect(_on_log_scroll)
 
+	# Selected-pop panel — anchored to the bottom of the screen
+	pop_inspector_panel = get_node_or_null("UI/PopInspector")
+	if pop_inspector_panel:
+		pop_inspector_title = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorTitle")
+		pop_inspector_role  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorRole")
+		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/PopInspectorBody")
+		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
+		if close_btn:
+			close_btn.pressed.connect(_on_inspector_close)
+		# Dark semi-transparent panel background
+		var panel_style := StyleBoxFlat.new()
+		panel_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
+		panel_style.border_color = Color(0.28, 0.28, 0.42, 0.75)
+		panel_style.set_border_width_all(1)
+		panel_style.content_margin_left   = 14
+		panel_style.content_margin_right  = 14
+		panel_style.content_margin_top    = 10
+		panel_style.content_margin_bottom = 10
+		pop_inspector_panel.add_theme_stylebox_override("panel", panel_style)
+
+	# Connect pop_clicked for the static scene pops
+	if is_instance_valid(farmer) and farmer.has_signal("pop_clicked"):
+		farmer.pop_clicked.connect(select_pop)
+	if is_instance_valid(baker) and baker.has_signal("pop_clicked"):
+		baker.pop_clicked.connect(select_pop)
+	if is_instance_valid(household_agent) and household_agent.has_signal("pop_clicked"):
+		household_agent.pop_clicked.connect(select_pop)
+
 
 func update_ui() -> void:
-	if farmer and farmer_status_label:
-		farmer_status_label.text = "Status: " + farmer.get_status_text()
-	if farmer and farmer_money_label:
-		farmer_money_label.text = "Farmer Money: $%.2f" % farmer.get_node("Wallet").money
-	if farmer and farmer_seeds_label:
-		farmer_seeds_label.text = "Farmer Seeds: %d" % farmer.get_node("Inventory").get_qty("seeds")
-	if farmer and farmer_wheat_label:
-		farmer_wheat_label.text = "Farmer Wheat: %d" % farmer.get_node("Inventory").get_qty("wheat")
-	if farmer and farmer_bread_label:
-		farmer_bread_label.text = "Farmer Bread: %d" % farmer.get_node("Inventory").get_qty("bread")
-	if farmer and farmer_days_until_starve_label:
-		var farmer_hunger = farmer.get_node("HungerNeed")
-		farmer_days_until_starve_label.text = "Farmer Hunger Days: %d/%d" % [farmer_hunger.hunger_days, farmer_hunger.hunger_max_days]
-	if farmer and farmer_starving_label:
-		var farmer_hunger = farmer.get_node("HungerNeed")
-		farmer_starving_label.text = "Farmer Starving: %s" % ("Yes" if farmer_hunger.is_starving else "No")
-	if farmer and farmer_inventory_label:
-		var farmer_cap = farmer.get_node("InventoryCapacity")
-		var farmer_inv_text = "Inventory: %d / %d" % [farmer_cap.current_total(), farmer_cap.max_items]
-		if farmer_cap.is_full():
-			farmer_inv_text += " (FULL)"
-		farmer_inventory_label.text = farmer_inv_text
-	
-	if market and market_money_label:
-		market_money_label.text = "Market Money: $%.2f" % market.money
-	if market and market_seeds_label:
-		market_seeds_label.text = "Market Seeds: %d" % market.seeds
-	if market and market_wheat_label:
-		market_wheat_label.text = "Market Wheat: %d" % market.wheat
-	if market and market_wheat_cap_label:
-		market_wheat_cap_label.text = "Market Wheat: %d/%d" % [market.wheat, market.wheat_capacity]
-	if market and market_bread_label:
-		market_bread_label.text = "Market Bread: %d" % market.bread
-	if market and market_bread_cap_label:
-		market_bread_cap_label.text = "Market Bread: %d/%d" % [market.bread, market.bread_capacity]
-	if market and wheat_price_label:
-		wheat_price_label.text = "Wheat Price: $%.2f ($%.2f–$%.2f)" % [market.wheat_price, market.WHEAT_PRICE_FLOOR, market.WHEAT_PRICE_CEILING]
-	if market and bread_price_label:
-		bread_price_label.text = "Bread Price: $%.2f ($%.2f–$%.2f)" % [market.bread_price, market.BREAD_PRICE_FLOOR, market.BREAD_PRICE_CEILING]
-	
-	if baker and baker_status_label:
-		baker_status_label.text = "Status: " + baker.get_status_text()
-	if baker and baker_money_label:
-		baker_money_label.text = "Baker Money: $%.2f" % baker.get_node("Wallet").money
-	if baker and baker_wheat_label:
-		baker_wheat_label.text = "Baker Wheat: %d" % baker.get_node("Inventory").get_qty("wheat")
-	if baker and baker_flour_label:
-		baker_flour_label.text = "Baker Flour: %d" % baker.get_node("Inventory").get_qty("flour")
-	if baker and baker_bread_label:
-		baker_bread_label.text = "Baker Bread: %d" % baker.get_node("Inventory").get_qty("bread")
-	if baker and baker_food_bread_label:
-		baker_food_bread_label.text = "Baker Food Bread: %d" % baker.get_node("Inventory").get_qty("bread")
-	if baker and baker_days_until_starve_label:
-		var baker_hunger = baker.get_node("HungerNeed")
-		baker_days_until_starve_label.text = "Baker Hunger Days: %d/%d" % [baker_hunger.hunger_days, baker_hunger.hunger_max_days]
-	if baker and baker_starving_label:
-		var baker_hunger = baker.get_node("HungerNeed")
-		baker_starving_label.text = "Baker Starving: %s" % ("Yes" if baker_hunger.is_starving else "No")
-	if baker and baker_inventory_label:
-		var baker_cap = baker.get_node("InventoryCapacity")
-		var baker_inv_text = "Inventory: %d / %d" % [baker_cap.current_total(), baker_cap.max_items]
-		if baker_cap.is_full():
-			baker_inv_text += " (FULL)"
-		baker_inventory_label.text = baker_inv_text
-	
-	if household_agent and household_status_label:
-		household_status_label.text = "Status: " + household_agent.get_status_text()
-	if household_agent and household_money_label:
-		household_money_label.text = "Household Money: $%.2f" % household_agent.get_node("Wallet").money
-	if household_agent and household_bread_label:
-		household_bread_label.text = "Household Bread: %d" % household_agent.get_node("Inventory").get_qty("bread")
-	if household_agent and household_bread_consumed_label:
-		household_bread_consumed_label.text = "Household Bread Consumed: %d" % household_agent.bread_consumed
-	if household_agent and household_hunger_label:
-		var household_hunger = household_agent.get_node("HungerNeed")
-		household_hunger_label.text = "Household Hunger: %d/%d" % [household_hunger.hunger_days, household_hunger.hunger_max_days]
-	if household_agent and household_starving_label:
-		var household_hunger = household_agent.get_node("HungerNeed")
-		household_starving_label.text = "Household Starving: %s" % ("Yes" if household_hunger.is_starving else "No")
-	if household_agent and household_inventory_label:
-		var household_cap = household_agent.get_node("InventoryCapacity")
-		var household_inv_text = "Inventory: %d / %d" % [household_cap.current_total(), household_cap.max_items]
-		if household_cap.is_full():
-			household_inv_text += " (FULL)"
-		household_inventory_label.text = household_inv_text
-	
-	# Update prosperity UI
-	if prosperity_meter:
-		if prosperity_score_label:
-			prosperity_score_label.text = "Prosperity: %.2f" % prosperity_meter.prosperity_score
-		if wealth_score_label:
-			var wealth = prosperity_meter.prosperity_inputs.get("wealth_health", 0.0)
-			wealth_score_label.text = "Wealth: %.2f" % wealth
-		if food_score_label:
-			var food = prosperity_meter.prosperity_inputs.get("food_security", 0.0)
-			food_score_label.text = "Food: %.2f" % food
-		if starvation_score_label:
-			var starvation = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
-			starvation_score_label.text = "Starvation: %.2f" % starvation
-		if trade_score_label:
-			var trade = prosperity_meter.prosperity_inputs.get("trade_activity", 0.0)
-			trade_score_label.text = "Trade: %.2f" % trade
-		if population_info_label:
-			population_info_label.text = "Population: %d" % households.size()
+	_update_eco_bar()
+	update_inspector()
+
+
+func _update_eco_bar() -> void:
+	"""Refresh all six economy-bar section labels."""
+	# SIM
+	if eco_sim_label and calendar:
+		eco_sim_label.text = "Day %d\n%.1f×" % [calendar.day_index, _current_speed]
+
+	# VILLAGE
+	if eco_village_label:
+		var _f: int = get_tree().get_nodes_in_group("farmers").size()
+		var _b: int = get_tree().get_nodes_in_group("bakers").size()
+		var _h: int = get_tree().get_nodes_in_group("households").size()
+		eco_village_label.text = "Pop: %d  H:%d F:%d B:%d\nFields: %d/%d" % [
+			_h + _f + _b, _h, _f, _b,
+			all_field_nodes.size(), MAX_FIELDS
+		]
+
+	# MARKET
+	if eco_market_label and market:
+		eco_market_label.text = (
+			"Wheat %d/%d · $%.2f\nBread %d/%d · $%.2f" % [
+				market.wheat, market.wheat_capacity, market.wheat_price,
+				market.bread, market.bread_capacity, market.bread_price
+			]
+		)
+
+	# PROSPERITY
+	if eco_prosperity_label and prosperity_meter:
+		var w: float = prosperity_meter.prosperity_inputs.get("wealth_health",       0.0)
+		var f: float = prosperity_meter.prosperity_inputs.get("food_security",       0.0)
+		var s: float = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
+		var t: float = prosperity_meter.prosperity_inputs.get("trade_activity",      0.0)
+		eco_prosperity_label.text = "★ %.2f\nW:%.2f F:%.2f S:%.2f T:%.2f" % [
+			prosperity_meter.prosperity_score, w, f, s, t
+		]
+
+	# FARMER (baseline)
+	if eco_farmer_label:
+		if farmer and is_instance_valid(farmer):
+			var fh: HungerNeed        = farmer.get_node("HungerNeed")        as HungerNeed
+			var fi: Inventory         = farmer.get_node("Inventory")         as Inventory
+			var fw: Wallet            = farmer.get_node("Wallet")            as Wallet
+			var fc: InventoryCapacity = farmer.get_node("InventoryCapacity") as InventoryCapacity
+			eco_farmer_label.text = "$%.0f  S:%d W:%d Br:%d  ♥%d/%d\n%s  Inv:%d/%d" % [
+				fw.money,
+				fi.get_qty("seeds"), fi.get_qty("wheat"), fi.get_qty("bread"),
+				fh.hunger_days, fh.hunger_max_days,
+				farmer.get_status_text(),
+				fc.current_total(), fc.max_items
+			]
+		else:
+			eco_farmer_label.text = "(none)"
+
+	# BAKER (baseline)
+	if eco_baker_label:
+		if baker and is_instance_valid(baker):
+			var bh: HungerNeed        = baker.get_node("HungerNeed")        as HungerNeed
+			var bi: Inventory         = baker.get_node("Inventory")         as Inventory
+			var bw: Wallet            = baker.get_node("Wallet")            as Wallet
+			var bc: InventoryCapacity = baker.get_node("InventoryCapacity") as InventoryCapacity
+			eco_baker_label.text = "$%.0f  W:%d Fl:%d Br:%d  ♥%d/%d\n%s  Inv:%d/%d" % [
+				bw.money,
+				bi.get_qty("wheat"), bi.get_qty("flour"), bi.get_qty("bread"),
+				bh.hunger_days, bh.hunger_max_days,
+				baker.get_status_text(),
+				bc.current_total(), bc.max_items
+			]
+		else:
+			eco_baker_label.text = "(none)"
 
 
 func get_total_population() -> int:
 	"""Combined head-count of all living agents (households + farmers + bakers)."""
 	return households.size() + all_farmers.size() + all_bakers.size()
+
+
+# ============================================================================
+# POP INSPECTOR — click-to-inspect any agent
+# ============================================================================
+
+func select_pop(pop: Node) -> void:
+	"""Called when any pop emits pop_clicked. Opens the inspector panel."""
+	selected_pop = pop
+	update_inspector()
+
+
+func _on_inspector_close() -> void:
+	selected_pop = null
+	if pop_inspector_panel:
+		pop_inspector_panel.visible = false
+
+
+func update_inspector() -> void:
+	"""Refresh the inspector panel. Called every UI update tick."""
+	if pop_inspector_panel == null:
+		return
+	# Clear selection if the selected pop was freed (migration/conversion/starvation)
+	if selected_pop == null or not is_instance_valid(selected_pop):
+		selected_pop = null
+		pop_inspector_panel.visible = false
+		return
+	pop_inspector_panel.visible = true
+	if not selected_pop.has_method("get_inspector_data"):
+		if pop_inspector_body:
+			pop_inspector_body.text = "(no inspector data available)"
+		return
+	var d: Dictionary = selected_pop.get_inspector_data()
+
+	if pop_inspector_title:
+		pop_inspector_title.text = d.get("name", "?")
+	if pop_inspector_role:
+		pop_inspector_role.text = d.get("role", "?")
+
+	if not pop_inspector_body:
+		return
+
+	var cash: float   = d.get("cash", 0.0)
+	var bread: int    = d.get("bread", 0)
+	var hunger_str: String = d.get("hunger", "?")
+	var starving: bool = d.get("starving", false)
+	var surv: bool    = d.get("survival", false)
+	var state: String = d.get("state", "?")
+
+	var starve_tag: String = "  [color=red]☠ STARVING[/color]" if starving else ""
+	var surv_tag: String   = "  [color=orange][SURVIVAL][/color]" if surv else ""
+
+	# Line 1: core vitals
+	var line1: String = "[b]$%.0f[/b]    Bread: [b]%d[/b]    Hunger: [b]%s[/b]%s" % [
+		cash, bread, hunger_str, starve_tag
+	]
+
+	# Line 2: state + survival flag
+	var line2: String = "[color=#aaaaaa]%s[/color]%s" % [state, surv_tag]
+
+	# Line 3: role-specific extras (compact inline)
+	var extras: Array[String] = []
+	if d.has("seeds"):
+		extras.append("Seeds:%d" % d.get("seeds"))
+	if d.has("wheat"):
+		extras.append("Wheat:%d" % d.get("wheat"))
+	if d.has("flour"):
+		extras.append("Flour:%d" % d.get("flour"))
+	if d.has("fields"):
+		extras.append("Fields:%d" % d.get("fields"))
+	if d.has("bread_consumed") and d.get("bread_consumed", 0) > 0:
+		extras.append("Consumed:%d" % d.get("bread_consumed"))
+	if d.get("neg_cashflow_days", 0) > 0:
+		extras.append("[color=#ff8844]NegCash:%dd[/color]" % d.get("neg_cashflow_days"))
+	if d.get("failed_food_days", 0) > 0:
+		extras.append("[color=#ff8844]FailFood:%dd[/color]" % d.get("failed_food_days"))
+	if d.has("training_days"):
+		extras.append("[color=#88ccff]Training:%dd[/color]" % d.get("training_days"))
+
+	var lines: Array[String] = [line1, line2]
+	if extras.size() > 0:
+		lines.append("[color=#888888]" + "   ".join(extras) + "[/color]")
+
+	pop_inspector_body.text = "\n".join(lines)
 
 
 func spawn_household_at(pos: Vector2) -> Node:
@@ -901,6 +1125,10 @@ func spawn_household_at(pos: Vector2) -> Node:
 	
 	if event_bus:
 		event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_meter.prosperity_score])
+	
+	# Wire click-to-inspect
+	if h.has_signal("pop_clicked"):
+		h.pop_clicked.connect(select_pop)
 	
 	return h
 
@@ -1349,6 +1577,10 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 			msg += " → absorbed %d unassigned field(s)" % absorbed
 		event_bus.log(msg)
 	
+	# Wire click-to-inspect
+	if f.has_signal("pop_clicked"):
+		f.pop_clicked.connect(select_pop)
+	
 	return f
 
 
@@ -1410,6 +1642,10 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
+	
+	# Wire click-to-inspect
+	if b.has_signal("pop_clicked"):
+		b.pop_clicked.connect(select_pop)
 	
 	return b
 

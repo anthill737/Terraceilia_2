@@ -427,7 +427,7 @@ func get_saturation_info(good: String) -> Dictionary:
 			return {}
 
 
-func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
+func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Micro-fill buying: purchase wheat 1 unit at a time, recomputing bid after each unit.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
 	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
@@ -513,7 +513,7 @@ func buy_wheat_from_farmer(farmer: Farmer, min_acceptable_price: float = 0.0, is
 	return units_bought
 
 
-func sell_seeds_to_farmer(farmer: Farmer) -> void:
+func sell_seeds_to_farmer(farmer: Agent) -> void:
 	var farmer_inv: Inventory = get_inv(farmer)
 	var farmer_wallet: Wallet = get_wallet(farmer)
 	var current_seeds: int = farmer_inv.get_qty("seeds")
@@ -535,7 +535,7 @@ func sell_seeds_to_farmer(farmer: Farmer) -> void:
 			event_bus.log("Tick %d: Market sold %d seeds to %s for $%.2f" % [current_tick, needed, _agent_label(farmer), cost])
 
 
-func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
+func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	if requested <= 0:
 		return 0
 	
@@ -585,7 +585,7 @@ func sell_wheat_to_baker(baker: Baker, requested: int) -> int:
 	return amount_sold
 
 
-func buy_bread_from_baker(baker: Baker, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
+func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Micro-fill buying: purchase bread 1 unit at a time, recomputing bid after each unit.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
 	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
@@ -679,7 +679,7 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	
 	# HYSTERESIS GATE: Check if bread selling is allowed (applies to all producers, skip for survival)
 	# Note: Baker is the primary bread producer, but this gate applies generically
-	if not is_survival and agent is Baker and not can_producer_sell("bread"):
+	if not is_survival and agent.is_in_group("bakers") and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
 		return 0
@@ -807,7 +807,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	# GUARD RAIL: Prevent producers from buying their own output UNLESS:
 	# 1. They are in survival mode (food reserve critical), OR
 	# 2. Production is profit-paused (can't produce their own food)
-	if agent is Baker:
+	if agent.is_in_group("bakers"):
 		var can_buy_own_output: bool = false
 		
 		# Check if in survival mode

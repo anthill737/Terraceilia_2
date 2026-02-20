@@ -1,9 +1,9 @@
 extends Node
 
-var farmer: Farmer = null
-var baker: Baker = null
+var farmer: Agent = null
+var baker: Agent = null
 var market: Market = null
-var household_agent: HouseholdAgent = null
+var household_agent: Agent = null
 var clock: SimulationClock = null
 var bus: EventBus = null
 var audit: EconomyAudit = null
@@ -27,6 +27,7 @@ var next_farmer_id: int = 2      # Counter for new farmers
 var next_baker_id: int = 2       # Counter for new bakers
 @export var FarmerScene: PackedScene
 @export var BakerScene: PackedScene
+var AgentScene: PackedScene = null
 var spawn_info_label: Label = null
 
 # Placement mode state
@@ -118,6 +119,13 @@ var pop_history_label: RichTextLabel = null
 # Persistent identity counter — incremented each time a pop is born
 var _next_person_id: int = 1
 
+# Global rolling cashflow by role — diagnostics only, no effect on AI
+var _global_cashflow_7d: Dictionary = {
+	"Household": [],
+	"Farmer":    [],
+	"Baker":     [],
+}
+
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
 var user_at_bottom: bool = true  # Track if user is at bottom for sticky auto-scroll
@@ -139,6 +147,7 @@ func _ready() -> void:
 	_resolve_household_scene()
 	_resolve_farmer_scene()
 	_resolve_baker_scene()
+	_resolve_agent_scene()
 	
 	# Create simulation systems
 	# All simulation nodes are marked PAUSABLE so get_tree().paused = true stops them.
@@ -253,8 +262,11 @@ func _ready() -> void:
 	# Add baseline household to households array for prosperity tracking
 	households.append(household_agent)
 	
-	# Connect death signal for baseline household
-	household_agent.household_died.connect(_on_household_died)
+	# Connect death signal for baseline household (old subclass uses household_died)
+	if household_agent.has_signal("household_died"):
+		household_agent.connect("household_died", _on_household_died)
+	elif household_agent.has_signal("agent_died"):
+		household_agent.agent_died.connect(_on_household_died)
 	
 	# Bind prosperity meter references
 	prosperity_meter.bind_references(bus, market, households)
@@ -418,6 +430,18 @@ func _resolve_baker_scene() -> void:
 		print("Main: BakerScene auto-loaded from ", path)
 	else:
 		push_warning("BakerScene not found at " + path + " - baker spawning disabled")
+
+
+func _resolve_agent_scene() -> void:
+	"""Load the unified Agent.tscn used for all new spawns and role conversions."""
+	if AgentScene != null:
+		return
+	var path := "res://scenes/Agent.tscn"
+	if ResourceLoader.exists(path):
+		AgentScene = load(path)
+		print("Main: AgentScene loaded from ", path)
+	else:
+		push_error("FATAL: AgentScene not found at " + path)
 
 
 func _build_spawn_toolbar() -> void:
@@ -889,7 +913,12 @@ func _assign_new_identity(pop: Node) -> void:
 		return
 	pop.person_id   = _new_person_id()
 	pop.person_name = "Pop %d" % pop.person_id
-	pop.log_event("Born: role=%s" % pop.get_class())
+	var role_str: String = ""
+	if pop.get("current_role") != null and pop.current_role != "":
+		role_str = pop.current_role
+	else:
+		role_str = pop.get_class()
+	pop.log_event("Born: role=%s" % role_str)
 
 
 func _transfer_identity(from_pop: Node, to_pop: Node, new_role: String) -> void:
@@ -905,14 +934,60 @@ func _transfer_identity(from_pop: Node, to_pop: Node, new_role: String) -> void:
 
 
 func _transfer_identity_data(to_pop: Node, pid: int, pname: String,
-		events: Array, new_role: String) -> void:
-	"""Set pre-captured identity data on a newly spawned node (used when old node is gone)."""
+		events: Array, new_role: String,
+		skill_f: float = 0.25, skill_b: float = 0.25) -> void:
+	"""Set pre-captured identity + skills on a newly spawned node after role conversion."""
 	if not is_instance_valid(to_pop) or not to_pop.has_method("log_event"):
 		return
 	to_pop.person_id   = pid
 	to_pop.person_name = pname
 	to_pop.life_events = events.duplicate()
+	if to_pop.get("skill_farmer") != null:
+		to_pop.skill_farmer = skill_f
+	if to_pop.get("skill_baker") != null:
+		to_pop.skill_baker = skill_b
+	if to_pop.get("days_in_role") != null:
+		to_pop.days_in_role = 0
 	to_pop.log_event("Role changed → %s" % new_role)
+
+
+# ── Global cashflow helpers (diagnostics) ────────────────────────────────────
+
+func _roll_global_cashflow() -> void:
+	"""Sum each role's just-rolled daily net and append to global 7d arrays."""
+	var role_groups: Dictionary = {
+		"Household": "households",
+		"Farmer":    "farmers",
+		"Baker":     "bakers",
+	}
+	for role: String in role_groups:
+		var day_net: float = 0.0
+		for pop: Node in get_tree().get_nodes_in_group(role_groups[role]):
+			if not is_instance_valid(pop):
+				continue
+			var arr: Array = pop.get("cashflow_7d") if pop.get("cashflow_7d") != null else []
+			if not arr.is_empty():
+				day_net += float(arr[-1])
+		var hist: Array = _global_cashflow_7d[role]
+		hist.append(day_net)
+		if hist.size() > 7:
+			hist.pop_front()
+		_global_cashflow_7d[role] = hist
+
+
+func global_role_rolling_7d_sum(role: String) -> float:
+	var hist: Array = _global_cashflow_7d.get(role, [])
+	var s: float = 0.0
+	for v in hist:
+		s += float(v)
+	return s
+
+
+func global_role_rolling_7d_avg(role: String) -> float:
+	var hist: Array = _global_cashflow_7d.get(role, [])
+	if hist.is_empty():
+		return 0.0
+	return global_role_rolling_7d_sum(role) / float(hist.size())
 
 
 func get_ui_labels() -> void:
@@ -1176,6 +1251,53 @@ func update_inspector() -> void:
 	if extras.size() > 0:
 		lines.append("[color=#888888]" + "   ".join(extras) + "[/color]")
 
+	# ── Skills display ───────────────────────────────────────────────────────
+	var sk_f: float = d.get("skill_farmer", -1.0)
+	if sk_f >= 0.0:
+		var sk_b: float    = d.get("skill_baker",  0.0)
+		var dir: int       = d.get("days_in_role", 0)
+		var prod_m: float  = d.get("prod_mult",    1.0)
+		var pm_col: String = "#88cc88" if prod_m >= 1.0 else "#cc8888"
+		# Build a 5-block visual bar for each skill
+		var f_fill: int  = roundi(sk_f * 5.0)
+		var b_fill: int  = roundi(sk_b * 5.0)
+		var f_bar: String = "█".repeat(f_fill) + "░".repeat(5 - f_fill)
+		var b_bar: String = "█".repeat(b_fill) + "░".repeat(5 - b_fill)
+		lines.append(
+			"[color=#6688aa]Farmer: [%s] %.2f   Baker: [%s] %.2f   (%dd in role)[/color]" %
+			[f_bar, sk_f, b_bar, sk_b, dir])
+		lines.append(
+			"[color=#6688aa]Productivity: [color=%s]×%.2f[/color][/color]" %
+			[pm_col, prod_m])
+
+	# ── Cashflow diagnostics ─────────────────────────────────────────────────
+	var cf_income: float = d.get("cashflow_income", -1.0)
+	if cf_income >= 0.0:
+		var cf_expense: float = d.get("cashflow_expense", 0.0)
+		var cf_net: float     = cf_income - cf_expense
+		var cf_avg: float     = d.get("cashflow_7d_avg",  0.0)
+		var cf_sum: float     = d.get("cashflow_7d_sum",  0.0)
+		var cf_len: int       = d.get("cashflow_7d_len",  0)
+		var pop_role: String  = d.get("role", "")
+		var r_avg: float      = global_role_rolling_7d_avg(pop_role)
+		var r_sum: float      = global_role_rolling_7d_sum(pop_role)
+		var delta: float      = cf_avg - r_avg
+		# Each metric gets its OWN color — today's red doesn't bleed into 7d avg
+		var net_col: String   = "#55cc88" if cf_net  >= 0.0 else "#cc5555"
+		var avg_col: String   = "#55cc88" if cf_avg  >= 0.0 else "#cc5555"
+		var d_col: String     = "#55cc88" if delta   >= 0.0 else "#cc5555"
+		# Don't show 7d stats until there are at least 2 completed days of data
+		var has_7d: bool      = cf_len >= 2
+		var d_days: String    = "%d" % cf_len if has_7d else "n/a"
+		var avg_str: String   = "[color=%s]$%.2f/d[/color]" % [avg_col, cf_avg] if has_7d else "n/a"
+		lines.append(
+			"[color=#6688bb]₢ Today: +$%.2f  -$%.2f  = [color=%s]$%.2f[/color]   7d(%s): avg %s[/color]" %
+			[cf_income, cf_expense, net_col, cf_net, d_days, avg_str])
+		if has_7d:
+			lines.append(
+				"[color=#445577]%s role 7d avg: $%.2f/d   Δ vs role: [color=%s]%+.2f[/color][/color]" %
+				[pop_role, r_avg, d_col, delta])
+
 	pop_inspector_body.text = "\n".join(lines)
 
 	# ── Scrollable life history ────────────────────────────────────────────────
@@ -1194,13 +1316,13 @@ func update_inspector() -> void:
 
 
 func spawn_household_at(pos: Vector2) -> Node:
-	"""Spawn a new household from the HouseholdScene PackedScene."""
-	
-	# Fail cleanly if HouseholdScene is not resolved
-	if HouseholdScene == null:
-		push_error("Cannot spawn household: HouseholdScene is null.")
+	"""Spawn a new household using unified Agent.tscn + set_role()."""
+
+	var scene: PackedScene = AgentScene if AgentScene != null else HouseholdScene
+	if scene == null:
+		push_error("Cannot spawn household: no scene available.")
 		return null
-	
+
 	# Hard population cap
 	var total_pop := get_total_population()
 	if total_pop >= MAX_TOTAL_POP:
@@ -1208,71 +1330,77 @@ func spawn_household_at(pos: Vector2) -> Node:
 		if event_bus:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
-	
-	# Instantiate household from scene file
-	var h := HouseholdScene.instantiate()
+
+	var h: Agent = scene.instantiate() as Agent
 	if h == null:
-		push_error("HouseholdScene.instantiate() returned null")
+		push_error("Agent scene instantiate() returned null")
 		return null
-	
-	# Setup household
+
 	h.name = "Household_%d" % (households.size() + 1)
 	h.global_position = pos
 	add_child(h)
-	
-	# Allow _ready() to run so child nodes/components exist
+
 	await get_tree().process_frame
-	
+
 	_assign_new_identity(h)
 
-	# Wire required references (identical to baseline household)
 	h.market = market
 	h.event_bus = event_bus
-	
-	# Wire HungerNeed component for spawned household
-	var spawned_hunger = h.get_node("HungerNeed") as HungerNeed
-	var spawned_inv = h.get_node("Inventory") as Inventory
+
+	# Activate Household role (new-style Agent with no existing job)
+	if h.current_job == null:
+		h.set_role("Household")
+
+	# Wire HungerNeed
+	var spawned_hunger: HungerNeed = h.get_node("HungerNeed") as HungerNeed
+	var spawned_inv: Inventory = h.get_node("Inventory") as Inventory
 	if spawned_hunger and spawned_inv:
 		spawned_hunger.bind(h.name, spawned_inv, event_bus, calendar)
-	
-	# Create a home node for this household at their spawn position
-	var home = Node2D.new()
+
+	# Create home
+	var home := Node2D.new()
 	home.name = h.name + "_Home"
 	home.global_position = pos
 	add_child(home)
-	
+
 	h.set_locations(home, market_node)
-	
-	# Register in ALL simulation loops (identical to baseline)
+
+	# Register
 	households.append(h)
-	h.add_to_group("households")
-	h.add_to_group("agents")
-	
-	# Connect death signal
-	h.household_died.connect(_on_household_died)
-	
+	if not h.is_in_group("households"):
+		h.add_to_group("households")
+	if not h.is_in_group("agents"):
+		h.add_to_group("agents")
+
+	# Connect death signal (new Agent uses agent_died; old uses household_died)
+	if h.has_signal("agent_died"):
+		h.connect("agent_died", _on_household_died)
+	elif h.has_signal("household_died"):
+		h.connect("household_died", _on_household_died)
+
 	if event_bus:
 		event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_meter.prosperity_score])
-	
-	# Wire click-to-inspect
+
 	if h.has_signal("pop_clicked"):
-		h.pop_clicked.connect(select_pop)
-	
+		h.connect("pop_clicked", select_pop)
+
 	return h
 
 
 ## Handle household starvation death - remove from all simulation lists.
-func _on_household_died(household: HouseholdAgent) -> void:
-	# Remove from households list
-	var idx := households.find(household)
+## Accepts both old HouseholdAgent and new Agent (from agent_died signal).
+func _on_household_died(agent_node: Node) -> void:
+	var idx := households.find(agent_node)
 	if idx != -1:
 		households.remove_at(idx)
-	
-	# Remove from agent groups
-	household.remove_from_group("households")
-	household.remove_from_group("agents")
-	
-	# household will queue_free() itself, no need to call it here
+
+	if agent_node.is_in_group("households"):
+		agent_node.remove_from_group("households")
+	if agent_node.is_in_group("agents"):
+		agent_node.remove_from_group("agents")
+
+	# Old HouseholdAgent queue_frees itself; new Agent does not — safe to call either way
+	agent_node.queue_free()
 
 
 # ============================================================================
@@ -1302,6 +1430,9 @@ func _on_calendar_day_changed(day: int) -> void:
 		if h and is_instance_valid(h):
 			h.on_day_changed(day)
 	
+	# Aggregate global cashflow after all pop rollovers
+	_roll_global_cashflow()
+
 	# PART 4: Emergency respawn — prevent permanent dead-equilibrium.
 	# If the entire household population has been lost but the food supply chain
 	# is working, immediately bring in one new household rather than waiting for
@@ -1391,93 +1522,188 @@ func _on_role_switch_requested(household: Node, new_role: String) -> void:
 	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
 
 
-## Perform the actual role conversion: despawn household, spawn producer.
-## Transfers wallet funds to give the new agent a starting stake.
+## Perform the actual role conversion.
+## New-style Agent: in-place set_role() — identity, wallet, skills persist automatically.
+## Old-style subclass: falls back to despawn + spawn + transfer.
 func _perform_role_conversion(household: Node, role: String) -> void:
 	if not is_instance_valid(household):
 		return
-	
-	# [POP] Hard population cap — bail before touching the household so it stays alive.
+
+	# [POP] Hard population cap
+	# Conversion keeps the same agent, so pop count doesn't increase, but guard anyway.
 	var total_pop := get_total_population()
 	if total_pop >= MAX_TOTAL_POP:
 		if event_bus:
 			event_bus.log("[POP] Conversion of %s blocked — pop cap (%d/%d)" % [
 				household.name, total_pop, MAX_TOTAL_POP])
 		return
-	
-	# [LAND] Gate farmer conversions on field capacity BEFORE removing the household.
-	# If we are at the land cap we cancel; the household stays alive.
+
+	# [LAND] Gate farmer conversions on field capacity
 	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
 		if event_bus:
 			event_bus.log("[MOBILITY] farmer conversion blocked — land cap reached (%d/%d fields)" % [
 				all_field_nodes.size(), MAX_FIELDS])
 		return
-	
+
 	var pos: Vector2 = household.global_position
-	var starting_money: float = 0.0
-	var w = household.get_node_or_null("Wallet")
-	if w:
-		starting_money = w.money
-	
-	# Save identity BEFORE freeing the old node so we can transfer it to the successor
+	var wallet_money: float = 0.0
+	var hw: Wallet = household.get_node_or_null("Wallet") as Wallet
+	if hw:
+		wallet_money = hw.money
+
+	# ── NEW-STYLE in-place conversion (Agent + job components) ──────────────
+	if household is Agent and (household as Agent).current_job != null:
+		var ag: Agent = household as Agent
+		ag.log_event("Converting: Household → %s" % role.capitalize())
+		if event_bus:
+			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
+				ag.name, role, pos.x, pos.y, wallet_money])
+
+		# Remove from households tracking (set_role handles Godot groups)
+		var h_idx := households.find(ag)
+		if h_idx != -1:
+			households.remove_at(h_idx)
+
+		# Disconnect old death signal
+		if ag.agent_died.is_connected(_on_household_died):
+			ag.agent_died.disconnect(_on_household_died)
+
+		if role == "farmer":
+			# Spawn field atomically first
+			var field_pos := Vector2(
+				clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
+				clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
+			)
+			var pre_field := spawn_field_at(field_pos, null, true)
+			if pre_field == null:
+				# Re-add to households since conversion failed
+				households.append(ag)
+				if ag.agent_died and not ag.agent_died.is_connected(_on_household_died):
+					ag.agent_died.connect(_on_household_died)
+				if event_bus:
+					event_bus.log("[MOBILITY] Farmer conversion aborted — field spawn returned null")
+				return
+
+			# In-place switch!
+			ag.set_role("Farmer")
+			ag.name = "Farmer_%d" % next_farmer_id
+			next_farmer_id += 1
+
+			# Re-bind HungerNeed for new role label
+			if ag.hunger and ag.inv:
+				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
+
+			# Wire FoodReserve
+			if ag.food_reserve:
+				ag.food_reserve.bind(ag.inv, ag.hunger, market, ag.wallet, event_bus, ag.name)
+
+			# Create home
+			var home := Node2D.new()
+			home.name = ag.name + "_Home"
+			home.global_position = pos
+			var home_marker := ColorRect.new()
+			home_marker.name = "HomeMarker"
+			home_marker.offset_left = -12.0
+			home_marker.offset_top = -12.0
+			home_marker.offset_right = 12.0
+			home_marker.offset_bottom = 12.0
+			home_marker.color = Color(0.2, 0.5, 1, 0.6)
+			home.add_child(home_marker)
+			add_child(home)
+
+			# Assign field BEFORE set_route_nodes
+			_assign_field_to_farmer(pre_field, ag)
+			ag.set_route_nodes(home, market_node)
+
+			all_farmers.append(ag)
+
+			if event_bus:
+				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
+					ag.name, field_pos.x, field_pos.y])
+
+		elif role == "baker":
+			ag.set_role("Baker")
+			ag.name = "Baker_%d" % next_baker_id
+			next_baker_id += 1
+
+			if ag.hunger and ag.inv:
+				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
+
+			# Create bakery spot
+			var bakery_spot := Node2D.new()
+			bakery_spot.name = ag.name + "_Bakery"
+			bakery_spot.global_position = pos
+			var bakery_marker := ColorRect.new()
+			bakery_marker.name = "BakeryMarker"
+			bakery_marker.offset_left = -12.0
+			bakery_marker.offset_top = -12.0
+			bakery_marker.offset_right = 12.0
+			bakery_marker.offset_bottom = 12.0
+			bakery_marker.color = Color(1, 0.8, 0.2, 0.6)
+			bakery_spot.add_child(bakery_marker)
+			add_child(bakery_spot)
+
+			ag.set_locations(bakery_spot, market_node)
+			all_bakers.append(ag)
+
+		return
+
+	# ── LEGACY fallback: old-style subclass agents (free + spawn + transfer) ─
 	var _saved_pid: int = 0
 	var _saved_pname: String = ""
 	var _saved_events: Array = []
+	var _saved_sk_f: float = 0.25
+	var _saved_sk_b: float = 0.25
 	if household.has_method("log_event"):
 		household.log_event("Converting: Household → %s" % role.capitalize())
 		_saved_pid    = household.person_id
 		_saved_pname  = household.person_name
 		_saved_events = household.life_events.duplicate()
+	if household.get("skill_farmer") != null:
+		_saved_sk_f = household.skill_farmer
+	if household.get("skill_baker") != null:
+		_saved_sk_b = household.skill_baker
 
 	if event_bus:
 		event_bus.log("[MOBILITY] %s → converting to %s at (%.0f, %.0f) with $%.2f" % [
-			household.name, role, pos.x, pos.y, starting_money])
-	
-	# Remove household from tracking BEFORE spawning to avoid labor_market counting it twice
+			household.name, role, pos.x, pos.y, wallet_money])
+
 	var h_idx := households.find(household)
 	if h_idx != -1:
 		households.remove_at(h_idx)
-		household.remove_from_group("households")
-		household.remove_from_group("agents")
+		if household.is_in_group("households"):
+			household.remove_from_group("households")
+		if household.is_in_group("agents"):
+			household.remove_from_group("agents")
 	var _converting_name: String = household.name
 	household.queue_free()
 	print("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
 	if event_bus:
 		event_bus.log("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
-	
-	# Spawn the new producer; transfer money after spawn wires the Wallet
+
 	if role == "farmer":
-		# [LAND] ATOMIC ORDERING: create the field FIRST (skip_auto_assign=true so it
-		# is left unassigned), then pass it into spawn_farmer_at.  Inside spawn_farmer_at
-		# the field is assigned BEFORE set_route_nodes fires, which means _rebuild_route
-		# always sees >= 1 field and never emits a false "[ERROR] Farmer has no fields".
 		var field_pos := Vector2(
 			clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
 			clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
 		)
 		var pre_field := spawn_field_at(field_pos, null, true)
 		if pre_field == null:
-			# spawn_field_at returned null despite our earlier cap check (race / edge-case).
-			# The household is already freed; log and abort cleanly.
 			print("[MOBILITY] Farmer conversion aborted — land cap reached")
 			if event_bus:
 				event_bus.log("[MOBILITY] Farmer conversion aborted — land cap (field spawn returned null)")
 			return
-		
+
 		var new_farmer = await spawn_farmer_at(pos, pre_field)
 		if new_farmer and is_instance_valid(new_farmer):
 			var fw = new_farmer.get_node_or_null("Wallet")
 			if fw:
-				fw.money = starting_money
-			# Restore persistent identity from the converted household
+				fw.money = wallet_money
 			if _saved_pid > 0:
-				_transfer_identity_data(new_farmer, _saved_pid, _saved_pname, _saved_events, "Farmer")
+				_transfer_identity_data(new_farmer, _saved_pid, _saved_pname, _saved_events, "Farmer", _saved_sk_f, _saved_sk_b)
 			if event_bus:
 				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
 					new_farmer.name, field_pos.x, field_pos.y])
 		else:
-			# Farmer spawn failed — clean up the pre-created orphan field so it doesn't
-			# sit in the world unassigned and skew the field count.
 			var fi := all_field_nodes.find(pre_field)
 			if fi != -1:
 				all_field_nodes.remove_at(fi)
@@ -1493,9 +1719,9 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		if new_baker and is_instance_valid(new_baker):
 			var bw = new_baker.get_node_or_null("Wallet")
 			if bw:
-				bw.money = starting_money
+				bw.money = wallet_money
 			if _saved_pid > 0:
-				_transfer_identity_data(new_baker, _saved_pid, _saved_pname, _saved_events, "Baker")
+				_transfer_identity_data(new_baker, _saved_pid, _saved_pname, _saved_events, "Baker", _saved_sk_f, _saved_sk_b)
 
 
 # ============================================================================
@@ -1642,14 +1868,15 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 
 
 func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
-	"""Spawn a new farmer at the given position.
+	"""Spawn a new farmer using unified Agent.tscn + set_role().
 	initial_field_node, when provided, is assigned BEFORE set_route_nodes so that
 	_rebuild_route never sees an empty fields array during construction."""
-	if FarmerScene == null:
+	var scene: PackedScene = AgentScene if AgentScene != null else FarmerScene
+	if scene == null:
 		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn farmer: FarmerScene not found")
+			event_bus.log("[ERROR] Cannot spawn farmer: no scene available")
 		return null
-	
+
 	# Hard population cap
 	var total_pop := get_total_population()
 	if total_pop >= MAX_TOTAL_POP:
@@ -1657,40 +1884,43 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		if event_bus:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
-	
-	var f = FarmerScene.instantiate()
+
+	var f: Agent = scene.instantiate() as Agent
+	if f == null:
+		push_error("Farmer scene instantiate() returned non-Agent")
+		return null
 	f.name = "Farmer_%d" % next_farmer_id
 	next_farmer_id += 1
 	f.global_position = pos
 	add_child(f)
-	
-	# Allow _ready() to run so child nodes/components exist
+
 	await get_tree().process_frame
 
 	_assign_new_identity(f)
 
-	# Wire references
 	f.market = market
 	f.event_bus = event_bus
-	
+
+	# Activate Farmer role if no job exists yet (new-style Agent)
+	if f.current_job == null:
+		f.set_role("Farmer")
+
 	# Wire HungerNeed
-	var f_hunger = f.get_node("HungerNeed") as HungerNeed
-	var f_inv = f.get_node("Inventory") as Inventory
+	var f_hunger: HungerNeed = f.get_node("HungerNeed") as HungerNeed
+	var f_inv: Inventory = f.get_node("Inventory") as Inventory
 	if f_hunger and f_inv:
 		f_hunger.bind(f.name, f_inv, event_bus, calendar)
-	
+
 	# Wire FoodReserve
-	var f_reserve = f.get_node("FoodReserve") as FoodReserve
+	var f_reserve: FoodReserve = f.get_node("FoodReserve") as FoodReserve
 	if f_reserve:
 		f_reserve.bind(f_inv, f_hunger, market, f.get_node("Wallet"), event_bus, f.name)
-	
-	# Create a home node at spawn position
-	var home = Node2D.new()
+
+	# Create home
+	var home := Node2D.new()
 	home.name = f.name + "_Home"
 	home.global_position = pos
-	
-	# Add home visual marker
-	var home_marker = ColorRect.new()
+	var home_marker := ColorRect.new()
 	home_marker.name = "HomeMarker"
 	home_marker.offset_left = -12.0
 	home_marker.offset_top = -12.0
@@ -1699,47 +1929,47 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	home_marker.color = Color(0.2, 0.5, 1, 0.6)
 	home.add_child(home_marker)
 	add_child(home)
-	
-	# Assign initial field BEFORE set_route_nodes so _rebuild_route sees >= 1 field.
-	# For conversion-spawned farmers this eliminates the construction-time "no fields" warning.
-	# For UI-placed farmers (initial_field_node == null) behaviour is unchanged.
+
+	# Assign initial field BEFORE set_route_nodes
 	if initial_field_node != null and is_instance_valid(initial_field_node):
 		_assign_field_to_farmer(initial_field_node, f)
-	
-	# Set route nodes (field already registered if initial_field_node was provided)
+
 	f.set_route_nodes(home, market_node)
-	
-	# Register — only after field assignment so farmer never ticks field-less
+
+	# Register
 	all_farmers.append(f)
-	
-	# Auto-assign any OTHER orphaned fields (initial_field_node is already assigned so
-	# field_assignment_map[initial_field_node] != null and the loop skips it automatically)
-	var absorbed = 0
+	if not f.is_in_group("farmers"):
+		f.add_to_group("farmers")
+	if not f.is_in_group("agents"):
+		f.add_to_group("agents")
+
+	# Absorb orphaned fields
+	var absorbed: int = 0
 	for fn in all_field_nodes:
 		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == null:
 			_assign_field_to_farmer(fn, f)
 			absorbed += 1
-	
+
 	if event_bus:
-		var msg = "PLACED: %s at (%d, %d)" % [f.name, int(pos.x), int(pos.y)]
+		var msg: String = "PLACED: %s at (%d, %d)" % [f.name, int(pos.x), int(pos.y)]
 		if absorbed > 0:
 			msg += " → absorbed %d unassigned field(s)" % absorbed
 		event_bus.log(msg)
-	
-	# Wire click-to-inspect
+
 	if f.has_signal("pop_clicked"):
 		f.pop_clicked.connect(select_pop)
-	
+
 	return f
 
 
 func spawn_baker_at(pos: Vector2) -> Node:
-	"""Spawn a new baker at the given position."""
-	if BakerScene == null:
+	"""Spawn a new baker using unified Agent.tscn + set_role()."""
+	var scene: PackedScene = AgentScene if AgentScene != null else BakerScene
+	if scene == null:
 		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn baker: BakerScene not found")
+			event_bus.log("[ERROR] Cannot spawn baker: no scene available")
 		return null
-	
+
 	# Hard population cap
 	var total_pop := get_total_population()
 	if total_pop >= MAX_TOTAL_POP:
@@ -1747,35 +1977,38 @@ func spawn_baker_at(pos: Vector2) -> Node:
 		if event_bus:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
-	
-	var b = BakerScene.instantiate()
+
+	var b: Agent = scene.instantiate() as Agent
+	if b == null:
+		push_error("Baker scene instantiate() returned non-Agent")
+		return null
 	b.name = "Baker_%d" % next_baker_id
 	next_baker_id += 1
 	b.global_position = pos
 	add_child(b)
-	
-	# Allow _ready() to run so child nodes/components exist
+
 	await get_tree().process_frame
 
 	_assign_new_identity(b)
 
-	# Wire references
 	b.market = market
 	b.event_bus = event_bus
-	
+
+	# Activate Baker role if no job exists yet (new-style Agent)
+	if b.current_job == null:
+		b.set_role("Baker")
+
 	# Wire HungerNeed
-	var b_hunger = b.get_node("HungerNeed") as HungerNeed
-	var b_inv = b.get_node("Inventory") as Inventory
+	var b_hunger: HungerNeed = b.get_node("HungerNeed") as HungerNeed
+	var b_inv: Inventory = b.get_node("Inventory") as Inventory
 	if b_hunger and b_inv:
 		b_hunger.bind(b.name, b_inv, event_bus, calendar)
-	
-	# Create a bakery spot for this baker
-	var bakery_spot = Node2D.new()
+
+	# Create bakery spot
+	var bakery_spot := Node2D.new()
 	bakery_spot.name = b.name + "_Bakery"
 	bakery_spot.global_position = pos
-	
-	# Add bakery visual marker
-	var bakery_marker = ColorRect.new()
+	var bakery_marker := ColorRect.new()
 	bakery_marker.name = "BakeryMarker"
 	bakery_marker.offset_left = -12.0
 	bakery_marker.offset_top = -12.0
@@ -1784,20 +2017,22 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	bakery_marker.color = Color(1, 0.8, 0.2, 0.6)
 	bakery_spot.add_child(bakery_marker)
 	add_child(bakery_spot)
-	
-	# set_locations handles ALL bakery bindings (profitability, throttle, margin, food_reserve)
+
 	b.set_locations(bakery_spot, market_node)
-	
+
 	# Register
 	all_bakers.append(b)
-	
+	if not b.is_in_group("bakers"):
+		b.add_to_group("bakers")
+	if not b.is_in_group("agents"):
+		b.add_to_group("agents")
+
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
-	
-	# Wire click-to-inspect
+
 	if b.has_signal("pop_clicked"):
 		b.pop_clicked.connect(select_pop)
-	
+
 	return b
 
 

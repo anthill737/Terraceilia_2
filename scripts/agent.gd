@@ -283,6 +283,56 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # ==============================================================================
+#  Forwarding properties — expose job-specific data to external systems
+# ==============================================================================
+
+var consecutive_days_negative_cashflow: int:
+	get:
+		if current_job and current_job.get("consecutive_days_negative_cashflow") != null:
+			return int(current_job.consecutive_days_negative_cashflow)
+		return 0
+	set(v):
+		if current_job:
+			current_job.set("consecutive_days_negative_cashflow", v)
+
+var switch_cooldown_days: int:
+	get:
+		if current_job and current_job.get("switch_cooldown_days") != null:
+			return int(current_job.switch_cooldown_days)
+		return 0
+	set(v):
+		if current_job:
+			current_job.set("switch_cooldown_days", v)
+
+var training_days_remaining: int:
+	get:
+		if current_job and current_job.get("training_days_remaining") != null:
+			return int(current_job.training_days_remaining)
+		return 0
+	set(v):
+		if current_job:
+			current_job.set("training_days_remaining", v)
+
+var days_in_survival_mode: int:
+	get:
+		if current_job and current_job.get("days_in_survival_mode") != null:
+			return int(current_job.days_in_survival_mode)
+		return 0
+	set(v):
+		if current_job:
+			current_job.set("days_in_survival_mode", v)
+
+var consecutive_failed_food_days: int:
+	get:
+		if current_job and current_job.get("consecutive_failed_food_days") != null:
+			return int(current_job.consecutive_failed_food_days)
+		return 0
+	set(v):
+		if current_job:
+			current_job.set("consecutive_failed_food_days", v)
+
+
+# ==============================================================================
 #  Forwarding methods — allow main.gd to call role-specific APIs generically
 # ==============================================================================
 

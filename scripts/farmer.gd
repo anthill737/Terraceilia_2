@@ -34,7 +34,6 @@ var inventory_throttle: InventoryThrottle = null
 var field_work_capacity_per_day: int = 3
 var fields_worked_today: int = 0
 var maintenance_cost_per_day: float = 0.2
-var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
 # [BUGFIX] Hysteresis cooldown (role-specific recovery)

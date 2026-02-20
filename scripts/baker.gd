@@ -59,7 +59,6 @@ var bread_produced_today: int = 0
 # Capital constraints (B) - maintenance costs and production capacity
 var oven_capacity_per_day: int = 15
 var maintenance_cost_per_day: float = 0.3
-var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
 # [BUGFIX] Hysteresis cooldown (role-specific recovery)

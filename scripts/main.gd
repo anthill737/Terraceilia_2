@@ -1,5 +1,10 @@
 extends Node
 
+# Force-load manager scripts so their class_names are resolved before main.gd
+const _PopMgrClass = preload("res://scripts/managers/population_manager.gd")
+const _FieldMgrClass = preload("res://scripts/managers/field_manager.gd")
+const _EconStatsClass = preload("res://scripts/managers/economy_stats_manager.gd")
+
 var farmer: Agent = null
 var baker: Agent = null
 var market: Market = null
@@ -10,21 +15,41 @@ var audit: EconomyAudit = null
 var calendar: Calendar = null
 var prosperity_meter: ProsperityMeter = null
 
-# ── Village hard caps ─────────────────────────────────────────────────────────
-## Maximum number of fields allowed in the simulation simultaneously.
-## Farmer role-conversions are blocked when this limit is reached.
-const MAX_FIELDS: int = 10
-## Maximum combined head-count of all living agents (households + farmers + bakers).
-const MAX_TOTAL_POP: int = 50
+# ── Managers ──────────────────────────────────────────────────────────────────
+var pop_mgr: PopulationManager = null
+var field_mgr: FieldManager = null
+var econ_stats: EconomyStatsManager = null
 
-# Dynamic entity tracking
-var all_fields: Array = []       # All FieldPlot nodes (for ticking)
-var all_field_nodes: Array = []  # All field Node2D scene nodes
-var all_farmers: Array = []      # All Farmer nodes
-var all_bakers: Array = []       # All Baker nodes
-var next_field_id: int = 3       # Counter for new fields (1 and 2 exist)
-var next_farmer_id: int = 2      # Counter for new farmers
-var next_baker_id: int = 2       # Counter for new bakers
+# ── Convenience forwards → managers (keeps all existing code working) ─────────
+var MAX_FIELDS: int:
+	get: return field_mgr.MAX_FIELDS if field_mgr else 10
+var MAX_TOTAL_POP: int:
+	get: return pop_mgr.MAX_TOTAL_POP if pop_mgr else 50
+var all_fields: Array:
+	get: return field_mgr.all_fields if field_mgr else []
+var all_field_nodes: Array:
+	get: return field_mgr.all_field_nodes if field_mgr else []
+var field_assignment_map: Dictionary:
+	get: return field_mgr.field_assignment_map if field_mgr else {}
+var next_field_id: int:
+	get: return field_mgr.next_field_id if field_mgr else 3
+	set(v):
+		if field_mgr: field_mgr.next_field_id = v
+var all_farmers: Array:
+	get: return pop_mgr.all_farmers if pop_mgr else []
+var all_bakers: Array:
+	get: return pop_mgr.all_bakers if pop_mgr else []
+var households: Array:
+	get: return pop_mgr.households if pop_mgr else []
+var next_farmer_id: int:
+	get: return pop_mgr.next_farmer_id if pop_mgr else 2
+	set(v):
+		if pop_mgr: pop_mgr.next_farmer_id = v
+var next_baker_id: int:
+	get: return pop_mgr.next_baker_id if pop_mgr else 2
+	set(v):
+		if pop_mgr: pop_mgr.next_baker_id = v
+
 @export var FarmerScene: PackedScene
 @export var BakerScene: PackedScene
 var AgentScene: PackedScene = null
@@ -36,12 +61,8 @@ var place_mode: PlaceMode = PlaceMode.NONE
 var placement_cursor: ColorRect = null  # Ghost preview at mouse
 var place_mode_label: Label = null      # Status text showing current mode
 
-# Field assignment tracking
-var field_assignment_map: Dictionary = {}  # field_node -> farmer_node (or null)
-
 # Household management
 @export var HouseholdScene: PackedScene
-var households: Array = []
 var market_node: Node2D = null
 var event_bus: EventBus = null
 var economy_config: Dictionary = {}
@@ -116,15 +137,11 @@ var pop_inspector_role: Label = null
 var pop_inspector_body: RichTextLabel = null
 var pop_history_label: RichTextLabel = null
 
-# Persistent identity counter — incremented each time a pop is born
-var _next_person_id: int = 1
-
-# Global rolling cashflow by role — diagnostics only, no effect on AI
-var _global_cashflow_7d: Dictionary = {
-	"Household": [],
-	"Farmer":    [],
-	"Baker":     [],
-}
+# Forwarded to managers (kept for backward compat)
+var _next_person_id: int:
+	get: return pop_mgr._next_person_id if pop_mgr else 1
+	set(v):
+		if pop_mgr: pop_mgr._next_person_id = v
 
 var log_lines: Array[String] = []
 var log_buffer: Array[String] = []  # Full log for export (not trimmed)
@@ -139,6 +156,22 @@ func _ready() -> void:
 	var ui_node := get_node_or_null("UI")
 	if ui_node != null:
 		ui_node.process_mode = Node.PROCESS_MODE_ALWAYS
+
+	# ── Create managers (before anything else accesses forwarded properties) ──
+	pop_mgr = PopulationManager.new()
+	pop_mgr.name = "PopulationManager"
+	add_child(pop_mgr)
+	pop_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+
+	field_mgr = FieldManager.new()
+	field_mgr.name = "FieldManager"
+	add_child(field_mgr)
+	field_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+
+	econ_stats = EconomyStatsManager.new()
+	econ_stats.name = "EconomyStatsManager"
+	add_child(econ_stats)
+	econ_stats.process_mode = Node.PROCESS_MODE_PAUSABLE
 
 	# Load economy config
 	_load_economy_config()
@@ -182,6 +215,9 @@ func _ready() -> void:
 	
 	# Store EventBus reference for spawn function
 	event_bus = bus
+
+	# Wire managers now that event_bus exists
+	field_mgr.bind(bus)
 	
 	# Get references to scene nodes
 	var house = get_node("House")
@@ -194,18 +230,15 @@ func _ready() -> void:
 	baker = get_node("Baker")
 	household_agent = get_node("HouseholdAgent")
 	
-	# Get field plot scripts and register in dynamic tracking
+	# Register initial entities with managers
 	var field1_plot = field1_node as FieldPlot
 	var field2_plot = field2_node as FieldPlot
-	all_fields.append(field1_plot)
-	all_fields.append(field2_plot)
-	all_field_nodes.append(field1_node)
-	all_field_nodes.append(field2_node)
-	all_farmers.append(farmer)
-	all_bakers.append(baker)
-	# Register initial fields as assigned to baseline farmer
-	field_assignment_map[field1_node] = farmer
-	field_assignment_map[field2_node] = farmer
+	field_mgr.register_field(field1_node, field1_plot)
+	field_mgr.register_field(field2_node, field2_plot)
+	pop_mgr.register_farmer(farmer)
+	pop_mgr.register_baker(baker)
+	field_mgr.field_assignment_map[field1_node] = farmer
+	field_mgr.field_assignment_map[field2_node] = farmer
 	
 	# Create market instance
 	market = Market.new()
@@ -314,10 +347,8 @@ func _on_tick(tick: int) -> void:
 	# Update calendar
 	calendar.set_tick(tick)
 	
-	# Tick all field plots (dynamic)
-	for fp in all_fields:
-		if fp and is_instance_valid(fp):
-			fp.tick()
+	# Tick all field plots via manager
+	field_mgr.tick_all()
 	
 	# Update tick for all agents (dynamic tracking)
 	if market:
@@ -899,95 +930,34 @@ func export_log() -> void:
 			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
 
 
-# ── Persistent identity helpers ──────────────────────────────────────────────
+# ── Identity helpers (delegate to PopulationManager) ─────────────────────────
 
 func _new_person_id() -> int:
-	var id: int = _next_person_id
-	_next_person_id += 1
-	return id
+	return pop_mgr.new_person_id()
 
 
 func _assign_new_identity(pop: Node) -> void:
-	"""Assign a fresh person_id and person_name to a newly spawned pop."""
-	if not is_instance_valid(pop) or not pop.has_method("log_event"):
-		return
-	pop.person_id   = _new_person_id()
-	pop.person_name = "Pop %d" % pop.person_id
-	var role_str: String = ""
-	if pop.get("current_role") != null and pop.current_role != "":
-		role_str = pop.current_role
-	else:
-		role_str = pop.get_class()
-	pop.log_event("Born: role=%s" % role_str)
-
-
-func _transfer_identity(from_pop: Node, to_pop: Node, new_role: String) -> void:
-	"""Copy identity + history from old node to new node on conversion."""
-	if not is_instance_valid(from_pop) or not is_instance_valid(to_pop):
-		return
-	if not from_pop.has_method("log_event") or not to_pop.has_method("log_event"):
-		return
-	to_pop.person_id    = from_pop.person_id
-	to_pop.person_name  = from_pop.person_name
-	to_pop.life_events  = from_pop.life_events.duplicate()
-	to_pop.log_event("Role changed → %s" % new_role)
+	pop_mgr.assign_identity(pop)
 
 
 func _transfer_identity_data(to_pop: Node, pid: int, pname: String,
 		events: Array, new_role: String,
 		skill_f: float = 0.25, skill_b: float = 0.25) -> void:
-	"""Set pre-captured identity + skills on a newly spawned node after role conversion."""
-	if not is_instance_valid(to_pop) or not to_pop.has_method("log_event"):
-		return
-	to_pop.person_id   = pid
-	to_pop.person_name = pname
-	to_pop.life_events = events.duplicate()
-	if to_pop.get("skill_farmer") != null:
-		to_pop.skill_farmer = skill_f
-	if to_pop.get("skill_baker") != null:
-		to_pop.skill_baker = skill_b
-	if to_pop.get("days_in_role") != null:
-		to_pop.days_in_role = 0
-	to_pop.log_event("Role changed → %s" % new_role)
+	pop_mgr.transfer_identity_data(to_pop, pid, pname, events, new_role, skill_f, skill_b)
 
 
-# ── Global cashflow helpers (diagnostics) ────────────────────────────────────
+# ── Global cashflow helpers (delegate to EconomyStatsManager) ─────────────────
 
 func _roll_global_cashflow() -> void:
-	"""Sum each role's just-rolled daily net and append to global 7d arrays."""
-	var role_groups: Dictionary = {
-		"Household": "households",
-		"Farmer":    "farmers",
-		"Baker":     "bakers",
-	}
-	for role: String in role_groups:
-		var day_net: float = 0.0
-		for pop: Node in get_tree().get_nodes_in_group(role_groups[role]):
-			if not is_instance_valid(pop):
-				continue
-			var arr: Array = pop.get("cashflow_7d") if pop.get("cashflow_7d") != null else []
-			if not arr.is_empty():
-				day_net += float(arr[-1])
-		var hist: Array = _global_cashflow_7d[role]
-		hist.append(day_net)
-		if hist.size() > 7:
-			hist.pop_front()
-		_global_cashflow_7d[role] = hist
+	econ_stats.roll_daily()
 
 
 func global_role_rolling_7d_sum(role: String) -> float:
-	var hist: Array = _global_cashflow_7d.get(role, [])
-	var s: float = 0.0
-	for v in hist:
-		s += float(v)
-	return s
+	return econ_stats.role_rolling_7d_sum(role)
 
 
 func global_role_rolling_7d_avg(role: String) -> float:
-	var hist: Array = _global_cashflow_7d.get(role, [])
-	if hist.is_empty():
-		return 0.0
-	return global_role_rolling_7d_sum(role) / float(hist.size())
+	return econ_stats.role_rolling_7d_avg(role)
 
 
 func get_ui_labels() -> void:
@@ -1139,8 +1109,7 @@ func _update_eco_bar() -> void:
 
 
 func get_total_population() -> int:
-	"""Combined head-count of all living agents (households + farmers + bakers)."""
-	return households.size() + all_farmers.size() + all_bakers.size()
+	return pop_mgr.get_total_population()
 
 
 # ============================================================================
@@ -1843,10 +1812,8 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 	
 	add_child(field_node)
 	
-	# Register in dynamic tracking
-	all_fields.append(field_node)
-	all_field_nodes.append(field_node)
-	field_assignment_map[field_node] = null
+	# Register with field manager
+	field_mgr.register_field(field_node, field_node)
 	
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
@@ -2041,16 +2008,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 # ============================================================================
 
 func _assign_field_to_farmer(field_node: Node2D, new_farmer) -> void:
-	"""Assign a field to a farmer, removing it from any previous owner."""
-	var old_farmer = field_assignment_map.get(field_node, null)
-	if old_farmer and is_instance_valid(old_farmer) and old_farmer != new_farmer:
-		old_farmer.remove_field(field_node)
-	field_assignment_map[field_node] = new_farmer
-	if new_farmer and is_instance_valid(new_farmer):
-		new_farmer.add_field(field_node, field_node)
-	if event_bus:
-		var fname = new_farmer.name if new_farmer else "(none)"
-		event_bus.log("ASSIGNED: %s → %s" % [field_node.name, fname])
+	field_mgr.assign_field(field_node, new_farmer)
 
 
 func _show_field_assignment_popup(field_node: Node2D, world_pos: Vector2) -> void:

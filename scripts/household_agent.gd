@@ -36,11 +36,7 @@ var last_logged_price_adjustment_tick: int = -999999
 var last_market_trip_tick: int = -999999
 var logged_staying_home: bool = false
 
-# Labor-market tracking (read/written by LaborMarket and main.gd)
-var switch_cooldown_days: int = 0
-var training_days_remaining: int = 0
-var days_in_survival_mode: int = 0
-var consecutive_failed_food_days: int = 0
+# Labor-market tracking now forwarded via Agent base class
 
 # Constants
 const SPEED: float = 100.0

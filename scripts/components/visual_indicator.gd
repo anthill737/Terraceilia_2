@@ -32,16 +32,16 @@ func _create_health_bar(bar_y: float) -> void:
 		return
 	var bg: ColorRect = ColorRect.new()
 	bg.name = "HealthBarBG"
-	bg.position = Vector2(-10.0, bar_y)
-	bg.size = Vector2(20.0, 4.0)
+	bg.position = Vector2(-12.0, bar_y)
+	bg.size = Vector2(24.0, 5.0)
 	bg.color = Color(0.18, 0.05, 0.05, 0.85)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_parent_node.add_child(bg)
 
 	_health_bar_fg = ColorRect.new()
 	_health_bar_fg.name = "HealthBar"
-	_health_bar_fg.position = Vector2(-10.0, bar_y)
-	_health_bar_fg.size = Vector2(20.0, 4.0)
+	_health_bar_fg.position = Vector2(-12.0, bar_y)
+	_health_bar_fg.size = Vector2(24.0, 5.0)
 	_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0)
 	_health_bar_fg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_parent_node.add_child(_health_bar_fg)
@@ -73,7 +73,7 @@ func _update_visuals() -> void:
 	if _health_bar_fg == null or _hunger_ref == null or _hunger_ref.hunger_max_days <= 0:
 		return
 	var ratio: float = clamp(float(_hunger_ref.hunger_days) / float(_hunger_ref.hunger_max_days), 0.0, 1.0)
-	_health_bar_fg.size.x = 20.0 * ratio
+	_health_bar_fg.size.x = 24.0 * ratio
 	if ratio > 0.25:
 		_health_bar_fg.color = Color(0.85, 0.12, 0.12, 1.0)
 	else:

@@ -542,10 +542,10 @@ func process_baking(delta: float) -> void:
 				if event_bus:
 					event_bus.log("Tick %d: Baker baked %d flour into %d bread (skill=%.2f)" % [agent.current_tick, units, bread_produced, agent.skill_baker])
 				agent.log_event("Baked %d bread (sk=%.2f ×%.2f)" % [bread_produced, agent.skill_baker, _sk_mult])
-				# Emergency: go sell immediately if flagged
+				# Emergency: immediately go to sell after baking
 				if emergency_sell_next:
 					if event_bus:
-						event_bus.log("[EMERGENCY] Tick %d: Baker %s bread ready, forcing SELL (emergency_sell_next)" % [agent.current_tick, agent.name])
+						event_bus.log("[EMERGENCY] Tick %d: Baker %s rushing to SELL after bake (bread=%d)" % [agent.current_tick, agent.name, inv.get_qty("bread")])
 					production_state = ProductionState.IDLE
 					phase = Phase.SELL
 					agent.pending_target = market_location
@@ -585,6 +585,9 @@ func process_baking(delta: float) -> void:
 
 
 func on_day_changed(_day: int) -> void:
+	emergency_grind_next = false
+	emergency_bake_next = false
+	emergency_sell_next = false
 	var _br: int = inv.get_qty("bread") if inv else 0
 	var _fl: int = inv.get_qty("flour") if inv else 0
 	agent.log_event("── $%.0f  br=%d  fl=%d" % [agent.get_cash(), _br, _fl])
@@ -599,10 +602,6 @@ func on_day_changed(_day: int) -> void:
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
 	bread_produced_today = 0
-	# Clear stale emergency flags at day boundary
-	emergency_grind_next = false
-	emergency_bake_next = false
-	emergency_sell_next = false
 
 
 func _check_travel_timeout() -> void:

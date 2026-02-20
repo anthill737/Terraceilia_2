@@ -130,6 +130,9 @@ var _pause_btn: Button = null
 var sim_failed: bool = false
 var _sim_fail_banner: PanelContainer = null
 
+# Camera
+var _camera: Camera2D = null
+
 # Pop Inspector
 var selected_pop: Node = null
 var pop_inspector_panel: Control = null
@@ -173,6 +176,16 @@ func _ready() -> void:
 	econ_stats.name = "EconomyStatsManager"
 	add_child(econ_stats)
 	econ_stats.process_mode = Node.PROCESS_MODE_PAUSABLE
+
+	# Camera (world view with zoom/pan)
+	var cam := Camera2D.new()
+	cam.name = "WorldCamera"
+	cam.set_script(preload("res://scripts/camera_controller.gd"))
+	cam.position = Vector2(300, 400)
+	cam.zoom = Vector2(1.5, 1.5)
+	add_child(cam)
+	cam.make_current()
+	_camera = cam
 
 	# Load economy config
 	_load_economy_config()
@@ -342,6 +355,7 @@ func _process(_delta: float) -> void:
 	update_ui()
 	_update_spawn_info()
 	_update_placement_cursor()
+	_update_camera()
 
 
 func _on_tick(tick: int) -> void:
@@ -356,7 +370,6 @@ func _on_tick(tick: int) -> void:
 	# Update tick for all agents (dynamic tracking)
 	if market:
 		market.set_tick(tick)
-		market.check_bread_emergency(all_bakers)
 	for f in all_farmers:
 		if f and is_instance_valid(f):
 			f.set_tick(tick)
@@ -395,9 +408,51 @@ func _on_tick(tick: int) -> void:
 			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
 			spawn_household_at(spawn_pos)
 	
+	# Bread emergency liquidity override
+	if market:
+		market.check_bread_emergency(all_bakers)
+
 	# Run audit checks — skip if either base agent has been freed by migration
 	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
 		audit.audit(farmer, baker, market, bus, tick)
+
+
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+
+
+func _world_to_screen(world_pos: Vector2) -> Vector2:
+	return get_viewport().get_canvas_transform() * world_pos
+
+
+func _update_camera() -> void:
+	if _camera == null:
+		return
+	var positions: Array[Vector2] = []
+	var all_entities: Array = []
+	for f in all_farmers:
+		if f and is_instance_valid(f):
+			positions.append((f as Node2D).global_position)
+			all_entities.append(f)
+	for b in all_bakers:
+		if b and is_instance_valid(b):
+			positions.append((b as Node2D).global_position)
+			all_entities.append(b)
+	for h in households:
+		if h and is_instance_valid(h):
+			positions.append((h as Node2D).global_position)
+			all_entities.append(h)
+	for fn in all_field_nodes:
+		if fn and is_instance_valid(fn):
+			all_entities.append(fn)
+	if not positions.is_empty():
+		var centroid := Vector2.ZERO
+		for p in positions:
+			centroid += p
+		centroid /= float(positions.size())
+		_camera.update_centroid(centroid)
+	if not all_entities.is_empty():
+		_camera.update_bounds(all_entities)
 
 
 func _load_economy_config() -> void:
@@ -432,100 +487,86 @@ func _resolve_agent_scene() -> void:
 
 
 func _build_spawn_toolbar() -> void:
-	"""Build a game-style spawn toolbar at the top of the world area."""
+	"""Build the top toolbar row inside LeftColumn (proper container child)."""
 	var toolbar = PanelContainer.new()
 	toolbar.name = "SpawnToolbar"
-	toolbar.position = Vector2(10, 10)
-	
-	# Style the panel with a dark semi-transparent background
+
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.12, 0.12, 0.15, 0.92)
 	style.border_color = Color(0.4, 0.4, 0.5, 0.8)
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(6)
-	style.set_content_margin_all(6)
+	style.set_content_margin_all(8)
 	toolbar.add_theme_stylebox_override("panel", style)
-	
+
 	var vbox_outer = VBoxContainer.new()
 	vbox_outer.add_theme_constant_override("separation", 4)
 	toolbar.add_child(vbox_outer)
-	
+
 	var hbox = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 6)
+	hbox.add_theme_constant_override("separation", 8)
 	vbox_outer.add_child(hbox)
-	
-	# Build label
+
 	var title = Label.new()
 	title.text = "BUILD"
-	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", Color(0.85, 0.85, 0.65))
 	hbox.add_child(title)
-	
-	# Separator
-	var sep1 = VSeparator.new()
-	hbox.add_child(sep1)
-	
-	# Spawn buttons - click to enter placement mode
+
+	hbox.add_child(VSeparator.new())
+
 	var field_btn = _create_toolbar_button("Field", Color(0.4, 0.3, 0.1), "Click to place a farm field")
 	field_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.FIELD))
 	hbox.add_child(field_btn)
-	
+
 	var farmer_btn = _create_toolbar_button("Farmer", Color(0.2, 0.8, 0.2), "Click to place a new farmer")
 	farmer_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.FARMER))
 	hbox.add_child(farmer_btn)
-	
+
 	var baker_btn = _create_toolbar_button("Baker", Color(0.8, 0.6, 0.2), "Click to place a new baker")
 	baker_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.BAKER))
 	hbox.add_child(baker_btn)
-	
+
 	var household_btn = _create_toolbar_button("Household", Color(0.8, 0.2, 0.8), "Click to place a new household")
 	household_btn.pressed.connect(func(): _enter_placement_mode(PlaceMode.HOUSEHOLD))
 	hbox.add_child(household_btn)
-	
-	# Separator
-	var sep2 = VSeparator.new()
-	hbox.add_child(sep2)
-	
-	# Speed controls
+
+	hbox.add_child(VSeparator.new())
+
 	var speed_down = Button.new()
 	speed_down.text = "<<"
 	speed_down.tooltip_text = "Slow down simulation"
 	speed_down.pressed.connect(func(): clock.decrease_speed())
 	hbox.add_child(speed_down)
-	
+
 	var speed_label = Label.new()
 	speed_label.text = "Speed: 1.0x"
 	speed_label.name = "ToolbarSpeedLabel"
-	speed_label.add_theme_font_size_override("font_size", 13)
+	speed_label.add_theme_font_size_override("font_size", 18)
 	hbox.add_child(speed_label)
 	sim_speed_label = speed_label
-	
+
 	var speed_up = Button.new()
 	speed_up.text = ">>"
 	speed_up.tooltip_text = "Speed up simulation"
 	speed_up.pressed.connect(func(): clock.increase_speed())
 	hbox.add_child(speed_up)
-	
-	# Separator
-	var sep3 = VSeparator.new()
-	hbox.add_child(sep3)
-	
-	# Entity count label
+
+	hbox.add_child(VSeparator.new())
+
 	spawn_info_label = Label.new()
 	spawn_info_label.text = ""
-	spawn_info_label.add_theme_font_size_override("font_size", 12)
+	spawn_info_label.add_theme_font_size_override("font_size", 18)
 	spawn_info_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	hbox.add_child(spawn_info_label)
 	_update_spawn_info()
 
-	# ── Pause button ──────────────────────────────────────────────────────────
-	var sep_pause := VSeparator.new()
-	hbox.add_child(sep_pause)
+	hbox.add_child(VSeparator.new())
 
 	_pause_btn = Button.new()
 	_pause_btn.text = "⏸ Pause"
 	_pause_btn.tooltip_text = "Pause / resume simulation  [P]"
-	_pause_btn.custom_minimum_size = Vector2(88, 30)
+	_pause_btn.custom_minimum_size = Vector2(100, 34)
 	var pb_style := StyleBoxFlat.new()
 	pb_style.bg_color = Color(0.18, 0.18, 0.23, 0.92)
 	pb_style.border_color = Color(0.82, 0.72, 0.28, 0.85)
@@ -539,27 +580,35 @@ func _build_spawn_toolbar() -> void:
 	_pause_btn.pressed.connect(_toggle_pause)
 	hbox.add_child(_pause_btn)
 
+	# Center camera button
+	var center_btn := Button.new()
+	center_btn.text = "Center"
+	center_btn.tooltip_text = "Recenter camera on town  [Space]"
+	center_btn.custom_minimum_size = Vector2(80, 34)
+	center_btn.pressed.connect(_recenter_camera)
+	hbox.add_child(center_btn)
+
 	# Second row: placement mode status
 	place_mode_label = Label.new()
 	place_mode_label.text = ""
-	place_mode_label.add_theme_font_size_override("font_size", 12)
+	place_mode_label.add_theme_font_size_override("font_size", 18)
 	place_mode_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
 	vbox_outer.add_child(place_mode_label)
-	
-	# Add to WorldSpacer area (left part of the screen)
-	var world_spacer = get_node("UI/HUDRoot/Layout/WorldSpacer")
 
-	# Transparent pass-through so UI layout fills correctly but clicks reach agents
+	# Insert toolbar into LeftColumn at index 0 (above WorldSpacer)
+	var left_column = get_node("UI/HUDRoot/Layout/LeftColumn")
+	left_column.add_child(toolbar)
+	left_column.move_child(toolbar, 0)
+
+	# WorldSpacer gets the click receiver and placement cursor
+	var world_spacer = get_node("UI/HUDRoot/Layout/LeftColumn/WorldSpacer")
+
 	var click_receiver := Control.new()
 	click_receiver.name = "WorldClickReceiver"
 	click_receiver.set_anchors_preset(Control.PRESET_FULL_RECT)
 	click_receiver.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	world_spacer.add_child(click_receiver)
-	
-	# Toolbar goes AFTER click receiver so it renders on top and gets click priority
-	world_spacer.add_child(toolbar)
-	
-	# Create placement cursor (ghost preview)
+
 	placement_cursor = ColorRect.new()
 	placement_cursor.name = "PlacementCursor"
 	placement_cursor.size = Vector2(30, 30)
@@ -571,27 +620,19 @@ func _build_spawn_toolbar() -> void:
 
 
 func _build_economy_bar() -> void:
-	"""Build the economy HUD strip anchored just below the spawn toolbar."""
-	var world_spacer := get_node("UI/HUDRoot/Layout/WorldSpacer")
-
+	"""Build the economy HUD strip as a proper container child of LeftColumn."""
 	var bar := PanelContainer.new()
 	bar.name = "EcoBar"
-	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	bar.offset_top    = 82
-	bar.offset_bottom = 152
-	bar.offset_left   = 10
-	bar.offset_right  = -10
-	bar.mouse_filter  = Control.MOUSE_FILTER_IGNORE
 
 	var bar_style := StyleBoxFlat.new()
 	bar_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
 	bar_style.border_color = Color(0.28, 0.28, 0.42, 0.85)
 	bar_style.set_border_width_all(1)
 	bar_style.set_corner_radius_all(5)
-	bar_style.content_margin_left   = 6
-	bar_style.content_margin_right  = 6
-	bar_style.content_margin_top    = 4
-	bar_style.content_margin_bottom = 4
+	bar_style.content_margin_left   = 10
+	bar_style.content_margin_right  = 10
+	bar_style.content_margin_top    = 6
+	bar_style.content_margin_bottom = 6
 	bar.add_theme_stylebox_override("panel", bar_style)
 
 	var hbox := HBoxContainer.new()
@@ -606,7 +647,10 @@ func _build_economy_bar() -> void:
 	eco_farmer_label     = _add_eco_section(hbox, "FARMER",     Color(0.20, 1.00, 0.20), true)
 	eco_baker_label      = _add_eco_section(hbox, "BAKER",      Color(1.00, 0.75, 0.20), true)
 
-	world_spacer.add_child(bar)
+	# Insert into LeftColumn at index 1 (after toolbar, before WorldSpacer)
+	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
+	left_column.add_child(bar)
+	left_column.move_child(bar, 1)
 
 
 func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, expand: bool) -> Label:
@@ -635,13 +679,13 @@ func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, ex
 
 	var title_lbl := Label.new()
 	title_lbl.text = title_text
-	title_lbl.add_theme_font_size_override("font_size", 9)
+	title_lbl.add_theme_font_size_override("font_size", 16)
 	title_lbl.add_theme_color_override("font_color", accent)
 	vbox.add_child(title_lbl)
 
 	var content_lbl := Label.new()
 	content_lbl.text = "..."
-	content_lbl.add_theme_font_size_override("font_size", 11)
+	content_lbl.add_theme_font_size_override("font_size", 18)
 	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
 	vbox.add_child(content_lbl)
 
@@ -694,9 +738,20 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
+	# Right-click cancel placement (must run in _input so it takes priority over camera pan)
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if place_mode != PlaceMode.NONE:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+			return
+
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
 			_toggle_pause()
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_SPACE and not event.ctrl_pressed and not event.alt_pressed:
+			_recenter_camera()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_ESCAPE and place_mode != PlaceMode.NONE:
@@ -708,20 +763,13 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Runs AFTER GUI buttons/panels have had a chance to consume clicks.
 
-	# Right-click: cancel placement
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-		if place_mode != PlaceMode.NONE:
-			_cancel_placement()
-			get_viewport().set_input_as_handled()
-			return
-
 	# Left-click: pop selection + placement (only reaches here if no GUI ate it)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var click_pos: Vector2 = event.position
+		var screen_pos: Vector2 = event.position
 
-		# Find the closest pop within 15 px of the click
+		# Find the closest pop within 20 screen-px of the click
 		var best_pop: Node = null
-		var best_dist: float = 15.0
+		var best_dist: float = 20.0
 		for group_name: String in ["farmers", "bakers", "households"]:
 			for pop: Node in get_tree().get_nodes_in_group(group_name):
 				if not is_instance_valid(pop):
@@ -729,7 +777,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				var pop2d := pop as Node2D
 				if pop2d == null:
 					continue
-				var d: float = click_pos.distance_to(pop2d.global_position)
+				var pop_screen: Vector2 = _world_to_screen(pop2d.global_position)
+				var d: float = screen_pos.distance_to(pop_screen)
 				if d < best_dist:
 					best_dist = d
 					best_pop = pop
@@ -741,7 +790,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		# Nothing was clicked — handle placement if active
 		if place_mode != PlaceMode.NONE:
-			_place_entity_at(click_pos)
+			var world_pos: Vector2 = _screen_to_world(screen_pos)
+			_place_entity_at(world_pos)
 			get_viewport().set_input_as_handled()
 
 
@@ -753,6 +803,29 @@ func _on_speed_changed(new_speed: float) -> void:
 	_current_speed = new_speed
 	if sim_speed_label and not _is_paused:
 		sim_speed_label.text = "Speed: %.1fx" % new_speed
+
+
+func _recenter_camera() -> void:
+	if _camera == null:
+		return
+	var positions: Array[Vector2] = []
+	for f in all_farmers:
+		if f and is_instance_valid(f):
+			positions.append((f as Node2D).global_position)
+	for b in all_bakers:
+		if b and is_instance_valid(b):
+			positions.append((b as Node2D).global_position)
+	for h in households:
+		if h and is_instance_valid(h):
+			positions.append((h as Node2D).global_position)
+	if positions.is_empty():
+		_camera.recenter(Vector2(300, 400))
+		return
+	var centroid := Vector2.ZERO
+	for p in positions:
+		centroid += p
+	centroid /= float(positions.size())
+	_camera.recenter(centroid)
 
 
 func _toggle_pause() -> void:
@@ -851,7 +924,7 @@ func _show_sim_fail_banner(day: int) -> void:
 
 	var label := Label.new()
 	label.text = "TOWN EXTINCT — Simulation paused  (day %d)" % day
-	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_font_size_override("font_size", 28)
 	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_sim_fail_banner.add_child(label)
@@ -1037,7 +1110,7 @@ func get_ui_labels() -> void:
 			pop_history_label.bbcode_enabled = true
 			pop_history_label.fit_content = true
 			pop_history_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			pop_history_label.add_theme_font_size_override("normal_font_size", 10)
+			pop_history_label.add_theme_font_size_override("normal_font_size", 16)
 			pop_history_label.add_theme_color_override("default_color", Color(0.72, 0.72, 0.72, 1.0))
 			scroll.add_child(pop_history_label)
 
@@ -1267,7 +1340,7 @@ func update_inspector() -> void:
 			"[color=#6688aa]Productivity: [color=%s]×%.2f[/color][/color]" %
 			[pm_col, prod_m])
 
-	# ── Career utility display ───────────────────────────────────────────────
+	# ── Career utility display (full instrumentation) ───────────────────────
 	var rec_role: String = d.get("recommended_role", "")
 	if rec_role != "":
 		var u_f: float = d.get("utility_farmer", 0.0)
@@ -1283,6 +1356,40 @@ func update_inspector() -> void:
 		lines.append(
 			"[color=#556688]Recommended: [color=%s]%s[/color][/color]" %
 			[rec_col, rec_role])
+
+	# ── Detailed career eval breakdown (from last_career_eval dict) ──────
+	var lce: Dictionary = d.get("last_career_eval", {})
+	if not lce.is_empty():
+		var rpf: float = lce.get("role_profit_7d_avg_farmer", 0.0)
+		var rpb: float = lce.get("role_profit_7d_avg_baker", 0.0)
+		lines.append(
+			"[color=#556688]Role 7d avg: Farmer=$%.2f  Baker=$%.2f[/color]" % [rpf, rpb])
+		var ei_f: float = lce.get("income_farmer", 0.0) * lce.get("sf_farmer", 1.0)
+		var ei_b: float = lce.get("income_baker", 0.0) * lce.get("sf_baker", 1.0)
+		lines.append(
+			"[color=#556688]Expected income: F=$%.2f  B=$%.2f  (pop avg=$%.2f)[/color]" % [
+				ei_f, ei_b, lce.get("pop_cashflow_7d_avg", 0.0)])
+		lines.append(
+			"[color=#556688]Skill factors: F=×%.2f  B=×%.2f  Risk=%.2f[/color]" % [
+				lce.get("sf_farmer", 1.0), lce.get("sf_baker", 1.0), lce.get("risk", 0.0)])
+		lines.append(
+			"[color=#556688]Switch cost: F=%.1f  B=%.1f[/color]" % [
+				lce.get("switch_cost_farmer", 0.0), lce.get("switch_cost_baker", 0.0)])
+		var du_f: float = lce.get("diag_U_farmer", 0.0)
+		var du_b: float = lce.get("diag_U_baker", 0.0)
+		lines.append(
+			"[color=#556688]Diag U (simple): F=%.2f  B=%.2f[/color]" % [du_f, du_b])
+		var scar_b: float = lce.get("scarcity_bread", 0.0)
+		var scar_w: float = lce.get("scarcity_wheat", 0.0)
+		var scar_col: String = "#cc5555" if scar_b > 0.0 or scar_w > 0.0 else "#556688"
+		lines.append(
+			"[color=%s]Scarcity: bread=%.2f wheat=%.2f[/color]" % [scar_col, scar_b, scar_w])
+
+	# ── Last career decision ─────────────────────────────────────────────
+	var lcd: String = d.get("last_career_decision", "")
+	if lcd != "":
+		var lcd_col: String = "#ccaa55" if "blocked" in lcd else "#55cc88"
+		lines.append("[color=%s]Last decision: %s[/color]" % [lcd_col, lcd])
 
 	# ── Cashflow diagnostics ─────────────────────────────────────────────────
 	var cf_income: float = d.get("cashflow_income", -1.0)
@@ -1526,20 +1633,16 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	if not is_instance_valid(household):
 		return
 
-	# [POP] Hard population cap
-	# Conversion keeps the same agent, so pop count doesn't increase, but guard anyway.
-	var total_pop := get_total_population()
-	if total_pop >= MAX_TOTAL_POP:
-		if event_bus:
-			event_bus.log("[POP] Conversion of %s blocked — pop cap (%d/%d)" % [
-				household.name, total_pop, MAX_TOTAL_POP])
-		return
+	var from_role: String = household.current_role if household.get("current_role") else "?"
+	var pop_id: String = household.person_name if household.get("person_name") and household.person_name != "" else household.name
 
-	# [LAND] Gate farmer conversions on field capacity
+	# [LAND] Gate farmer conversions on field capacity (only valid conversion block)
 	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
+		var block_line: String = "[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
+			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
+		print(block_line)
 		if event_bus:
-			event_bus.log("[MOBILITY] farmer conversion blocked — land cap reached (%d/%d fields)" % [
-				all_field_nodes.size(), MAX_FIELDS])
+			event_bus.log(block_line)
 		return
 
 	var pos: Vector2 = household.global_position
@@ -1558,6 +1661,10 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		var margin_pct: float = 0.0
 		if u_cur != 0.0:
 			margin_pct = ((u_best / u_cur) - 1.0) * 100.0
+		var convert_line: String = "[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role]
+		print(convert_line)
+		if event_bus:
+			event_bus.log(convert_line)
 		ag.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
 			old_role, role.capitalize(), margin_pct, wallet_money])
 		if event_bus:
@@ -1767,7 +1874,7 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 	name_label.name = "FieldLabel"
 	name_label.text = field_node.name
 	name_label.position = Vector2(-20, 18)
-	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_font_size_override("font_size", 16)
 	name_label.add_theme_color_override("font_color", Color(0.8, 0.7, 0.4))
 	field_node.add_child(name_label)
 	
@@ -1989,7 +2096,7 @@ func _show_field_assignment_popup(field_node: Node2D, world_pos: Vector2) -> voi
 	
 	var title = Label.new()
 	title.text = "Assign %s to:" % field_node.name
-	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_font_size_override("font_size", 18)
 	title.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6))
 	vbox.add_child(title)
 	

@@ -783,7 +783,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	if bread <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(h), requested])
+			event_bus.log("[BREAD EMPTY] day=%d tick=%d buyer=%s wanted=%d inv=0" % [current_day, current_tick, _agent_label(h), requested])
 		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
@@ -910,7 +910,11 @@ func on_day_changed(day: int) -> void:
 	
 	# Daily bread status diagnostic
 	if event_bus:
-		event_bus.log("[BREAD STATUS] day=%d inv=%d emergency_cd=%d" % [day, bread, bread_emergency_cooldown_remaining])
+		event_bus.log("[BREAD STATUS] day=%d inv=%d paused_sell=%s paused_prod=%s emergency_cd=%d" % [
+			day, bread,
+			not can_producer_sell("bread"),
+			not can_producer_produce("bread"),
+			bread_emergency_cooldown_remaining])
 
 	# Reset daily flow counters
 	wheat_sold_today = 0
@@ -1252,13 +1256,14 @@ func check_bread_emergency(bakers: Array) -> void:
 	if bread_emergency_cooldown_remaining > 0:
 		return
 
-	if event_bus:
-		event_bus.log("[EMERGENCY] Bread market empty (inv=%d) -> attempting emergency supply injection" % bread)
-
 	var supplier = _find_emergency_bread_supplier(bakers)
 	if supplier == null:
+		var skip_line: String = "[EMERGENCY] Bread empty override SKIPPED (no supplier) day=%d tick=%d inv=0" % [
+			current_day, current_tick]
+		print(skip_line)
 		if event_bus:
-			event_bus.log("[EMERGENCY] Bread empty but no supplier found (no baker inventory/inputs)")
+			event_bus.log(skip_line)
+		bread_emergency_cooldown_remaining = BREAD_EMERGENCY_COOLDOWN_TICKS
 		return
 
 	var supplier_inv: Inventory = get_inv(supplier)
@@ -1323,9 +1328,11 @@ func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: 
 		money -= bid
 		total_paid += bid
 
-	if sell_qty > 0 and event_bus:
-		event_bus.log("[EMERGENCY] Injected bread: supplier=%s qty=%d market_inv_before=%d market_inv_after=%d bypassed=true price_paid=$%.2f" % [
-			_agent_label(supplier), sell_qty, inv_before, bread, total_paid])
+	var trigger_line: String = "[EMERGENCY] Bread empty override TRIGGERED day=%d tick=%d inv=0 supplier=%s qty=%d bypass_sell_block=true cd=%d" % [
+		current_day, current_tick, _agent_label(supplier), sell_qty, BREAD_EMERGENCY_COOLDOWN_TICKS]
+	print(trigger_line)
+	if event_bus:
+		event_bus.log(trigger_line)
 
 
 func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
@@ -1346,6 +1353,11 @@ func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
 		job.set("emergency_sell_next", true)
 		action = "grind+sell_next"
 
-	if action != "" and event_bus:
-		event_bus.log("[EMERGENCY] Bread empty: supplier=%s had no bread; set priority action=%s (flour=%d wheat=%d)" % [
-			_agent_label(supplier), action, flour, wheat])
+	if action != "":
+		var trigger_line: String = "[EMERGENCY] Bread empty override TRIGGERED day=%d tick=%d inv=0 supplier=%s qty=0 bypass_sell_block=false cd=%d priority=%s" % [
+			current_day, current_tick, _agent_label(supplier), BREAD_EMERGENCY_COOLDOWN_TICKS, action]
+		print(trigger_line)
+		if event_bus:
+			event_bus.log(trigger_line)
+
+

@@ -105,6 +105,10 @@ var pending_target: Node2D = null
 # -- Career switching history (persistent across role changes) -----------------
 var last_switch_day: int = -999
 
+# -- Career instrumentation (diagnostic only — no behavior impact) -------------
+var last_career_eval: Dictionary = {}
+var last_career_decision: String = ""
+
 
 # ==============================================================================
 #  Lifecycle
@@ -210,7 +214,10 @@ func on_day_changed(day: int) -> void:
 	_roll_cashflow()
 	_progress_skills(current_role)
 	if career_eval:
+		var prev_eval_day: int = career_eval.last_eval_day
 		career_eval.evaluate(day, self, econ_stats)
+		if career_eval.last_eval_day != prev_eval_day:
+			_log_career_eval(day)
 	if current_job:
 		current_job.on_day_changed(day)
 
@@ -266,6 +273,41 @@ var utility_current: float:
 
 var recommended_role: String:
 	get: return career_eval.recommended_role if career_eval else ""
+
+
+func _log_career_eval(day: int) -> void:
+	var scar_b: float = 1.0 if (market and market.bread <= 0) else 0.0
+	var scar_w: float = 1.0 if (market and market.wheat <= 0) else 0.0
+	last_career_eval = career_eval.get_eval_summary(self, scar_b, scar_w)
+	var ce = career_eval
+	var pop_id: String = person_name if person_name != "" else name
+	if event_bus:
+		event_bus.log(
+			"[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d skill(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s scar(b=%.2f w=%.2f)" % [
+				day, pop_id, current_role,
+				get_cash(),
+				inv.get_qty("bread") if inv else 0,
+				skill_farmer, skill_baker,
+				ce.last_income_farmer * ce.last_sf_farmer,
+				ce.last_income_baker * ce.last_sf_baker,
+				ce.utility_farmer, ce.utility_baker,
+				ce.recommended_role,
+				scar_b, scar_w,
+			]
+		)
+	print(
+		"[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d skill(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s scar(b=%.2f w=%.2f)" % [
+			day, pop_id, current_role,
+			get_cash(),
+			inv.get_qty("bread") if inv else 0,
+			skill_farmer, skill_baker,
+			ce.last_income_farmer * ce.last_sf_farmer,
+			ce.last_income_baker * ce.last_sf_baker,
+			ce.utility_farmer, ce.utility_baker,
+			ce.recommended_role,
+			scar_b, scar_w,
+		]
+	)
 
 
 # ==============================================================================
@@ -422,6 +464,8 @@ func _base_inspector_data() -> Dictionary:
 		"utility_current": utility_current,
 		"recommended_role": recommended_role,
 		"last_switch_day": last_switch_day,
+		"last_career_eval": last_career_eval,
+		"last_career_decision": last_career_decision,
 	}
 
 

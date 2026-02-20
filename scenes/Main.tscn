@@ -204,7 +204,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 1
+mouse_filter = 2
 
 [node name="Layout" type="HBoxContainer" parent="UI/HUDRoot"]
 layout_mode = 1
@@ -213,16 +213,22 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 1
+mouse_filter = 2
 
-[node name="WorldSpacer" type="Control" parent="UI/HUDRoot/Layout"]
+[node name="LeftColumn" type="VBoxContainer" parent="UI/HUDRoot/Layout"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-mouse_filter = 1
+mouse_filter = 2
+
+[node name="WorldSpacer" type="Control" parent="UI/HUDRoot/Layout/LeftColumn"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
 
 [node name="Sidebar" type="PanelContainer" parent="UI/HUDRoot/Layout"]
-custom_minimum_size = Vector2(280, 0)
+custom_minimum_size = Vector2(380, 0)
 layout_mode = 2
 size_flags_vertical = 3
 
@@ -232,20 +238,23 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 
 [node name="LogPanel" type="PanelContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox"]
-custom_minimum_size = Vector2(0, 220)
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="LogVBox" type="VBoxContainer" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel"]
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="LogTitle" type="Label" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 20
 text = "Event Log"
 
 [node name="EventLog" type="RichTextLabel" parent="UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_font_sizes/normal_font_size = 16
 bbcode_enabled = true
 scroll_following = false
 
@@ -259,7 +268,7 @@ anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -270.0
+offset_top = -160.0
 offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -278,12 +287,12 @@ theme_override_constants/separation = 4
 
 [node name="PopInspectorTitle" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 24
 text = "Name"
 
 [node name="PopInspectorRole" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 18
 theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
 text = "Role"
 
@@ -309,4 +318,3 @@ layout_mode = 2
 [node name="PopInspectorClose" type="Button" parent="UI/PopInspector/ContentRow/CloseCol"]
 layout_mode = 2
 text = "✕"
-

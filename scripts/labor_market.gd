@@ -63,6 +63,13 @@ var event_bus = null
 
 var _initialized: bool = false
 
+# ─── Career instrumentation counters (reset daily) ──────────────────────────
+var switches_today: int = 0
+var blocked_today: int = 0
+var evals_today: int = 0
+var reason_utility_today: int = 0
+var reason_scarcity_today: int = 0
+
 # ── Startup bootstrap tracking ────────────────────────────────────────────────
 ## Set to true the first time the market holds any bread inventory.
 ## Migration is suppressed until this is true AND the startup grace period expires.
@@ -83,6 +90,12 @@ func bind(p_market, p_event_bus) -> void:
 func update_daily(day: int) -> void:
 	if not _initialized:
 		return
+
+	switches_today = 0
+	blocked_today = 0
+	evals_today = 0
+	reason_utility_today = 0
+	reason_scarcity_today = 0
 
 	# Update profit EMAs from daily money deltas
 	var farmer_avg_delta: float = _compute_avg_delta(all_farmers, farmer_prev_money)
@@ -117,6 +130,15 @@ func update_daily(day: int) -> void:
 
 	# Evaluate producers for sustained-loss migration
 	_evaluate_producer_migration(day)
+
+	# ── Daily career summary (instrumentation only) ──────────────────────
+	var avg_f: float = farmer_profit_ema
+	var avg_b: float = baker_profit_ema
+	var summary_line: String = "[CAREER SUMMARY] day=%d evals=%d switches=%d blocked=%d avg_profit_farmer=%.2f avg_profit_baker=%.2f reason_counts(scarcity=%d utility=%d)" % [
+		day, evals_today, switches_today, blocked_today, avg_f, avg_b, reason_scarcity_today, reason_utility_today]
+	print(summary_line)
+	if event_bus:
+		event_bus.log(summary_line)
 
 
 # ─── Household evaluation ────────────────────────────────────────────────────
@@ -189,24 +211,32 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if day % EVAL_INTERVAL_DAYS != 0:
 		return
 
+	evals_today += 1
+	var pop_id: String = h.person_name if h.get("person_name") and h.person_name != "" else h.name
+
 	if h.switch_cooldown_days > 0:
+		_log_career_blocked(day, pop_id, "?", "cooldown", h.switch_cooldown_days, h)
 		return
 
 	# Gate: minimum tenure in current role
 	if h.days_in_role < MIN_TENURE_DAYS:
+		_log_career_blocked(day, pop_id, "?", "tenure", h.days_in_role, h)
 		return
 
 	# Gate: not starving and has minimum food buffer
 	var h_hunger = h.get_node_or_null("HungerNeed")
 	if h_hunger and h_hunger.is_starving:
+		_log_career_blocked(day, pop_id, "?", "starving", 0, h)
 		return
 	var h_inv = h.get_node_or_null("Inventory")
 	if h_inv and h_inv.get_qty("bread") < HUNGER_SAFETY_BREAD:
+		_log_career_blocked(day, pop_id, "?", "food_buffer", h_inv.get_qty("bread") if h_inv else 0, h)
 		return
 
 	# Gate: savings buffer
 	var cash: float = h.get_cash() if h.has_method("get_cash") else 0.0
 	if cash < SAVINGS_BUFFER_REQUIRED:
+		_log_career_blocked(day, pop_id, "?", "savings", int(cash), h)
 		return
 
 	# Read utility scores from agent's CareerEvaluator
@@ -233,18 +263,30 @@ func _evaluate_household(h: Node, day: int) -> void:
 
 	if u_current == 0.0:
 		if best_u <= 0.0:
+			_log_career_blocked(day, pop_id, best_role, "margin_zero", 0, h)
 			return
 	elif best_u < u_current * (1.0 + margin):
+		_log_career_blocked(day, pop_id, best_role, "margin", int(margin * 100.0), h)
 		return
 
-	# All gates passed — request switch
+	# All gates passed — request switch (reason is always "utility" in current code)
 	var new_role: String = best_role.to_lower()
+	switches_today += 1
+	reason_utility_today += 1
+
+	var decision_line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility details=bread_s=%.2f wheat_s=%.2f U_F=%.2f U_B=%.2f U_cur=%.2f margin=%.0f%%" % [
+		day, pop_id, h.current_role, best_role,
+		bread_scarcity_ema, wheat_scarcity_ema,
+		u_farmer, u_baker, u_current, margin * 100.0]
+	print(decision_line)
 	if event_bus:
-		event_bus.log("[LaborMkt] %s → utility switch to %s (Uc=%.2f Ub=%.2f margin=%.0f%% cash=$%.0f)" % [
-			h.name, new_role, u_current, best_u, margin * 100.0, cash])
+		event_bus.log(decision_line)
 	if h.has_method("log_event"):
 		h.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
 			h.current_role, best_role, margin * 100.0, cash])
+	if h.get("last_career_decision") != null:
+		h.last_career_decision = "day=%d utility %s->%s U_F=%.2f U_B=%.2f margin=%.0f%%" % [
+			day, h.current_role, best_role, u_farmer, u_baker, margin * 100.0]
 	role_switch_requested.emit(h, new_role)
 	h.switch_cooldown_days = SWITCH_COOLDOWN_DAYS
 
@@ -279,6 +321,17 @@ func should_suppress_spawn() -> bool:
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────
+
+func _log_career_blocked(day: int, pop_id: String, desired_role: String, block: String, detail_val: int, h: Node) -> void:
+	blocked_today += 1
+	var line: String = "[CAREER BLOCKED] day=%d pop=%s desired=%s block=%s val=%d" % [
+		day, pop_id, desired_role, block, detail_val]
+	print(line)
+	if event_bus:
+		event_bus.log(line)
+	if h and h.get("last_career_decision") != null:
+		h.last_career_decision = "day=%d blocked=%s (val=%d)" % [day, block, detail_val]
+
 
 func _ema(prev: float, new_val: float) -> float:
 	return EMA_ALPHA * new_val + (1.0 - EMA_ALPHA) * prev

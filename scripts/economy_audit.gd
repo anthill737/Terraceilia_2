@@ -2,7 +2,7 @@ extends Node
 class_name EconomyAudit
 
 
-func audit(farmer: Farmer, baker: Baker, market: Market, bus: EventBus, tick: int) -> void:
+func audit(farmer: Agent, baker: Agent, market: Market, bus: EventBus, tick: int) -> void:
 	# [BUGFIX] Guard against freed instances — agents may have migrated since last tick
 	if farmer == null or not is_instance_valid(farmer):
 		return

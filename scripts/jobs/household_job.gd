@@ -68,7 +68,11 @@ func get_job_inspector_data() -> Dictionary:
 	return d
 
 
+const STARTING_CASH: float = 500.0
+
 func activate() -> void:
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"bread": 0}
 	agent._health_bar_y = -24.0
@@ -188,26 +192,19 @@ func attempt_buy_bread() -> void:
 				event_bus.log("Tick %d: %s [BUGFIX] at market but no deficit (%d/%d) - returning home" % [agent.current_tick, agent.name, current_bread, effective_reserve_target])
 			return
 		var qty_bought: int = market.sell_bread_to_household(agent, desired)
+		var tr: Dictionary = market.last_trade_result
 		if qty_bought > 0:
 			inv.add("bread", qty_bought)
 			agent.cashflow_today_expense += float(qty_bought) * (market.bread_price if market else 0.0)
 			consecutive_failed_food_days = 0
 			if event_bus:
 				event_bus.log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [agent.current_tick, agent.name, qty_bought, desired, inv.get_qty("bread")])
-			agent.log_event("Bread buy: got=%d/%d  mkt=%d" % [qty_bought, desired, market.bread if market else -1])
+			agent.log_event("Bread buy: got=%d/%d @$%.2f (%s)" % [qty_bought, desired, tr.get("price", 0.0), tr.get("reason", "?")])
 		else:
 			consecutive_failed_food_days += 1
 			if event_bus:
 				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [agent.current_tick, agent.name, desired, consecutive_failed_food_days])
-			var _mkt_inv: int = market.bread if market else -1
-			var _reason: String
-			if _mkt_inv == 0:
-				_reason = "empty"
-			elif wallet != null and market != null and wallet.money < market.bread_price:
-				_reason = "insufficient_funds"
-			else:
-				_reason = "blocked"
-			agent.log_event("Bread buy: wanted=%d, got=0, mkt=%d, reason=%s" % [desired, _mkt_inv, _reason])
+			agent.log_event("Bread buy FAILED: wanted=%d, mkt=%d, reason=%s" % [desired, tr.get("market_bread", -1), tr.get("reason", "unknown")])
 
 
 func consume_bread_at_home() -> void:

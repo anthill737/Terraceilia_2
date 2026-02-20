@@ -83,7 +83,11 @@ func set_tick(t: int) -> void:
 	_check_idle_guard()
 
 
+const STARTING_CASH: float = 500.0
+
 func activate() -> void:
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability
@@ -256,7 +260,8 @@ func handle_market_arrival() -> void:
 		var _ws: int = market.buy_wheat_from_farmer(agent, min_price)
 		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_wheat_snap)
 		if _ws > 0:
-			agent.log_event("Sold %d wheat" % _ws)
+			var wtr: Dictionary = market.last_trade_result
+			agent.log_event("Sold %d wheat @$%.2f (%s)" % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")])
 	if inv.get_qty("seeds") < 20:
 		var _cf_seeds_snap: float = agent.get_cash()
 		market.sell_seeds_to_farmer(agent)
@@ -264,17 +269,16 @@ func handle_market_arrival() -> void:
 	var needed: int = food_stockpile.needed_to_reach_target()
 	if needed > 0:
 		var bought: int = market.sell_bread_to_agent(agent, needed)
+		var btr: Dictionary = market.last_trade_result
 		if bought > 0:
 			agent.cashflow_today_expense += float(bought) * (market.bread_price if market else 0.0)
 		inv.add("bread", bought)
 		if bought > 0 and event_bus:
 			event_bus.log("Tick %d: Farmer bought %d bread for food buffer" % [agent.current_tick, bought])
-		var _mkt_inv: int = market.bread if market else -1
 		if bought == 0:
-			var _br: String = "empty" if _mkt_inv == 0 else "insufficient_funds"
-			agent.log_event("Bread buy: wanted=%d, got=0, mkt=%d, reason=%s" % [needed, _mkt_inv, _br])
+			agent.log_event("Bread buy FAILED: wanted=%d, mkt=%d, reason=%s" % [needed, btr.get("market_bread", -1), btr.get("reason", "unknown")])
 		else:
-			agent.log_event("Bread buy: got=%d/%d" % [bought, needed])
+			agent.log_event("Bread buy: got=%d/%d @$%.2f (%s)" % [bought, needed, btr.get("price", 0.0), btr.get("reason", "?")])
 
 
 func on_day_changed(_day: int) -> void:

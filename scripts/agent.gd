@@ -371,6 +371,7 @@ func _base_inspector_data() -> Dictionary:
 	return {
 		"name": name,
 		"person_name": person_name if person_name != "" else name,
+		"role": current_role if current_role != "" else get_class(),
 		"cash": get_cash(),
 		"wealth_tier": get_wealth_tier(),
 		"hunger": "%d/%d" % [hunger.hunger_days, hunger.hunger_max_days] if hunger else "?/?",

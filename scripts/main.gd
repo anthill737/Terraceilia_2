@@ -50,8 +50,6 @@ var next_baker_id: int:
 	set(v):
 		if pop_mgr: pop_mgr.next_baker_id = v
 
-@export var FarmerScene: PackedScene
-@export var BakerScene: PackedScene
 var AgentScene: PackedScene = null
 var spawn_info_label: Label = null
 
@@ -62,7 +60,6 @@ var placement_cursor: ColorRect = null  # Ghost preview at mouse
 var place_mode_label: Label = null      # Status text showing current mode
 
 # Household management
-@export var HouseholdScene: PackedScene
 var market_node: Node2D = null
 var event_bus: EventBus = null
 var economy_config: Dictionary = {}
@@ -176,10 +173,7 @@ func _ready() -> void:
 	# Load economy config
 	_load_economy_config()
 	
-	# Resolve packed scenes (eliminate Inspector dependency)
-	_resolve_household_scene()
-	_resolve_farmer_scene()
-	_resolve_baker_scene()
+	# Load the unified Agent.tscn used for all spawns
 	_resolve_agent_scene()
 	
 	# Create simulation systems
@@ -251,55 +245,55 @@ func _ready() -> void:
 	# Wire calendar day_changed to labor market handler
 	calendar.day_changed.connect(_on_calendar_day_changed)
 	
-	# Wire event bus to all agents
+	# Wire event bus and market to all initial agents
 	market.event_bus = bus
 	farmer.event_bus = bus
+	farmer.market = market
 	baker.event_bus = bus
+	baker.market = market
 	household_agent.event_bus = bus
+	household_agent.market = market
 	
-	# Wire HungerNeed components
-	var farmer_inv = farmer.get_node("Inventory") as Inventory
-	var farmer_hunger = farmer.get_node("HungerNeed") as HungerNeed
+	# Wire HungerNeed components (must happen before set_role)
+	var farmer_inv: Inventory = farmer.get_node("Inventory") as Inventory
+	var farmer_hunger: HungerNeed = farmer.get_node("HungerNeed") as HungerNeed
 	farmer_hunger.bind("Farmer", farmer_inv, bus, calendar)
 	
-	var baker_inv = baker.get_node("Inventory") as Inventory
-	var baker_hunger = baker.get_node("HungerNeed") as HungerNeed
+	var baker_inv: Inventory = baker.get_node("Inventory") as Inventory
+	var baker_hunger: HungerNeed = baker.get_node("HungerNeed") as HungerNeed
 	baker_hunger.bind("Baker", baker_inv, bus, calendar)
 	
-	var household_inv = household_agent.get_node("Inventory") as Inventory
-	var household_hunger = household_agent.get_node("HungerNeed") as HungerNeed
+	var household_inv: Inventory = household_agent.get_node("Inventory") as Inventory
+	var household_hunger: HungerNeed = household_agent.get_node("HungerNeed") as HungerNeed
 	household_hunger.bind("Household", household_inv, bus, calendar)
 	
-	# Connect farmer to market and fields
-	farmer.market = market
+	# Bind food reserves (must happen before set_role so job activate() sees them)
+	var farmer_food_reserve: FoodReserve = farmer.get_node("FoodReserve") as FoodReserve
+	if farmer_food_reserve:
+		farmer_food_reserve.bind(farmer_inv, farmer_hunger, market, farmer.get_node("Wallet") as Wallet, bus, "Farmer")
+	var baker_food_reserve: FoodReserve = baker.get_node("FoodReserve") as FoodReserve
+	if baker_food_reserve:
+		baker_food_reserve.bind(baker_inv, baker_hunger, market, baker.get_node("Wallet") as Wallet, bus, "Baker")
+	var household_food_reserve: FoodReserve = household_agent.get_node("FoodReserve") as FoodReserve
+	if household_food_reserve:
+		household_food_reserve.bind(household_inv, household_hunger, market, household_agent.get_node("Wallet") as Wallet, bus, "Household")
+	
+	# Activate roles — creates job components, sets sprite colors, adds to groups
+	farmer.set_role("Farmer")
 	farmer.set_route_nodes(house, market_node)
 	farmer.set_fields([field1_plot, field2_plot], [field1_node, field2_node])
 	
-	# Bind farmer food reserve after market is set
-	var farmer_food_reserve = farmer.get_node("FoodReserve") as FoodReserve
-	if farmer_food_reserve:
-		farmer_food_reserve.bind(farmer.get_node("Inventory"), farmer.get_node("HungerNeed"), market, farmer.get_node("Wallet"), bus, "Farmer")
+	baker.set_role("Baker")
+	baker.set_locations(bakery, market_node)
 	
-	# Connect baker to market
-	baker.market = market
+	household_agent.set_role("Household")
+	household_agent.set_locations(household_home, market_node)
 	
-	# Set up baker movement targets
-	if baker and bakery and market_node:
-		baker.set_locations(bakery, market_node)
+	# Register baseline household for prosperity tracking
+	pop_mgr.register_household(household_agent)
 	
-	# Connect household agent to market
-	household_agent.market = market
-	if household_agent and household_home and market_node:
-		household_agent.set_locations(household_home, market_node)
-	
-	# Add baseline household to households array for prosperity tracking
-	households.append(household_agent)
-	
-	# Connect death signal for baseline household (old subclass uses household_died)
-	if household_agent.has_signal("household_died"):
-		household_agent.connect("household_died", _on_household_died)
-	elif household_agent.has_signal("agent_died"):
-		household_agent.agent_died.connect(_on_household_died)
+	# Connect death signal
+	household_agent.agent_died.connect(_on_household_died)
 	
 	# Bind prosperity meter references
 	prosperity_meter.bind_references(bus, market, households)
@@ -413,54 +407,6 @@ func _load_economy_config() -> void:
 				push_error("Main: Failed to parse economy config: " + json.get_error_message())
 	else:
 		print("Main: Economy config not found at ", config_path, " - using defaults")
-
-
-func _resolve_household_scene() -> void:
-	"""Auto-resolve HouseholdScene to eliminate Inspector dependency."""
-	if HouseholdScene != null:
-		return
-	
-	var candidate_paths := [
-		"res://scenes/Household.tscn",
-		"res://scenes/agents/HouseholdAgent.tscn",
-		"res://scenes/HouseholdAgent.tscn",
-		"res://scenes/household_agent.tscn"
-	]
-	
-	for p in candidate_paths:
-		if ResourceLoader.exists(p):
-			HouseholdScene = load(p)
-			if event_bus:
-				event_bus.log("HouseholdScene auto-loaded from " + p)
-			else:
-				print("Main: HouseholdScene auto-loaded from ", p)
-			return
-	
-	push_error("FATAL: HouseholdScene could not be resolved. Population growth disabled.")
-
-
-func _resolve_farmer_scene() -> void:
-	"""Auto-resolve FarmerScene to eliminate Inspector dependency."""
-	if FarmerScene != null:
-		return
-	var path = "res://scenes/Farmer.tscn"
-	if ResourceLoader.exists(path):
-		FarmerScene = load(path)
-		print("Main: FarmerScene auto-loaded from ", path)
-	else:
-		push_warning("FarmerScene not found at " + path + " - farmer spawning disabled")
-
-
-func _resolve_baker_scene() -> void:
-	"""Auto-resolve BakerScene to eliminate Inspector dependency."""
-	if BakerScene != null:
-		return
-	var path = "res://scenes/Baker.tscn"
-	if ResourceLoader.exists(path):
-		BakerScene = load(path)
-		print("Main: BakerScene auto-loaded from ", path)
-	else:
-		push_warning("BakerScene not found at " + path + " - baker spawning disabled")
 
 
 func _resolve_agent_scene() -> void:
@@ -727,7 +673,7 @@ func _update_spawn_info() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# ── Keyboard shortcuts ────────────────────────────────────────────────────
+	# ── Keyboard shortcuts (run before GUI so hotkeys always work) ────────────
 	if clock != null:
 		if event.is_action_pressed("speed_up"):
 			clock.increase_speed()
@@ -738,32 +684,29 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# P key: toggle pause
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
 			return
-
-	# ── Right-click / Escape: cancel placement ────────────────────────────────
-	if place_mode != PlaceMode.NONE:
-		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-			_cancel_placement()
-			get_viewport().set_input_as_handled()
-			return
-		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if event.keycode == KEY_ESCAPE and place_mode != PlaceMode.NONE:
 			_cancel_placement()
 			get_viewport().set_input_as_handled()
 			return
 
-	# ── Left-click: pop selection + placement ─────────────────────────────────
-	# Runs even when paused (main node is PROCESS_MODE_ALWAYS).
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Runs AFTER GUI buttons/panels have had a chance to consume clicks.
+
+	# Right-click: cancel placement
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if place_mode != PlaceMode.NONE:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+			return
+
+	# Left-click: pop selection + placement (only reaches here if no GUI ate it)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		# Skip if the cursor is over a solid UI control (button, panel, etc.)
-		var hovered := get_viewport().gui_get_hovered_control()
-		if hovered != null and hovered.mouse_filter == Control.MOUSE_FILTER_STOP:
-			return
-
 		var click_pos: Vector2 = event.position
 
 		# Find the closest pop within 15 px of the click
@@ -1024,12 +967,12 @@ func get_ui_labels() -> void:
 		panel_style.content_margin_bottom = 10
 		pop_inspector_panel.add_theme_stylebox_override("panel", panel_style)
 
-	# Connect pop_clicked for the static scene pops
-	if is_instance_valid(farmer) and farmer.has_signal("pop_clicked"):
+	# Connect pop_clicked for the initial scene agents
+	if is_instance_valid(farmer):
 		farmer.pop_clicked.connect(select_pop)
-	if is_instance_valid(baker) and baker.has_signal("pop_clicked"):
+	if is_instance_valid(baker):
 		baker.pop_clicked.connect(select_pop)
-	if is_instance_valid(household_agent) and household_agent.has_signal("pop_clicked"):
+	if is_instance_valid(household_agent):
 		household_agent.pop_clicked.connect(select_pop)
 
 
@@ -1287,9 +1230,8 @@ func update_inspector() -> void:
 func spawn_household_at(pos: Vector2) -> Node:
 	"""Spawn a new household using unified Agent.tscn + set_role()."""
 
-	var scene: PackedScene = AgentScene if AgentScene != null else HouseholdScene
-	if scene == null:
-		push_error("Cannot spawn household: no scene available.")
+	if AgentScene == null:
+		push_error("Cannot spawn household: AgentScene not loaded")
 		return null
 
 	# Hard population cap
@@ -1300,9 +1242,9 @@ func spawn_household_at(pos: Vector2) -> Node:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 
-	var h: Agent = scene.instantiate() as Agent
+	var h: Agent = AgentScene.instantiate() as Agent
 	if h == null:
-		push_error("Agent scene instantiate() returned null")
+		push_error("AgentScene instantiate() returned null")
 		return null
 
 	h.name = "Household_%d" % (households.size() + 1)
@@ -1315,10 +1257,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	h.market = market
 	h.event_bus = event_bus
-
-	# Activate Household role (new-style Agent with no existing job)
-	if h.current_job == null:
-		h.set_role("Household")
+	h.set_role("Household")
 
 	# Wire HungerNeed
 	var spawned_hunger: HungerNeed = h.get_node("HungerNeed") as HungerNeed
@@ -1336,22 +1275,13 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	# Register
 	households.append(h)
-	if not h.is_in_group("households"):
-		h.add_to_group("households")
-	if not h.is_in_group("agents"):
-		h.add_to_group("agents")
 
-	# Connect death signal (new Agent uses agent_died; old uses household_died)
-	if h.has_signal("agent_died"):
-		h.connect("agent_died", _on_household_died)
-	elif h.has_signal("household_died"):
-		h.connect("household_died", _on_household_died)
+	h.agent_died.connect(_on_household_died)
 
 	if event_bus:
 		event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_meter.prosperity_score])
 
-	if h.has_signal("pop_clicked"):
-		h.connect("pop_clicked", select_pop)
+	h.pop_clicked.connect(select_pop)
 
 	return h
 
@@ -1617,81 +1547,6 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 		return
 
-	# ── LEGACY fallback: old-style subclass agents (free + spawn + transfer) ─
-	var _saved_pid: int = 0
-	var _saved_pname: String = ""
-	var _saved_events: Array = []
-	var _saved_sk_f: float = 0.25
-	var _saved_sk_b: float = 0.25
-	if household.has_method("log_event"):
-		household.log_event("Converting: Household → %s" % role.capitalize())
-		_saved_pid    = household.person_id
-		_saved_pname  = household.person_name
-		_saved_events = household.life_events.duplicate()
-	if household.get("skill_farmer") != null:
-		_saved_sk_f = household.skill_farmer
-	if household.get("skill_baker") != null:
-		_saved_sk_b = household.skill_baker
-
-	if event_bus:
-		event_bus.log("[MOBILITY] %s → converting to %s at (%.0f, %.0f) with $%.2f" % [
-			household.name, role, pos.x, pos.y, wallet_money])
-
-	var h_idx := households.find(household)
-	if h_idx != -1:
-		households.remove_at(h_idx)
-		if household.is_in_group("households"):
-			household.remove_from_group("households")
-		if household.is_in_group("agents"):
-			household.remove_from_group("agents")
-	var _converting_name: String = household.name
-	household.queue_free()
-	print("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
-	if event_bus:
-		event_bus.log("[MIGRATE CONFIRM] %s removed (converting to %s)" % [_converting_name, role])
-
-	if role == "farmer":
-		var field_pos := Vector2(
-			clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
-			clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
-		)
-		var pre_field := spawn_field_at(field_pos, null, true)
-		if pre_field == null:
-			print("[MOBILITY] Farmer conversion aborted — land cap reached")
-			if event_bus:
-				event_bus.log("[MOBILITY] Farmer conversion aborted — land cap (field spawn returned null)")
-			return
-
-		var new_farmer = await spawn_farmer_at(pos, pre_field)
-		if new_farmer and is_instance_valid(new_farmer):
-			var fw = new_farmer.get_node_or_null("Wallet")
-			if fw:
-				fw.money = wallet_money
-			if _saved_pid > 0:
-				_transfer_identity_data(new_farmer, _saved_pid, _saved_pname, _saved_events, "Farmer", _saved_sk_f, _saved_sk_b)
-			if event_bus:
-				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
-					new_farmer.name, field_pos.x, field_pos.y])
-		else:
-			var fi := all_field_nodes.find(pre_field)
-			if fi != -1:
-				all_field_nodes.remove_at(fi)
-			var fai := all_fields.find(pre_field)
-			if fai != -1:
-				all_fields.remove_at(fai)
-			field_assignment_map.erase(pre_field)
-			pre_field.queue_free()
-			if event_bus:
-				event_bus.log("[LAND] WARNING: farmer spawn failed; orphan field cleaned up")
-	elif role == "baker":
-		var new_baker = await spawn_baker_at(pos)
-		if new_baker and is_instance_valid(new_baker):
-			var bw = new_baker.get_node_or_null("Wallet")
-			if bw:
-				bw.money = wallet_money
-			if _saved_pid > 0:
-				_transfer_identity_data(new_baker, _saved_pid, _saved_pname, _saved_events, "Baker", _saved_sk_f, _saved_sk_b)
-
 
 # ============================================================================
 # PLACEMENT MODE - Click-to-place entities in the world
@@ -1835,13 +1690,12 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 
 
 func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
-	"""Spawn a new farmer using unified Agent.tscn + set_role().
+	"""Spawn a new farmer using Agent.tscn + set_role("Farmer").
 	initial_field_node, when provided, is assigned BEFORE set_route_nodes so that
 	_rebuild_route never sees an empty fields array during construction."""
-	var scene: PackedScene = AgentScene if AgentScene != null else FarmerScene
-	if scene == null:
+	if AgentScene == null:
 		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn farmer: no scene available")
+			event_bus.log("[ERROR] Cannot spawn farmer: AgentScene not loaded")
 		return null
 
 	# Hard population cap
@@ -1852,9 +1706,9 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 
-	var f: Agent = scene.instantiate() as Agent
+	var f: Agent = AgentScene.instantiate() as Agent
 	if f == null:
-		push_error("Farmer scene instantiate() returned non-Agent")
+		push_error("AgentScene instantiate() returned null")
 		return null
 	f.name = "Farmer_%d" % next_farmer_id
 	next_farmer_id += 1
@@ -1867,10 +1721,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 
 	f.market = market
 	f.event_bus = event_bus
-
-	# Activate Farmer role if no job exists yet (new-style Agent)
-	if f.current_job == null:
-		f.set_role("Farmer")
+	f.set_role("Farmer")
 
 	# Wire HungerNeed
 	var f_hunger: HungerNeed = f.get_node("HungerNeed") as HungerNeed
@@ -1881,7 +1732,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	# Wire FoodReserve
 	var f_reserve: FoodReserve = f.get_node("FoodReserve") as FoodReserve
 	if f_reserve:
-		f_reserve.bind(f_inv, f_hunger, market, f.get_node("Wallet"), event_bus, f.name)
+		f_reserve.bind(f_inv, f_hunger, market, f.get_node("Wallet") as Wallet, event_bus, f.name)
 
 	# Create home
 	var home := Node2D.new()
@@ -1905,10 +1756,6 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 
 	# Register
 	all_farmers.append(f)
-	if not f.is_in_group("farmers"):
-		f.add_to_group("farmers")
-	if not f.is_in_group("agents"):
-		f.add_to_group("agents")
 
 	# Absorb orphaned fields
 	var absorbed: int = 0
@@ -1923,18 +1770,16 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 			msg += " → absorbed %d unassigned field(s)" % absorbed
 		event_bus.log(msg)
 
-	if f.has_signal("pop_clicked"):
-		f.pop_clicked.connect(select_pop)
+	f.pop_clicked.connect(select_pop)
 
 	return f
 
 
 func spawn_baker_at(pos: Vector2) -> Node:
-	"""Spawn a new baker using unified Agent.tscn + set_role()."""
-	var scene: PackedScene = AgentScene if AgentScene != null else BakerScene
-	if scene == null:
+	"""Spawn a new baker using Agent.tscn + set_role("Baker")."""
+	if AgentScene == null:
 		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn baker: no scene available")
+			event_bus.log("[ERROR] Cannot spawn baker: AgentScene not loaded")
 		return null
 
 	# Hard population cap
@@ -1945,9 +1790,9 @@ func spawn_baker_at(pos: Vector2) -> Node:
 			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
 		return null
 
-	var b: Agent = scene.instantiate() as Agent
+	var b: Agent = AgentScene.instantiate() as Agent
 	if b == null:
-		push_error("Baker scene instantiate() returned non-Agent")
+		push_error("AgentScene instantiate() returned null")
 		return null
 	b.name = "Baker_%d" % next_baker_id
 	next_baker_id += 1
@@ -1960,10 +1805,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 
 	b.market = market
 	b.event_bus = event_bus
-
-	# Activate Baker role if no job exists yet (new-style Agent)
-	if b.current_job == null:
-		b.set_role("Baker")
+	b.set_role("Baker")
 
 	# Wire HungerNeed
 	var b_hunger: HungerNeed = b.get_node("HungerNeed") as HungerNeed
@@ -1989,16 +1831,11 @@ func spawn_baker_at(pos: Vector2) -> Node:
 
 	# Register
 	all_bakers.append(b)
-	if not b.is_in_group("bakers"):
-		b.add_to_group("bakers")
-	if not b.is_in_group("agents"):
-		b.add_to_group("agents")
 
 	if event_bus:
 		event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
 
-	if b.has_signal("pop_clicked"):
-		b.pop_clicked.connect(select_pop)
+	b.pop_clicked.connect(select_pop)
 
 	return b
 

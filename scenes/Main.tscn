@@ -1,10 +1,8 @@
-[gd_scene load_steps=16 format=3 uid="uid://c6qvxkw7yf1yd"]
+[gd_scene load_steps=15 format=3 uid="uid://c6qvxkw7yf1yd"]
 
 [ext_resource type="Script" uid="uid://b3hs1u0d10nyn" path="res://scripts/main.gd" id="1_abcde"]
-[ext_resource type="Script" uid="uid://dgudqpmx1nxlv" path="res://scripts/farmer.gd" id="2_farmer"]
-[ext_resource type="Script" uid="uid://c4es4stvnr225" path="res://scripts/baker.gd" id="3_baker"]
+[ext_resource type="Script" path="res://scripts/agent.gd" id="2_agent"]
 [ext_resource type="Script" uid="uid://bii8ulb1hgvyu" path="res://scripts/field_plot.gd" id="4_field"]
-[ext_resource type="Script" uid="uid://l4x615g7rjbk" path="res://scripts/household_agent.gd" id="5_household_agent"]
 [ext_resource type="Script" path="res://scripts/components/wallet.gd" id="6_wallet"]
 [ext_resource type="Script" path="res://scripts/components/inventory.gd" id="7_inventory"]
 [ext_resource type="Script" path="res://scripts/components/hunger_need.gd" id="8_hunger_need"]
@@ -75,9 +73,9 @@ color = Color(0.4, 0.3, 0.1, 1)
 
 [node name="Farmer" type="CharacterBody2D" parent="."]
 position = Vector2(120, 520)
-script = ExtResource("2_farmer")
+script = ExtResource("2_agent")
 
-[node name="FarmerSprite" type="ColorRect" parent="Farmer"]
+[node name="AgentSprite" type="ColorRect" parent="Farmer"]
 offset_left = -10.0
 offset_top = -10.0
 offset_right = 10.0
@@ -113,9 +111,9 @@ script = ExtResource("15_food_reserve")
 
 [node name="Baker" type="CharacterBody2D" parent="."]
 position = Vector2(350, 450)
-script = ExtResource("3_baker")
+script = ExtResource("2_agent")
 
-[node name="BakerSprite" type="ColorRect" parent="Baker"]
+[node name="AgentSprite" type="ColorRect" parent="Baker"]
 offset_left = -10.0
 offset_top = -10.0
 offset_right = 10.0
@@ -167,9 +165,9 @@ color = Color(0.8, 0.2, 0.8, 1)
 
 [node name="HouseholdAgent" type="CharacterBody2D" parent="."]
 position = Vector2(177, 288)
-script = ExtResource("5_household_agent")
+script = ExtResource("2_agent")
 
-[node name="HouseholdSprite" type="ColorRect" parent="HouseholdAgent"]
+[node name="AgentSprite" type="ColorRect" parent="HouseholdAgent"]
 offset_left = -10.0
 offset_top = -12.0
 offset_right = 10.0

@@ -116,7 +116,11 @@ func set_tick(t: int) -> void:
 	_check_idle_and_pause_guard()
 
 
+const STARTING_CASH: float = 500.0
+
 func activate() -> void:
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"wheat": 0, "flour": 0, "bread": 5}
 	prod = agent.get_node_or_null("ProductionBatch") as ProductionBatch
@@ -229,8 +233,11 @@ func perform_market_transactions() -> void:
 					var _cf_wbuy_snap: float = agent.get_cash()
 					var _bw: int = market.sell_wheat_to_baker(agent, adjusted_target)
 					agent.cashflow_today_expense += max(0.0, _cf_wbuy_snap - agent.get_cash())
+					var wtr: Dictionary = market.last_trade_result
 					if _bw > 0:
-						agent.log_event("Bought %d wheat" % _bw)
+						agent.log_event("Bought %d wheat @$%.2f (%s)" % [_bw, wtr.get("price", 0.0), wtr.get("reason", "?")])
+					elif adjusted_target > 0:
+						agent.log_event("Wheat buy FAILED: wanted=%d, reason=%s" % [adjusted_target, wtr.get("reason", "unknown")])
 				phase = Phase.PRODUCE
 				agent.pending_target = bakery_location
 				route.wait(WAIT_TIME)
@@ -267,8 +274,11 @@ func perform_market_transactions() -> void:
 				var _cf_bsale_snap: float = agent.get_cash()
 				var _bs: int = market.buy_bread_from_agent(agent, sellable, min_price)
 				agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_bsale_snap)
+				var btr: Dictionary = market.last_trade_result
 				if _bs > 0:
-					agent.log_event("Sold %d bread" % _bs)
+					agent.log_event("Sold %d bread @$%.2f (%s)" % [_bs, btr.get("price", 0.0), btr.get("reason", "?")])
+				else:
+					agent.log_event("Bread sale FAILED: offered=%d, reason=%s" % [sellable, btr.get("reason", "unknown")])
 			var current_wheat: int = inv.get_qty("wheat")
 			if current_wheat < WHEAT_LOW_WATERMARK:
 				phase = Phase.RESTOCK

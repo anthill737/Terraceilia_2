@@ -1,6 +1,12 @@
 extends Node
 class_name Market
 
+# Structured result from the most recent buy/sell call.
+# Keys: qty (int), reason (String), item (String), price (float), market_inv (int)
+# Reason codes: "success", "partial", "blocked", "empty",
+#   "insufficient_funds", "storage_full", "walk_away", "capped", "zero_request"
+var last_trade_result: Dictionary = {}
+
 var money: float = 100000.0
 var seeds: int = 100000
 var wheat: int = 0
@@ -427,6 +433,17 @@ func get_saturation_info(good: String) -> Dictionary:
 			return {}
 
 
+func _set_result(qty: int, reason: String, item: String, price: float = 0.0) -> void:
+	last_trade_result = {
+		"qty": qty,
+		"reason": reason,
+		"item": item,
+		"price": price,
+		"market_wheat": wheat,
+		"market_bread": bread,
+	}
+
+
 func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Micro-fill buying: purchase wheat 1 unit at a time, recomputing bid after each unit.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
@@ -436,6 +453,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	if not is_survival and not can_producer_sell("wheat"):
 		if event_bus:
 			event_bus.log("Tick %d: %s wheat sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(farmer)])
+		_set_result(0, "blocked", "wheat", wheat_price)
 		return 0
 	
 	var farmer_inv: Inventory = get_inv(farmer)
@@ -443,6 +461,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	var farmer_wheat: int = farmer_inv.get_qty("wheat")
 	
 	if farmer_wheat <= 0:
+		_set_result(0, "empty", "wheat", wheat_price)
 		return 0
 	
 	# Check available storage space
@@ -450,6 +469,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	if available_space <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to sell %d wheat, but market wheat storage FULL (%d/%d)" % [current_tick, _agent_label(farmer), farmer_wheat, wheat, wheat_capacity])
+		_set_result(0, "storage_full", "wheat", wheat_price)
 		return 0
 	
 	# Determine max units to process this trade (performance cap)
@@ -464,20 +484,16 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
-		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("wheat")
 		final_bid = current_bid
 		
-		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
 			break
 		
-		# Check if market can afford this unit
 		if money < current_bid:
 			break
 		
-		# Buy 1 unit
 		farmer_inv.remove("wheat", 1)
 		farmer_wallet.credit(current_bid)
 		wheat += 1
@@ -485,29 +501,30 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 		total_paid += current_bid
 		units_bought += 1
 	
-	# Check if capped by performance limit
 	if units_bought == max_units and units_bought < farmer_wheat:
 		stopped_by_cap = true
 	
-	# Track flow for pricing
 	wheat_sold_today += units_bought
 	
-	# PART 3: Track clearing prices ONLY for valid market-directed trades
-	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
 	var upper_band_wheat: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (wheat - units_bought) < upper_band_wheat
 	if units_bought > 0 and should_update_clearing:
 		wheat_total_cleared += units_bought
 		wheat_total_value += total_paid
 	
-	# Summary log
+	var avg_price: float = total_paid / float(max(units_bought, 1))
+	var reason: String = "success"
+	if units_bought == 0:
+		reason = "insufficient_funds"
+	elif stopped_by_price:
+		reason = "walk_away"
+	elif stopped_by_cap:
+		reason = "capped"
+	elif units_bought < farmer_wheat:
+		reason = "partial"
+	_set_result(units_bought, reason, "wheat", avg_price)
+	
 	if event_bus and units_bought > 0:
-		var avg_price: float = total_paid / float(units_bought)
-		var reason: String = "complete"
-		if stopped_by_price:
-			reason = "walk-away"
-		elif stopped_by_cap:
-			reason = "capped"
 		event_bus.log("Tick %d: %s wheat sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(farmer), farmer_wheat, units_bought, avg_price, initial_bid, final_bid, reason])
 	
 	return units_bought
@@ -537,45 +554,44 @@ func sell_seeds_to_farmer(farmer: Agent) -> void:
 
 func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	if requested <= 0:
+		_set_result(0, "zero_request", "wheat", wheat_price)
 		return 0
 	
-	# Track demand
 	wheat_requested_today += requested
 	
-	# Check if market has no wheat
 	if wheat == 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
+		_set_result(0, "empty", "wheat", wheat_price)
 		return 0
 	
 	var baker_wallet: Wallet = get_wallet(baker)
 	var baker_inv: Inventory = get_inv(baker)
-	
-	# Determine how much baker can afford
 	var max_affordable: int = int(floor(baker_wallet.money / wheat_price))
 	
-	# Check if baker cannot afford any
 	if max_affordable == 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to buy wheat, but cannot afford any at $%.2f (money=$%.2f)." % [current_tick, _agent_label(baker), wheat_price, baker_wallet.money])
+		_set_result(0, "insufficient_funds", "wheat", wheat_price)
 		return 0
 	
-	# Determine how much wheat is available
 	var before_market_wheat: int = wheat
 	var amount_sold: int = min(requested, wheat)
 	amount_sold = min(amount_sold, max_affordable)
 	
 	if amount_sold <= 0:
+		_set_result(0, "insufficient_funds", "wheat", wheat_price)
 		return 0
 	
-	# Perform transaction
 	var cost: float = amount_sold * wheat_price
 	baker_wallet.debit(cost)
 	money += cost
 	baker_inv.add("wheat", amount_sold)
 	wheat -= amount_sold
 	
-	# Log success or partial fulfillment
+	var reason: String = "success" if amount_sold >= requested else "partial"
+	_set_result(amount_sold, reason, "wheat", wheat_price)
+	
 	if event_bus:
 		if amount_sold < requested:
 			event_bus.log("Tick %d: %s requested %d wheat; bought %d (market wheat=%d, affordable=%d)." % [current_tick, _agent_label(baker), requested, amount_sold, before_market_wheat, max_affordable])
@@ -590,10 +606,10 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
 	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if bread selling is allowed (skip for survival purchases)
 	if not is_survival and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(baker)])
+		_set_result(0, "blocked", "bread", bread_price)
 		return 0
 	
 	var baker_inv: Inventory = get_inv(baker)
@@ -601,19 +617,17 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	var baker_bread: int = baker_inv.get_qty("bread")
 	
 	if baker_bread <= 0:
+		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
-	# Check available storage space
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(baker), baker_bread, bread, bread_capacity])
+		_set_result(0, "storage_full", "bread", bread_price)
 		return 0
 	
-	# Determine max units to process this trade (performance cap)
 	var max_units: int = min(baker_bread, available_space, MAX_MICROFILL_UNITS_PER_TRADE)
-	
-	# Micro-fill loop: buy 1 unit at a time
 	var units_bought: int = 0
 	var total_paid: float = 0.0
 	var initial_bid: float = get_bid_price("bread")
@@ -622,20 +636,13 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
-		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("bread")
 		final_bid = current_bid
-		
-		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
 			break
-		
-		# Check if market can afford this unit
 		if money < current_bid:
 			break
-		
-		# Buy 1 unit
 		baker_inv.remove("bread", 1)
 		baker_wallet.credit(current_bid)
 		bread += 1
@@ -643,29 +650,30 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 		total_paid += current_bid
 		units_bought += 1
 	
-	# Check if capped by performance limit
 	if units_bought == max_units and units_bought < baker_bread:
 		stopped_by_cap = true
 	
-	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# PART 3: Track clearing prices ONLY for valid market-directed trades
-	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
 	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
 	if units_bought > 0 and should_update_clearing:
 		bread_total_cleared += units_bought
 		bread_total_value += total_paid
 	
-	# Summary log
+	var avg_price: float = total_paid / float(max(units_bought, 1))
+	var reason: String = "success"
+	if units_bought == 0:
+		reason = "insufficient_funds"
+	elif stopped_by_price:
+		reason = "walk_away"
+	elif stopped_by_cap:
+		reason = "capped"
+	elif units_bought < baker_bread:
+		reason = "partial"
+	_set_result(units_bought, reason, "bread", avg_price)
+	
 	if event_bus and units_bought > 0:
-		var avg_price: float = total_paid / float(units_bought)
-		var reason: String = "complete"
-		if stopped_by_price:
-			reason = "walk-away"
-		elif stopped_by_cap:
-			reason = "capped"
 		var trade_type: String = " (SURVIVAL)" if is_survival else ""
 		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
@@ -677,14 +685,14 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
 	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if bread selling is allowed (applies to all producers, skip for survival)
-	# Note: Baker is the primary bread producer, but this gate applies generically
 	if not is_survival and agent.is_in_group("bakers") and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
+		_set_result(0, "blocked", "bread", bread_price)
 		return 0
 	
 	if amount_offered <= 0:
+		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
 	var agent_inv: Inventory = get_inv(agent)
@@ -692,19 +700,17 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	var agent_bread: int = agent_inv.get_qty("bread")
 	
 	if agent_bread <= 0:
+		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
-	# Check available storage space
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(agent), amount_offered, bread, bread_capacity])
+		_set_result(0, "storage_full", "bread", bread_price)
 		return 0
 	
-	# Determine max units to process this trade (performance cap)
 	var max_units: int = min(amount_offered, agent_bread, available_space, MAX_MICROFILL_UNITS_PER_TRADE)
-	
-	# Micro-fill loop: buy 1 unit at a time
 	var units_bought: int = 0
 	var total_paid: float = 0.0
 	var initial_bid: float = get_bid_price("bread")
@@ -713,20 +719,13 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	var stopped_by_cap: bool = false
 	
 	for i in range(max_units):
-		# Recompute bid based on current inventory
 		var current_bid: float = get_bid_price("bread")
 		final_bid = current_bid
-		
-		# Check if bid dropped below min acceptable
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
 			break
-		
-		# Check if market can afford this unit
 		if money < current_bid:
 			break
-		
-		# Buy 1 unit
 		agent_inv.remove("bread", 1)
 		agent_wallet.credit(current_bid)
 		bread += 1
@@ -734,29 +733,30 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 		total_paid += current_bid
 		units_bought += 1
 	
-	# Check if capped by performance limit
 	if units_bought == max_units and units_bought < amount_offered:
 		stopped_by_cap = true
 	
-	# Track flow for pricing
 	bread_sold_today += units_bought
 	
-	# PART 3: Track clearing prices ONLY for valid market-directed trades
-	# Exclude: (1) survival purchases, (2) trades when inventory >= upper_band
 	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
 	if units_bought > 0 and should_update_clearing:
 		bread_total_cleared += units_bought
 		bread_total_value += total_paid
 	
-	# Summary log
+	var avg_price: float = total_paid / float(max(units_bought, 1))
+	var reason: String = "success"
+	if units_bought == 0:
+		reason = "insufficient_funds"
+	elif stopped_by_price:
+		reason = "walk_away"
+	elif stopped_by_cap:
+		reason = "capped"
+	elif units_bought < amount_offered:
+		reason = "partial"
+	_set_result(units_bought, reason, "bread", avg_price)
+	
 	if event_bus and units_bought > 0:
-		var avg_price: float = total_paid / float(units_bought)
-		var reason: String = "complete"
-		if stopped_by_price:
-			reason = "walk-away"
-		elif stopped_by_cap:
-			reason = "capped"
 		var trade_type: String = " (SURVIVAL)" if is_survival else ""
 		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
@@ -765,20 +765,18 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 
 func sell_bread_to_household(h, requested: int) -> int:
 	if requested <= 0:
+		_set_result(0, "zero_request", "bread", bread_price)
 		return 0
 	
-	# Track demand
 	bread_requested_today += requested
 	
-	# Check if market has no bread
 	if bread <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(h), requested])
+		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
 	var h_wallet: Wallet = get_wallet(h)
-	
-	# Determine how much can be sold
 	var max_by_inventory: int = min(requested, bread)
 	var max_affordable: int = int(floor(h_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
@@ -786,54 +784,47 @@ func sell_bread_to_household(h, requested: int) -> int:
 	if qty <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(h), bread_price, h_wallet.money])
+		_set_result(0, "insufficient_funds", "bread", bread_price)
 		return 0
 	
-	# Perform transaction
 	var cost: float = float(qty) * bread_price
 	h_wallet.debit(cost)
 	money += cost
 	bread -= qty
 	
+	var reason: String = "success" if qty >= requested else "partial"
+	_set_result(qty, reason, "bread", bread_price)
 	return qty
 
 
 func sell_bread_to_agent(agent, requested: int) -> int:
 	if requested <= 0:
+		_set_result(0, "zero_request", "bread", bread_price)
 		return 0
 	
-	# Track demand
 	bread_requested_today += requested
 	
-	# GUARD RAIL: Prevent producers from buying their own output UNLESS:
-	# 1. They are in survival mode (food reserve critical), OR
-	# 2. Production is profit-paused (can't produce their own food)
 	if agent.is_in_group("bakers"):
 		var can_buy_own_output: bool = false
-		
-		# Check if in survival mode
 		var food_reserve = agent.get_node_or_null("FoodReserve")
 		if food_reserve and food_reserve.is_survival_mode:
 			can_buy_own_output = true
-		
-		# Check if production is profit-paused
 		var profit_checker = agent.get_node_or_null("ProductionProfitability")
 		if profit_checker and not profit_checker.is_profitable:
 			can_buy_own_output = true
-		
 		if not can_buy_own_output:
 			if event_bus:
-				event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED - producers must not buy their output unless survival mode or production paused)" % current_tick)
+				event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED)" % current_tick)
+			_set_result(0, "blocked", "bread", bread_price)
 			return 0
 	
-	# Check if market has no bread
 	if bread <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
+		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
 	var agent_wallet: Wallet = get_wallet(agent)
-	
-	# Determine how much can be sold
 	var max_by_inventory: int = min(requested, bread)
 	var max_affordable: int = int(floor(agent_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
@@ -841,13 +832,16 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	if qty <= 0:
 		if event_bus:
 			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(agent), bread_price, agent_wallet.money])
+		_set_result(0, "insufficient_funds", "bread", bread_price)
 		return 0
 	
-	# Perform transaction
 	var cost: float = float(qty) * bread_price
 	agent_wallet.debit(cost)
 	money += cost
 	bread -= qty
+	
+	var reason: String = "success" if qty >= requested else "partial"
+	_set_result(qty, reason, "bread", bread_price)
 	
 	if event_bus and qty < requested:
 		event_bus.log("Tick %d: %s bought %d/%d bread (limited by availability or money)" % [current_tick, _agent_label(agent), qty, requested])

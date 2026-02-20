@@ -18,10 +18,11 @@ var _person_day: int = 0
 var current_role: String = ""
 var current_job: JobBase = null
 
-# -- Phase 2 component refs (created in _ready) --------------------------------
+# -- Component refs (created in _ready) -----------------------------------------
 var cashflow: CashflowTracker = null
 var skills: SkillSet = null
 var visuals: VisualIndicator = null
+var career_eval: CareerEvaluator = null
 
 # -- Cashflow forwarding (backward compat -> CashflowTracker) ------------------
 var cashflow_today_income: float:
@@ -97,8 +98,12 @@ var sprite: ColorRect = null
 # -- External references -------------------------------------------------------
 var market: Market = null
 var event_bus: EventBus = null
+var econ_stats: EconomyStatsManager = null
 var current_tick: int = 0
 var pending_target: Node2D = null
+
+# -- Career switching history (persistent across role changes) -----------------
+var last_switch_day: int = -999
 
 
 # ==============================================================================
@@ -121,6 +126,10 @@ func _ready() -> void:
 	visuals.name = "VisualIndicator"
 	add_child(visuals)
 	visuals.setup(self, hunger, wallet, _health_bar_y)
+
+	career_eval = CareerEvaluator.new()
+	career_eval.name = "CareerEvaluator"
+	add_child(career_eval)
 
 
 # ==============================================================================
@@ -177,6 +186,9 @@ func set_role(role: String) -> void:
 	if skills:
 		skills.days_in_role = 0
 
+	if _person_day > 0:
+		last_switch_day = _person_day
+
 
 # ==============================================================================
 #  Tick + physics delegation
@@ -197,6 +209,8 @@ func on_day_changed(day: int) -> void:
 	_person_day = day
 	_roll_cashflow()
 	_progress_skills(current_role)
+	if career_eval:
+		career_eval.evaluate(day, self, econ_stats)
 	if current_job:
 		current_job.on_day_changed(day)
 
@@ -235,6 +249,23 @@ func _roll_cashflow() -> void:
 func _progress_skills(role_name: String) -> void:
 	if skills:
 		skills.progress(role_name)
+
+
+# ==============================================================================
+#  Career utility forwarding (delegate to CareerEvaluator)
+# ==============================================================================
+
+var utility_farmer: float:
+	get: return career_eval.utility_farmer if career_eval else 0.0
+
+var utility_baker: float:
+	get: return career_eval.utility_baker if career_eval else 0.0
+
+var utility_current: float:
+	get: return career_eval.utility_current if career_eval else 0.0
+
+var recommended_role: String:
+	get: return career_eval.recommended_role if career_eval else ""
 
 
 # ==============================================================================
@@ -386,6 +417,11 @@ func _base_inspector_data() -> Dictionary:
 		"skill_farmer": skill_farmer,
 		"skill_baker": skill_baker,
 		"days_in_role": days_in_role,
+		"utility_farmer": utility_farmer,
+		"utility_baker": utility_baker,
+		"utility_current": utility_current,
+		"recommended_role": recommended_role,
+		"last_switch_day": last_switch_day,
 	}
 
 

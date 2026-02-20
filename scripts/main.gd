@@ -126,6 +126,10 @@ var _current_speed: float = 1.0          # Tracks sim speed for eco bar
 var _is_paused: bool = false
 var _pause_btn: Button = null
 
+# Simulation failure state
+var sim_failed: bool = false
+var _sim_fail_banner: PanelContainer = null
+
 # Pop Inspector
 var selected_pop: Node = null
 var pop_inspector_panel: Control = null
@@ -249,10 +253,13 @@ func _ready() -> void:
 	market.event_bus = bus
 	farmer.event_bus = bus
 	farmer.market = market
+	farmer.econ_stats = econ_stats
 	baker.event_bus = bus
 	baker.market = market
+	baker.econ_stats = econ_stats
 	household_agent.event_bus = bus
 	household_agent.market = market
+	household_agent.econ_stats = econ_stats
 	
 	# Wire HungerNeed components (must happen before set_role)
 	var farmer_inv: Inventory = farmer.get_node("Inventory") as Inventory
@@ -338,6 +345,8 @@ func _process(_delta: float) -> void:
 
 
 func _on_tick(tick: int) -> void:
+	if sim_failed:
+		return
 	# Update calendar
 	calendar.set_tick(tick)
 	
@@ -347,6 +356,7 @@ func _on_tick(tick: int) -> void:
 	# Update tick for all agents (dynamic tracking)
 	if market:
 		market.set_tick(tick)
+		market.check_bread_emergency(all_bakers)
 	for f in all_farmers:
 		if f and is_instance_valid(f):
 			f.set_tick(tick)
@@ -674,7 +684,7 @@ func _update_spawn_info() -> void:
 
 func _input(event: InputEvent) -> void:
 	# ── Keyboard shortcuts (run before GUI so hotkeys always work) ────────────
-	if clock != null:
+	if clock != null and not sim_failed:
 		if event.is_action_pressed("speed_up"):
 			clock.increase_speed()
 			get_viewport().set_input_as_handled()
@@ -746,6 +756,8 @@ func _on_speed_changed(new_speed: float) -> void:
 
 
 func _toggle_pause() -> void:
+	if sim_failed:
+		return
 	_is_paused = !_is_paused
 	get_tree().paused = _is_paused
 
@@ -779,6 +791,79 @@ func _toggle_pause() -> void:
 	# Update speed label
 	if sim_speed_label != null:
 		sim_speed_label.text = "PAUSED" if _is_paused else "Speed: %.1fx" % _current_speed
+
+
+func _trigger_sim_failure(day: int, tick: int) -> void:
+	sim_failed = true
+	get_tree().paused = true
+
+	var total: int = get_total_population()
+	var h_count: int = households.size()
+	var f_count: int = all_farmers.size()
+	var b_count: int = all_bakers.size()
+	var m_bread: int = market.bread if market else -1
+	var m_wheat: int = market.wheat if market else -1
+	var m_seeds: int = market.seeds if market else -1
+
+	var hyst_bread_sell: bool = not market.can_producer_sell("bread") if market else false
+	var hyst_bread_prod: bool = not market.can_producer_produce("bread") if market else false
+	var hyst_wheat_sell: bool = not market.can_producer_sell("wheat") if market else false
+	var hyst_wheat_prod: bool = not market.can_producer_produce("wheat") if market else false
+
+	var training: int = pending_conversions.size()
+
+	if event_bus:
+		event_bus.log("[SIM FAIL] Town extinct at day=%d tick=%d. Simulation paused." % [day, tick])
+		event_bus.log(
+			"[SIM FAIL SNAPSHOT] day=%d tick=%d total=%d groups(H=%d F=%d B=%d) market(bread=%d wheat=%d seeds=%d) hysteresis(bread_sell=%s bread_prod=%s wheat_sell=%s wheat_prod=%s) training=%d" % [
+				day, tick, total, h_count, f_count, b_count,
+				m_bread, m_wheat, m_seeds,
+				hyst_bread_sell, hyst_bread_prod, hyst_wheat_sell, hyst_wheat_prod,
+				training
+			])
+
+	print("[SIM FAIL] Town extinct at day=%d tick=%d. Simulation paused." % [day, tick])
+
+	_show_sim_fail_banner(day)
+
+	if _pause_btn != null:
+		_pause_btn.text = "EXTINCT"
+		_pause_btn.disabled = true
+
+
+func _show_sim_fail_banner(day: int) -> void:
+	if _sim_fail_banner != null:
+		return
+	var ui_node := get_node_or_null("UI")
+	if ui_node == null:
+		return
+
+	_sim_fail_banner = PanelContainer.new()
+	_sim_fail_banner.name = "SimStatusBanner"
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.55, 0.05, 0.05, 0.95)
+	style.border_color = Color(1.0, 0.2, 0.2, 1.0)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(12)
+	_sim_fail_banner.add_theme_stylebox_override("panel", style)
+
+	var label := Label.new()
+	label.text = "TOWN EXTINCT — Simulation paused  (day %d)" % day
+	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sim_fail_banner.add_child(label)
+
+	_sim_fail_banner.layout_mode = 1
+	_sim_fail_banner.anchors_preset = Control.PRESET_CENTER_TOP
+	_sim_fail_banner.anchor_left = 0.5
+	_sim_fail_banner.anchor_right = 0.5
+	_sim_fail_banner.anchor_top = 0.0
+	_sim_fail_banner.offset_top = 60
+	_sim_fail_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	ui_node.add_child(_sim_fail_banner)
 
 
 func _on_event_logged(msg: String) -> void:
@@ -1182,6 +1267,23 @@ func update_inspector() -> void:
 			"[color=#6688aa]Productivity: [color=%s]×%.2f[/color][/color]" %
 			[pm_col, prod_m])
 
+	# ── Career utility display ───────────────────────────────────────────────
+	var rec_role: String = d.get("recommended_role", "")
+	if rec_role != "":
+		var u_f: float = d.get("utility_farmer", 0.0)
+		var u_b: float = d.get("utility_baker", 0.0)
+		var u_c: float = d.get("utility_current", 0.0)
+		var uf_col: String = "#88ccaa" if u_f >= u_c else "#888888"
+		var ub_col: String = "#88ccaa" if u_b >= u_c else "#888888"
+		var uc_col: String = "#aaaacc"
+		lines.append(
+			"[color=#6688aa]U: [color=%s]Farmer=%.1f[/color]  [color=%s]Baker=%.1f[/color]  [color=%s]Current=%.1f[/color][/color]" %
+			[uf_col, u_f, ub_col, u_b, uc_col, u_c])
+		var rec_col: String = "#55cc88" if rec_role != d.get("role", "") else "#888888"
+		lines.append(
+			"[color=#556688]Recommended: [color=%s]%s[/color][/color]" %
+			[rec_col, rec_role])
+
 	# ── Cashflow diagnostics ─────────────────────────────────────────────────
 	var cf_income: float = d.get("cashflow_income", -1.0)
 	if cf_income >= 0.0:
@@ -1257,6 +1359,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	h.market = market
 	h.event_bus = event_bus
+	h.econ_stats = econ_stats
 	h.set_role("Household")
 
 	# Wire HungerNeed
@@ -1308,6 +1411,8 @@ func _on_household_died(agent_node: Node) -> void:
 
 ## Called once per game day when the calendar emits day_changed.
 func _on_calendar_day_changed(day: int) -> void:
+	if sim_failed:
+		return
 	# Daily village-capacity status (always visible in log to aid debugging)
 	print("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
 	print("[POP STATUS] total=%d/%d (households=%d farmers=%d bakers=%d)" % [
@@ -1332,16 +1437,9 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Aggregate global cashflow after all pop rollovers
 	_roll_global_cashflow()
 
-	# PART 4: Emergency respawn — prevent permanent dead-equilibrium.
-	# If the entire household population has been lost but the food supply chain
-	# is working, immediately bring in one new household rather than waiting for
-	# prosperity to tick up from a state it can't evaluate without any agents.
-	if households.size() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
-		if labor_market != null and labor_market.ever_had_bread_supply:
-			if event_bus:
-				event_bus.log("[SPAWN] Emergency respawn: population=0, food supply established (day=%d)" % day)
-			var emergency_pos := Vector2(randf_range(100, 700), randf_range(100, 500))
-			spawn_household_at(emergency_pos)
+	# Extinction detection — if all agents are gone, halt the simulation
+	if not sim_failed and get_total_population() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
+		_trigger_sim_failure(day, clock.tick if clock else 0)
 
 	# Process pending role conversions (decrement countdown, spawn when ready)
 	var still_pending: Array = []
@@ -1453,7 +1551,15 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	# ── NEW-STYLE in-place conversion (Agent + job components) ──────────────
 	if household is Agent and (household as Agent).current_job != null:
 		var ag: Agent = household as Agent
-		ag.log_event("Converting: Household → %s" % role.capitalize())
+		var old_role: String = ag.current_role
+		var ce = ag.get_node_or_null("CareerEvaluator")
+		var u_cur: float = ce.utility_current if ce else 0.0
+		var u_best: float = maxf(ce.utility_farmer, ce.utility_baker) if ce else 0.0
+		var margin_pct: float = 0.0
+		if u_cur != 0.0:
+			margin_pct = ((u_best / u_cur) - 1.0) * 100.0
+		ag.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
+			old_role, role.capitalize(), margin_pct, wallet_money])
 		if event_bus:
 			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
 				ag.name, role, pos.x, pos.y, wallet_money])
@@ -1721,6 +1827,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 
 	f.market = market
 	f.event_bus = event_bus
+	f.econ_stats = econ_stats
 	f.set_role("Farmer")
 
 	# Wire HungerNeed
@@ -1805,6 +1912,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 
 	b.market = market
 	b.event_bus = event_bus
+	b.econ_stats = econ_stats
 	b.set_role("Baker")
 
 	# Wire HungerNeed

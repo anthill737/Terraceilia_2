@@ -1,22 +1,31 @@
 extends Node
 class_name LaborMarket
 
-## LaborMarket: tracks EMA signals for occupational mobility and migration.
+## LaborMarket: utility-based occupational mobility and migration.
 ## Signals main.gd when agents should switch roles or leave the simulation.
 ## Operates on day_changed cadence - called once per game day from main.gd.
+## Switching decisions use per-pop expected-utility scores from CareerEvaluator.
 
 # ─── Signals ────────────────────────────────────────────────────────────────
 signal migrate_requested(agent: Node, reason: String)
 signal role_switch_requested(household: Node, new_role: String)
 
-# ─── EMA constants ──────────────────────────────────────────────────────────
-const EMA_ALPHA: float = 0.2              # Smoothing factor (higher = more reactive)
-const ROLE_SWITCH_THRESHOLD: float = 0.3  # Scarcity EMA above this triggers role switch evaluation
+# ─── EMA constants (diagnostics + spawn suppression) ────────────────────────
+const EMA_ALPHA: float = 0.2
 
 # ─── Training / cooldown constants ──────────────────────────────────────────
 const FARMER_TRAINING_DAYS: int = 2
 const BAKER_TRAINING_DAYS: int = 3
-const SWITCH_COOLDOWN_DAYS: int = 7  # Days before same household can switch again
+const SWITCH_COOLDOWN_DAYS: int = 14
+
+# ─── Utility-based switching gates ─────────────────────────────────────────
+const MIN_TENURE_DAYS: int = 14
+const EVAL_INTERVAL_DAYS: int = 7
+const IMPROVEMENT_MARGIN: float = 0.15
+const RECENT_SWITCH_MARGIN: float = 0.25
+const RECENT_SWITCH_WINDOW_DAYS: int = 30
+const SAVINGS_BUFFER_REQUIRED: float = 100.0
+const HUNGER_SAFETY_BREAD: int = 2
 
 # ─── Migration constants ──────────────────────────────────────────────────────
 const MIGRATION_NO_FOOD_DAYS: int = 4      # Consecutive days without food → migrate
@@ -143,7 +152,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 		h.consecutive_failed_food_days = 0
 		h.days_in_survival_mode = 0
-		# Fall through to role switch evaluation (EMA-driven, not streak-driven)
+		# Fall through to role switch evaluation (utility-driven)
 
 	# ── Migration check (priority over role switch) ──────────────────────────
 	if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS:
@@ -175,34 +184,67 @@ func _evaluate_household(h: Node, day: int) -> void:
 			h.days_in_survival_mode = 0
 			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 
-	# ── Role switch check (only if cooldown elapsed) ─────────────────────────
+	# ── Utility-based role switch check ──────────────────────────────────────
+	# Only evaluate on the 7-day cadence
+	if day % EVAL_INTERVAL_DAYS != 0:
+		return
+
 	if h.switch_cooldown_days > 0:
 		return
 
-	# Needs-driven triggers: scarcity OR repeated failed food trips
-	var food_stress: bool = (h.consecutive_failed_food_days >= 2 or h.days_in_survival_mode >= 2)
-
-	var want_farm: bool = (wheat_scarcity_ema >= ROLE_SWITCH_THRESHOLD or
-		(food_stress and farmer_profit_ema >= baker_profit_ema))
-	var want_bake: bool = (bread_scarcity_ema >= ROLE_SWITCH_THRESHOLD or
-		(food_stress and baker_profit_ema >= farmer_profit_ema))
-
-	# No switch needed
-	if not want_farm and not want_bake:
+	# Gate: minimum tenure in current role
+	if h.days_in_role < MIN_TENURE_DAYS:
 		return
 
-	# Tie-break: pick the scarcer good's producer
-	var new_role: String
-	if want_farm and want_bake:
-		new_role = "farmer" if wheat_scarcity_ema >= bread_scarcity_ema else "baker"
-	elif want_farm:
-		new_role = "farmer"
-	else:
-		new_role = "baker"
+	# Gate: not starving and has minimum food buffer
+	var h_hunger = h.get_node_or_null("HungerNeed")
+	if h_hunger and h_hunger.is_starving:
+		return
+	var h_inv = h.get_node_or_null("Inventory")
+	if h_inv and h_inv.get_qty("bread") < HUNGER_SAFETY_BREAD:
+		return
 
+	# Gate: savings buffer
+	var cash: float = h.get_cash() if h.has_method("get_cash") else 0.0
+	if cash < SAVINGS_BUFFER_REQUIRED:
+		return
+
+	# Read utility scores from agent's CareerEvaluator
+	var ce = h.get_node_or_null("CareerEvaluator")
+	if ce == null:
+		return
+	var u_farmer: float = ce.utility_farmer
+	var u_baker: float = ce.utility_baker
+	var u_current: float = ce.utility_current
+
+	# Determine best alternative
+	var best_u: float = maxf(u_farmer, u_baker)
+	var best_role: String = "Farmer" if u_farmer >= u_baker else "Baker"
+
+	# Skip if the best role IS the current role
+	if best_role == h.current_role:
+		return
+
+	# Gate: improvement margin (higher if recently switched)
+	var margin: float = IMPROVEMENT_MARGIN
+	var last_sw: int = h.last_switch_day if h.get("last_switch_day") != null else -999
+	if last_sw >= 0 and (day - last_sw) < RECENT_SWITCH_WINDOW_DAYS:
+		margin = RECENT_SWITCH_MARGIN
+
+	if u_current == 0.0:
+		if best_u <= 0.0:
+			return
+	elif best_u < u_current * (1.0 + margin):
+		return
+
+	# All gates passed — request switch
+	var new_role: String = best_role.to_lower()
 	if event_bus:
-		event_bus.log("[LaborMkt] %s → switching to %s (bread_scar=%.2f wheat_scar=%.2f)" % [
-			h.name, new_role, bread_scarcity_ema, wheat_scarcity_ema])
+		event_bus.log("[LaborMkt] %s → utility switch to %s (Uc=%.2f Ub=%.2f margin=%.0f%% cash=$%.0f)" % [
+			h.name, new_role, u_current, best_u, margin * 100.0, cash])
+	if h.has_method("log_event"):
+		h.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
+			h.current_role, best_role, margin * 100.0, cash])
 	role_switch_requested.emit(h, new_role)
 	h.switch_cooldown_days = SWITCH_COOLDOWN_DAYS
 

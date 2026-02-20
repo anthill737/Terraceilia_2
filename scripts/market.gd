@@ -140,6 +140,12 @@ var producer_hysteresis_state: Dictionary = {
 	}
 }
 
+# ─── Bread emergency liquidity override ──────────────────────────────────────
+const BREAD_EMERGENCY_INV: int = 0
+const BREAD_EMERGENCY_MAX_SELL: int = 6
+const BREAD_EMERGENCY_COOLDOWN_TICKS: int = 10
+var bread_emergency_cooldown_remaining: int = 0
+
 var event_bus: EventBus = null
 var current_tick: int = 0
 
@@ -184,6 +190,10 @@ func set_tick(t: int) -> void:
 			BAND_LOWER_BID_MULTIPLIER
 		])
 	
+	# Tick down bread emergency cooldown
+	if bread_emergency_cooldown_remaining > 0:
+		bread_emergency_cooldown_remaining -= 1
+
 	# Enforce price floors and ceilings
 	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
 	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
@@ -680,12 +690,13 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	return units_bought
 
 
-func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
+func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0, is_survival: bool = false, is_emergency: bool = false) -> int:
 	"""Buy a specific amount of bread from any agent using micro-fill approach.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
-	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
+	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats.
+	is_emergency: If true, bypasses producer sell hysteresis (bread emergency override)."""
 	
-	if not is_survival and agent.is_in_group("bakers") and not can_producer_sell("bread"):
+	if not is_survival and not is_emergency and agent.is_in_group("bakers") and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
 		_set_result(0, "blocked", "bread", bread_price)
@@ -897,6 +908,10 @@ func on_day_changed(day: int) -> void:
 		var bread_upper: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, bread_upper])
 	
+	# Daily bread status diagnostic
+	if event_bus:
+		event_bus.log("[BREAD STATUS] day=%d inv=%d emergency_cd=%d" % [day, bread, bread_emergency_cooldown_remaining])
+
 	# Reset daily flow counters
 	wheat_sold_today = 0
 	wheat_requested_today = 0
@@ -1225,3 +1240,112 @@ func _adjust_bread_price(day: int) -> void:
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				old_price, bread_price, update_reason
 			])
+
+
+# ==============================================================================
+#  BREAD EMERGENCY LIQUIDITY OVERRIDE
+# ==============================================================================
+
+func check_bread_emergency(bakers: Array) -> void:
+	if bread > BREAD_EMERGENCY_INV:
+		return
+	if bread_emergency_cooldown_remaining > 0:
+		return
+
+	if event_bus:
+		event_bus.log("[EMERGENCY] Bread market empty (inv=%d) -> attempting emergency supply injection" % bread)
+
+	var supplier = _find_emergency_bread_supplier(bakers)
+	if supplier == null:
+		if event_bus:
+			event_bus.log("[EMERGENCY] Bread empty but no supplier found (no baker inventory/inputs)")
+		return
+
+	var supplier_inv: Inventory = get_inv(supplier)
+	var supplier_bread: int = supplier_inv.get_qty("bread")
+
+	if supplier_bread > 0:
+		_emergency_inject_bread(supplier, supplier_inv, supplier_bread)
+	else:
+		_emergency_set_priority(supplier, supplier_inv)
+
+	bread_emergency_cooldown_remaining = BREAD_EMERGENCY_COOLDOWN_TICKS
+
+
+func _find_emergency_bread_supplier(bakers: Array) -> Node:
+	var best_bread_supplier = null
+	var best_bread_qty: int = 0
+	var flour_supplier = null
+	var wheat_supplier = null
+
+	for b in bakers:
+		if not (b and is_instance_valid(b)):
+			continue
+		var b_inv: Inventory = get_inv(b)
+		if b_inv == null:
+			continue
+		var b_bread: int = b_inv.get_qty("bread")
+		if b_bread > best_bread_qty:
+			best_bread_qty = b_bread
+			best_bread_supplier = b
+		if flour_supplier == null and b_inv.get_qty("flour") > 0:
+			flour_supplier = b
+		if wheat_supplier == null and b_inv.get_qty("wheat") > 0:
+			wheat_supplier = b
+
+	if best_bread_supplier != null:
+		return best_bread_supplier
+	if flour_supplier != null:
+		return flour_supplier
+	if wheat_supplier != null:
+		return wheat_supplier
+	return null
+
+
+func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: int) -> void:
+	var sell_qty: int = mini(supplier_bread, BREAD_EMERGENCY_MAX_SELL)
+	var inv_before: int = bread
+	var total_paid: float = 0.0
+
+	for i in range(sell_qty):
+		if supplier_inv.get_qty("bread") <= 0:
+			sell_qty = i
+			break
+		var bid: float = get_bid_price("bread")
+		if money < bid:
+			sell_qty = i
+			break
+		supplier_inv.remove("bread", 1)
+		var supplier_wallet: Wallet = get_wallet(supplier)
+		if supplier_wallet:
+			supplier_wallet.credit(bid)
+		bread += 1
+		money -= bid
+		total_paid += bid
+
+	if sell_qty > 0 and event_bus:
+		event_bus.log("[EMERGENCY] Injected bread: supplier=%s qty=%d market_inv_before=%d market_inv_after=%d bypassed=true price_paid=$%.2f" % [
+			_agent_label(supplier), sell_qty, inv_before, bread, total_paid])
+
+
+func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
+	var job = supplier.get("current_job")
+	if job == null:
+		return
+
+	var flour: int = supplier_inv.get_qty("flour")
+	var wheat: int = supplier_inv.get_qty("wheat")
+	var action: String = ""
+
+	if flour > 0:
+		job.set("emergency_bake_next", true)
+		job.set("emergency_sell_next", true)
+		action = "bake+sell_next"
+	elif wheat > 0:
+		job.set("emergency_grind_next", true)
+		job.set("emergency_sell_next", true)
+		action = "grind+sell_next"
+
+	if action != "" and event_bus:
+		event_bus.log("[EMERGENCY] Bread empty: supplier=%s had no bread; set priority action=%s (flour=%d wheat=%d)" % [
+			_agent_label(supplier), action, flour, wheat])

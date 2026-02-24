@@ -19,8 +19,12 @@ func get_total_population() -> int:
 	return households.size() + all_farmers.size() + all_bakers.size()
 
 
+func count() -> int:
+	return get_total_population()
+
+
 func is_at_pop_cap() -> bool:
-	return get_total_population() >= MAX_TOTAL_POP
+	return count() >= MAX_TOTAL_POP
 
 
 func new_person_id() -> int:

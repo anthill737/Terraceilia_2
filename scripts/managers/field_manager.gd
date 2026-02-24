@@ -61,10 +61,13 @@ func assign_field(field_node: Node2D, new_farmer) -> void:
 
 
 func release_fields_for_agent(agent: Node) -> void:
+	# Step 1: Remove all fields from registry
 	for fn in all_field_nodes:
 		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == agent:
 			field_assignment_map[fn] = null
-			agent.remove_field(fn)
+	# Step 2: Bulk-clear farmer's field references (no per-field rebuild)
+	if agent.has_method("clear_fields_for_removal"):
+		agent.clear_fields_for_removal()
 
 
 func get_status_text() -> String:

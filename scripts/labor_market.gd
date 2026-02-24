@@ -274,9 +274,8 @@ func _evaluate_household(h: Node, day: int) -> void:
 	switches_today += 1
 	reason_utility_today += 1
 
-	var decision_line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility details=bread_s=%.2f wheat_s=%.2f U_F=%.2f U_B=%.2f U_cur=%.2f margin=%.0f%%" % [
-		day, pop_id, h.current_role, best_role,
-		bread_scarcity_ema, wheat_scarcity_ema,
+	var decision_line: String = "[CAREER DECISION] pop=%s from=%s to=%s reason=utility day=%d U_F=%.2f U_B=%.2f U_cur=%.2f margin=%.0f%%" % [
+		pop_id, h.current_role, best_role, day,
 		u_farmer, u_baker, u_current, margin * 100.0]
 	print(decision_line)
 	if event_bus:
@@ -324,8 +323,8 @@ func should_suppress_spawn() -> bool:
 
 func _log_career_blocked(day: int, pop_id: String, desired_role: String, block: String, detail_val: int, h: Node) -> void:
 	blocked_today += 1
-	var line: String = "[CAREER BLOCKED] day=%d pop=%s desired=%s block=%s val=%d" % [
-		day, pop_id, desired_role, block, detail_val]
+	var line: String = "[CAREER BLOCKED] pop=%s desired=%s block=%s day=%d val=%d" % [
+		pop_id, desired_role, block, day, detail_val]
 	print(line)
 	if event_bus:
 		event_bus.log(line)

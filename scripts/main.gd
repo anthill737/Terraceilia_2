@@ -870,10 +870,13 @@ func _trigger_sim_failure(day: int, tick: int) -> void:
 	sim_failed = true
 	get_tree().paused = true
 
-	var total: int = get_total_population()
-	var h_count: int = households.size()
-	var f_count: int = all_farmers.size()
-	var b_count: int = all_bakers.size()
+	var fail_line: String = "[SIM FAIL] Town extinct day=%d tick=%d" % [day, tick]
+	print(fail_line)
+	if event_bus:
+		event_bus.log(fail_line)
+
+	log_population_snapshot()
+
 	var m_bread: int = market.bread if market else -1
 	var m_wheat: int = market.wheat if market else -1
 	var m_seeds: int = market.seeds if market else -1
@@ -886,16 +889,13 @@ func _trigger_sim_failure(day: int, tick: int) -> void:
 	var training: int = pending_conversions.size()
 
 	if event_bus:
-		event_bus.log("[SIM FAIL] Town extinct at day=%d tick=%d. Simulation paused." % [day, tick])
 		event_bus.log(
-			"[SIM FAIL SNAPSHOT] day=%d tick=%d total=%d groups(H=%d F=%d B=%d) market(bread=%d wheat=%d seeds=%d) hysteresis(bread_sell=%s bread_prod=%s wheat_sell=%s wheat_prod=%s) training=%d" % [
-				day, tick, total, h_count, f_count, b_count,
+			"[SIM FAIL SNAPSHOT] day=%d tick=%d total=%d market(bread=%d wheat=%d seeds=%d) hysteresis(bread_sell=%s bread_prod=%s wheat_sell=%s wheat_prod=%s) training=%d" % [
+				day, tick, pop_mgr.count(),
 				m_bread, m_wheat, m_seeds,
 				hyst_bread_sell, hyst_bread_prod, hyst_wheat_sell, hyst_wheat_prod,
 				training
 			])
-
-	print("[SIM FAIL] Town extinct at day=%d tick=%d. Simulation paused." % [day, tick])
 
 	_show_sim_fail_banner(day)
 
@@ -1210,7 +1210,17 @@ func _update_eco_bar() -> void:
 
 
 func get_total_population() -> int:
-	return pop_mgr.get_total_population()
+	return pop_mgr.count()
+
+
+func log_population_snapshot() -> void:
+	var h: int = get_tree().get_nodes_in_group("households").size()
+	var f: int = get_tree().get_nodes_in_group("farmers").size()
+	var b: int = get_tree().get_nodes_in_group("bakers").size()
+	var line: String = "[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [h, f, b, pop_mgr.count()]
+	print(line)
+	if event_bus:
+		event_bus.log(line)
 
 
 # ============================================================================
@@ -1523,7 +1533,7 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Daily village-capacity status (always visible in log to aid debugging)
 	print("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
 	print("[POP STATUS] total=%d/%d (households=%d farmers=%d bakers=%d)" % [
-		get_total_population(), MAX_TOTAL_POP,
+		pop_mgr.count(), MAX_TOTAL_POP,
 		households.size(), all_farmers.size(), all_bakers.size()])
 	
 	# Update labor market EMA signals
@@ -1544,8 +1554,8 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Aggregate global cashflow after all pop rollovers
 	_roll_global_cashflow()
 
-	# Extinction detection — if all agents are gone, halt the simulation
-	if not sim_failed and get_total_population() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
+	# Extinction detection — PopulationManager.count() is the ONLY authority
+	if not sim_failed and pop_mgr.count() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
 		_trigger_sim_failure(day, clock.tick if clock else 0)
 
 	# Process pending role conversions (decrement countdown, spawn when ready)
@@ -1583,11 +1593,13 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	var f_idx := all_farmers.find(agent)
 	if f_idx != -1:
 		all_farmers.remove_at(f_idx)
-		# Release all assigned fields back to unassigned pool
+		# Step 1: Remove fields from registry
 		for fn in all_field_nodes:
 			if is_instance_valid(fn) and field_assignment_map.get(fn, null) == agent:
 				field_assignment_map[fn] = null
-				agent.remove_field(fn)
+		# Step 2: Bulk-clear farmer's field references (no per-field rebuild)
+		if agent.has_method("clear_fields_for_removal"):
+			agent.clear_fields_for_removal()
 	
 	# Remove from bakers if it's a baker
 	var b_idx := all_bakers.find(agent)

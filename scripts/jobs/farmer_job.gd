@@ -121,10 +121,6 @@ func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
 
 
 func _rebuild_route() -> void:
-	if fields.size() == 0 and _initialized:
-		print("[ERROR] Farmer %s lost all fields — economic dead zone" % get_display_name())
-		if event_bus:
-			event_bus.log("[ERROR] Farmer %s lost all fields" % get_display_name())
 	route_targets.clear()
 	if house_node:
 		route_targets.append(house_node)
@@ -161,6 +157,11 @@ func remove_field(field_node: Node2D) -> void:
 		_rebuild_route()
 		if event_bus:
 			event_bus.log("%s: Field removed (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
+
+
+func clear_fields_for_removal() -> void:
+	fields.clear()
+	field_nodes.clear()
 
 
 func get_field_count() -> int:

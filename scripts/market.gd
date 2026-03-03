@@ -1256,10 +1256,14 @@ func check_bread_emergency(bakers: Array) -> void:
 	if bread_emergency_cooldown_remaining > 0:
 		return
 
+	var detect_line: String = "[BREAD EMPTY DETECTED] day=%d tick=%d inv=0" % [current_day, current_tick]
+	print(detect_line)
+	if event_bus:
+		event_bus.log(detect_line)
+
 	var supplier = _find_emergency_bread_supplier(bakers)
 	if supplier == null:
-		var skip_line: String = "[EMERGENCY] Bread empty override SKIPPED (no supplier) day=%d tick=%d inv=0" % [
-			current_day, current_tick]
+		var skip_line: String = "[EMERGENCY SKIPPED] no supplier found day=%d tick=%d" % [current_day, current_tick]
 		print(skip_line)
 		if event_bus:
 			event_bus.log(skip_line)
@@ -1328,8 +1332,8 @@ func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: 
 		money -= bid
 		total_paid += bid
 
-	var trigger_line: String = "[EMERGENCY] Bread empty override TRIGGERED day=%d tick=%d inv=0 supplier=%s qty=%d bypass_sell_block=true cd=%d" % [
-		current_day, current_tick, _agent_label(supplier), sell_qty, BREAD_EMERGENCY_COOLDOWN_TICKS]
+	var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=%d bypassed=true day=%d tick=%d cd=%d" % [
+		_agent_label(supplier), sell_qty, current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS]
 	print(trigger_line)
 	if event_bus:
 		event_bus.log(trigger_line)
@@ -1354,8 +1358,8 @@ func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
 		action = "grind+sell_next"
 
 	if action != "":
-		var trigger_line: String = "[EMERGENCY] Bread empty override TRIGGERED day=%d tick=%d inv=0 supplier=%s qty=0 bypass_sell_block=false cd=%d priority=%s" % [
-			current_day, current_tick, _agent_label(supplier), BREAD_EMERGENCY_COOLDOWN_TICKS, action]
+		var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=0 bypassed=false day=%d tick=%d cd=%d priority=%s" % [
+			_agent_label(supplier), current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS, action]
 		print(trigger_line)
 		if event_bus:
 			event_bus.log(trigger_line)

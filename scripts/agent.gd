@@ -281,33 +281,19 @@ func _log_career_eval(day: int) -> void:
 	last_career_eval = career_eval.get_eval_summary(self, scar_b, scar_w)
 	var ce = career_eval
 	var pop_id: String = person_name if person_name != "" else name
+	var profit_f: float = ce.last_income_farmer * ce.last_sf_farmer
+	var profit_b: float = ce.last_income_baker * ce.last_sf_baker
+	var line: String = "[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f skill(F=%.2f B=%.2f) profit(F=%.2f B=%.2f) U(F=%.2f B=%.2f) recommended=%s" % [
+		day, pop_id, current_role,
+		get_cash(),
+		skill_farmer, skill_baker,
+		profit_f, profit_b,
+		ce.utility_farmer, ce.utility_baker,
+		ce.recommended_role,
+	]
+	print(line)
 	if event_bus:
-		event_bus.log(
-			"[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d skill(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s scar(b=%.2f w=%.2f)" % [
-				day, pop_id, current_role,
-				get_cash(),
-				inv.get_qty("bread") if inv else 0,
-				skill_farmer, skill_baker,
-				ce.last_income_farmer * ce.last_sf_farmer,
-				ce.last_income_baker * ce.last_sf_baker,
-				ce.utility_farmer, ce.utility_baker,
-				ce.recommended_role,
-				scar_b, scar_w,
-			]
-		)
-	print(
-		"[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d skill(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s scar(b=%.2f w=%.2f)" % [
-			day, pop_id, current_role,
-			get_cash(),
-			inv.get_qty("bread") if inv else 0,
-			skill_farmer, skill_baker,
-			ce.last_income_farmer * ce.last_sf_farmer,
-			ce.last_income_baker * ce.last_sf_baker,
-			ce.utility_farmer, ce.utility_baker,
-			ce.recommended_role,
-			scar_b, scar_w,
-		]
-	)
+		event_bus.log(line)
 
 
 # ==============================================================================
@@ -427,6 +413,11 @@ func add_field(field_node: Node2D, field_plot) -> void:
 func remove_field(field_node: Node2D) -> void:
 	if current_job and current_job is FarmerJob:
 		(current_job as FarmerJob).remove_field(field_node)
+
+
+func clear_fields_for_removal() -> void:
+	if current_job and current_job is FarmerJob:
+		(current_job as FarmerJob).clear_fields_for_removal()
 
 
 func set_locations(loc1: Node2D, loc2: Node2D) -> void:

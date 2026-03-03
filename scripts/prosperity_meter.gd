@@ -184,8 +184,6 @@ func record_trade_value(_day: int, value: float) -> void:
 func _compute_wealth_health() -> float:
 	"""Compute normalized wealth health score (0-1)."""
 	if households.size() == 0:
-		# No households to measure — return neutral so empty-population doesn't
-		# permanently suppress prosperity and block respawning.
 		return 0.5
 	
 	var total_wealth: float = 0.0

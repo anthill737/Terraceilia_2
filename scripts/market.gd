@@ -1359,5 +1359,3 @@ func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
 		print(trigger_line)
 		if event_bus:
 			event_bus.log(trigger_line)
-
-

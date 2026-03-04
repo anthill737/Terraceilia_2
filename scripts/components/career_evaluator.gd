@@ -22,8 +22,8 @@ const TRAINING_DAYS: Dictionary = {
 }
 
 # ─── Scarcity bonus (pressure term, NOT selector) ───────────────────────────
-const SCARCITY_WEIGHT: float = 1.0
-const MAX_SCARCITY_BONUS: float = 1.0
+const SCARCITY_WEIGHT: float = 5.0
+const MAX_SCARCITY_BONUS: float = 10.0
 
 # ─── Forward-looking scarcity expectation (Household entrants only) ──────────
 var scarcity_expectation_weight_farmer: float = 2.0

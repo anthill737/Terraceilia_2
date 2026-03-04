@@ -81,6 +81,9 @@ var max_fields: int = 10
 
 var _initialized: bool = false
 
+# Guard: ensures [POP SNAP] prints exactly once per sim day.
+var _last_pop_snap_day: int = -1
+
 # ─── Career instrumentation counters (reset daily) ──────────────────────────
 var switches_today: int = 0
 var blocked_today: int = 0
@@ -148,7 +151,8 @@ func update_daily(day: int) -> void:
 	bread_scarcity_ema = _ema(bread_scarcity_ema, bread_scarce)
 	wheat_scarcity_ema = _ema(wheat_scarcity_ema, wheat_scarce)
 
-	# Daily macro-conditions snapshot for correlation with switching outcomes
+	# Daily population + macro-conditions snapshots
+	_emit_pop_snap(day)
 	_emit_econ_snap(day)
 
 	# Periodic diagnostic log (every 5 days)
@@ -647,6 +651,20 @@ func _emit_eval_summary(day: int) -> void:
 		print(line)
 		if event_bus:
 			event_bus.log(line)
+
+
+func _emit_pop_snap(day: int) -> void:
+	if day == _last_pop_snap_day:
+		return
+	_last_pop_snap_day = day
+	var h: int = all_households.size()
+	var f: int = all_farmers.size()
+	var b: int = all_bakers.size()
+	var t: int = h + f + b
+	var snap: String = "[POP SNAP] day=%d households=%d farmers=%d bakers=%d total=%d" % [day, h, f, b, t]
+	print(snap)
+	if event_bus:
+		event_bus.log(snap)
 
 
 func _emit_econ_snap(day: int) -> void:

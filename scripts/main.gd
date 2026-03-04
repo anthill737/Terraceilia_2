@@ -4,6 +4,7 @@ extends Node
 const _PopMgrClass = preload("res://scripts/managers/population_manager.gd")
 const _FieldMgrClass = preload("res://scripts/managers/field_manager.gd")
 const _EconStatsClass = preload("res://scripts/managers/economy_stats_manager.gd")
+const _TradeMgrClass = preload("res://scripts/managers/trade_manager.gd")
 
 var farmer: Agent = null
 var baker: Agent = null
@@ -19,6 +20,7 @@ var prosperity_meter: ProsperityMeter = null
 var pop_mgr: PopulationManager = null
 var field_mgr: FieldManager = null
 var econ_stats: EconomyStatsManager = null
+var trade_mgr = null
 
 # ── Convenience forwards → managers (keeps all existing code working) ─────────
 var MAX_FIELDS: int:
@@ -325,6 +327,8 @@ func _ready() -> void:
 	labor_market.process_mode = Node.PROCESS_MODE_PAUSABLE
 	labor_market.bind(market, bus)
 	labor_market.econ_stats = econ_stats
+	labor_market.pop_mgr = pop_mgr
+	labor_market.load_career_entry_config(economy_config)
 	labor_market.field_count_ref = field_mgr.all_field_nodes if field_mgr else []
 	labor_market.max_fields = MAX_FIELDS
 	# Share the SAME array objects so labor_market always sees current population
@@ -335,6 +339,15 @@ func _ready() -> void:
 	labor_market.migrate_requested.connect(_on_migrate_requested)
 	labor_market.role_switch_requested.connect(_on_role_switch_requested)
 	
+	# Initialize trade manager (external import/export counterparty)
+	trade_mgr = _TradeMgrClass.new()
+	trade_mgr.name = "TradeManager"
+	add_child(trade_mgr)
+	trade_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+	trade_mgr.market = market
+	trade_mgr.event_bus = bus
+	trade_mgr.load_config(economy_config)
+
 	# Assign persistent identities to the initial scene pops
 	_assign_new_identity(farmer)
 	_assign_new_identity(baker)
@@ -349,6 +362,9 @@ func _ready() -> void:
 	# Build spawn toolbar and economy HUD bar
 	_build_spawn_toolbar()
 	_build_economy_bar()
+
+	# Bootstrap: seed market with initial inventory (exactly once per new run)
+	_apply_market_seed()
 
 	# Log startup
 	bus.log("Tick 0: START")
@@ -475,6 +491,16 @@ func _load_economy_config() -> void:
 				push_error("Main: Failed to parse economy config: " + json.get_error_message())
 	else:
 		print("Main: Economy config not found at ", config_path, " - using defaults")
+
+
+func _apply_market_seed() -> void:
+	if market == null or market.market_seeded:
+		return
+	var seed_cfg: Dictionary = economy_config.get("market_seed", {})
+	var seed_wheat: int = int(seed_cfg.get("initial_market_wheat", 40))
+	var seed_bread: int = int(seed_cfg.get("initial_market_bread", 20))
+	var seed_seeds: int = int(seed_cfg.get("initial_market_seeds", 0))
+	market.seed_market(seed_wheat, seed_bread, seed_seeds)
 
 
 func _resolve_agent_scene() -> void:
@@ -1586,7 +1612,11 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Update labor market EMA signals
 	if labor_market:
 		labor_market.update_daily(day)
-	
+
+	# Run external trade (imports/exports) after price update, before agents act
+	if trade_mgr:
+		trade_mgr.on_day_changed(day)
+
 	# Propagate day change to all agents
 	for f in all_farmers:
 		if f and is_instance_valid(f):

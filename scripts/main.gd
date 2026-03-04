@@ -325,6 +325,8 @@ func _ready() -> void:
 	labor_market.process_mode = Node.PROCESS_MODE_PAUSABLE
 	labor_market.bind(market, bus)
 	labor_market.econ_stats = econ_stats
+	labor_market.pop_mgr = pop_mgr
+	labor_market.load_career_entry_config(economy_config)
 	labor_market.field_count_ref = field_mgr.all_field_nodes if field_mgr else []
 	labor_market.max_fields = MAX_FIELDS
 	# Share the SAME array objects so labor_market always sees current population

@@ -25,6 +25,10 @@ const TRAINING_DAYS: Dictionary = {
 const SCARCITY_WEIGHT: float = 1.0
 const MAX_SCARCITY_BONUS: float = 1.0
 
+# ─── Forward-looking scarcity expectation (Household entrants only) ──────────
+var scarcity_expectation_weight_farmer: float = 2.0
+var scarcity_expectation_weight_baker: float = 2.0
+
 # ─── Stored results (read by inspector / LaborMarket) ────────────────────────
 var utility_farmer: float = 0.0
 var utility_baker: float = 0.0
@@ -49,6 +53,8 @@ var last_diag_U_farmer: float = 0.0
 var last_diag_U_baker: float = 0.0
 var last_scarcity_bonus_farmer: float = 0.0
 var last_scarcity_bonus_baker: float = 0.0
+var last_household_scar_income_f: float = 0.0
+var last_household_scar_income_b: float = 0.0
 
 
 func evaluate(day: int, agent: Node, econ_stats: Node, bread_scarcity: float = 0.0, wheat_scarcity: float = 0.0) -> void:
@@ -90,6 +96,19 @@ func evaluate(day: int, agent: Node, econ_stats: Node, bread_scarcity: float = 0
 	var scar_bonus_farmer: float = minf(wheat_scarcity * SCARCITY_WEIGHT, MAX_SCARCITY_BONUS)
 	var scar_bonus_baker: float = minf(bread_scarcity * SCARCITY_WEIGHT, MAX_SCARCITY_BONUS)
 
+	# ── Expected income (income slot for U) ─────────────────────────────
+	var expected_f: float = income_farmer * sf_farmer
+	var expected_b: float = income_baker * sf_baker
+
+	# Forward-looking scarcity expectation for Household entrants only
+	last_household_scar_income_f = 0.0
+	last_household_scar_income_b = 0.0
+	if current_role == "Household":
+		last_household_scar_income_f = wheat_scarcity * scarcity_expectation_weight_farmer
+		last_household_scar_income_b = bread_scarcity * scarcity_expectation_weight_baker
+		expected_f += last_household_scar_income_f
+		expected_b += last_household_scar_income_b
+
 	# ── Store intermediates (instrumentation only) ───────────────────────
 	last_income_farmer = income_farmer
 	last_income_baker = income_baker
@@ -101,22 +120,22 @@ func evaluate(day: int, agent: Node, econ_stats: Node, bread_scarcity: float = 0
 	last_global_baker_avg = g_baker
 	last_switch_cost_farmer = _switch_cost(current_role, "Farmer", cooldown)
 	last_switch_cost_baker = _switch_cost(current_role, "Baker", cooldown)
-	last_diag_expected_farmer = g_farmer * sf_farmer
-	last_diag_expected_baker = g_baker * sf_baker
-	last_diag_U_farmer = last_diag_expected_farmer + (sk_farmer * 2.0)
-	last_diag_U_baker = last_diag_expected_baker + (sk_baker * 2.0)
+	last_diag_expected_farmer = expected_f
+	last_diag_expected_baker = expected_b
+	last_diag_U_farmer = expected_f + (sk_farmer * 2.0)
+	last_diag_U_baker = expected_b + (sk_baker * 2.0)
 	last_scarcity_bonus_farmer = scar_bonus_farmer
 	last_scarcity_bonus_baker = scar_bonus_baker
 
 	# ── Compute U for each role ──────────────────────────────────────────
 	utility_farmer = _compute_utility(
-		income_farmer * sf_farmer,
+		expected_f,
 		sk_farmer,
 		_switch_cost(current_role, "Farmer", cooldown),
 		risk if current_role != "Farmer" else 0.0
 	) + scar_bonus_farmer
 	utility_baker = _compute_utility(
-		income_baker * sf_baker,
+		expected_b,
 		sk_baker,
 		_switch_cost(current_role, "Baker", cooldown),
 		risk if current_role != "Baker" else 0.0
@@ -206,4 +225,6 @@ func get_eval_summary(agent: Node, scarcity_bread: float, scarcity_wheat: float)
 		"scarcity_wheat": scarcity_wheat,
 		"scarcity_bonus_farmer": last_scarcity_bonus_farmer,
 		"scarcity_bonus_baker": last_scarcity_bonus_baker,
+		"household_scar_income_f": last_household_scar_income_f,
+		"household_scar_income_b": last_household_scar_income_b,
 	}

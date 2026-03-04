@@ -40,6 +40,20 @@ const STARTUP_GRACE_DAYS: int = 5
 # ─── Spawn suppression ────────────────────────────────────────────────────────
 const SPAWN_SUPPRESS_SCARCITY: float = 0.5  # Suppress new household spawn above this
 
+# ─── Forward-looking scarcity expectation weights (Part A) ───────────────────
+var _scarcity_weight_farmer: float = 2.0
+var _scarcity_weight_baker: float = 2.0
+
+# ─── Anti-stampede: per-eval role quota (Part B) ─────────────────────────────
+var _quota_pct: float = 0.10
+var _quota_min: int = 1
+var _quota_max: int = 5
+var _current_quota: int = 1
+var _entries_to_farmer_today: int = 0
+var _entries_to_baker_today: int = 0
+var _blocked_quota_farmer_today: int = 0
+var _blocked_quota_baker_today: int = 0
+
 # ─── EMA state ──────────────────────────────────────────────────────────────
 var farmer_profit_ema: float = 0.0
 var baker_profit_ema: float = 0.0
@@ -61,6 +75,7 @@ var all_households: Array = []
 var market = null
 var event_bus = null
 var econ_stats = null
+var pop_mgr = null
 var field_count_ref: Array = []
 var max_fields: int = 10
 
@@ -88,6 +103,15 @@ func bind(p_market, p_event_bus) -> void:
 	market = p_market
 	event_bus = p_event_bus
 	_initialized = true
+
+
+func load_career_entry_config(cfg: Dictionary) -> void:
+	var ce_cfg: Dictionary = cfg.get("career_entry", {})
+	_scarcity_weight_farmer = float(ce_cfg.get("scarcity_expectation_weight_farmer", 2.0))
+	_scarcity_weight_baker = float(ce_cfg.get("scarcity_expectation_weight_baker", 2.0))
+	_quota_pct = float(ce_cfg.get("career_entry_quota_pct", 0.10))
+	_quota_min = int(ce_cfg.get("career_entry_quota_min", 1))
+	_quota_max = int(ce_cfg.get("career_entry_quota_max", 5))
 
 
 # ─── Main daily update ────────────────────────────────────────────────────────
@@ -181,6 +205,14 @@ func update_daily(day: int) -> void:
 func _evaluate_careers_for_all_agents(day: int) -> void:
 	_reset_eval_diag()
 
+	# Precompute quota once from PopulationManager (no per-agent scene tree scan)
+	var total_pop: int = pop_mgr.count() if pop_mgr else (all_farmers.size() + all_bakers.size() + all_households.size())
+	_current_quota = clampi(int(floor(float(total_pop) * _quota_pct)), _quota_min, _quota_max)
+	_entries_to_farmer_today = 0
+	_entries_to_baker_today = 0
+	_blocked_quota_farmer_today = 0
+	_blocked_quota_baker_today = 0
+
 	var all_agents: Array = []
 	for f in all_farmers:
 		if f and is_instance_valid(f):
@@ -196,6 +228,10 @@ func _evaluate_careers_for_all_agents(day: int) -> void:
 		var ce = agent.get_node_or_null("CareerEvaluator")
 		if ce == null:
 			continue
+
+		# Propagate scarcity expectation weights
+		ce.scarcity_expectation_weight_farmer = _scarcity_weight_farmer
+		ce.scarcity_expectation_weight_baker = _scarcity_weight_baker
 
 		# Force evaluation by resetting last_eval_day so the cadence check passes
 		ce.last_eval_day = -999
@@ -215,8 +251,8 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 	var bread: int = agent.inv.get_qty("bread") if agent.get("inv") and agent.inv else 0
 	var food_target: int = agent.food_reserve.min_reserve_units if agent.get("food_reserve") and agent.food_reserve else 3
 	var food_required: int = ceili(food_target * FOOD_BUFFER_FRACTION)
-	var profit_f: float = ce.last_income_farmer * ce.last_sf_farmer
-	var profit_b: float = ce.last_income_baker * ce.last_sf_baker
+	var profit_f: float = ce.last_diag_expected_farmer
+	var profit_b: float = ce.last_diag_expected_baker
 
 	# Determine best role and gate status for this agent
 	var best_role: String = ce.recommended_role
@@ -262,18 +298,32 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 	if agent.get("last_career_eval") != null:
 		agent.last_career_eval = ce.get_eval_summary(agent, scar_b, scar_w)
 
+	# For Household, income includes scarcity expectation
+	var log_income_f: float = ce.last_diag_expected_farmer if role == "Household" else ce.last_income_farmer
+	var log_income_b: float = ce.last_diag_expected_baker if role == "Household" else ce.last_income_baker
+
 	var line: String = "[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d/%d skill(F=%.2f B=%.2f) profit(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s allowed=%d block=%s" % [
 		day, pop_id, role, cash,
 		bread, food_target,
 		agent.skill_farmer if agent.get("skill_farmer") != null else 0.0,
 		agent.skill_baker if agent.get("skill_baker") != null else 0.0,
 		profit_f, profit_b,
-		ce.last_income_farmer, ce.last_income_baker,
+		log_income_f, log_income_b,
 		ce.utility_farmer, ce.utility_baker,
 		best_role, allowed, block]
 	print(line)
 	if event_bus:
 		event_bus.log(line)
+
+	# Emit [CAREER EXPECT] for Household agents when scarcity contributes
+	if role == "Household" and (ce.last_household_scar_income_f > 0.0 or ce.last_household_scar_income_b > 0.0):
+		var expect_line: String = "[CAREER EXPECT] day=%d pop=%s role=Household income(F=%.2f=profit*skill+%.2f*%.1f) income(B=%.2f=profit*skill+%.2f*%.1f)" % [
+			day, pop_id,
+			ce.last_diag_expected_farmer, wheat_scarcity_ema, _scarcity_weight_farmer,
+			ce.last_diag_expected_baker, bread_scarcity_ema, _scarcity_weight_baker]
+		print(expect_line)
+		if event_bus:
+			event_bus.log(expect_line)
 
 	# ── Aggregation for [CAREER EVAL SUMMARY] ────────────────────────────
 	_eval_diag.total += 1
@@ -309,6 +359,10 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 				_eval_diag.block_land_cap += 1
 			"margin", "margin_zero":
 				_eval_diag.block_margin += 1
+			"quota_farmer":
+				_eval_diag.block_quota_farmer += 1
+			"quota_baker":
+				_eval_diag.block_quota_baker += 1
 			_:
 				_eval_diag.block_other += 1
 
@@ -464,6 +518,16 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_log_career_blocked(day, pop_id, best_role, "margin", int(margin * 100.0), h)
 		return
 
+	# Gate: per-eval role quota (anti-stampede)
+	if best_role == "Farmer" and _entries_to_farmer_today >= _current_quota:
+		_blocked_quota_farmer_today += 1
+		_log_career_blocked(day, pop_id, "Farmer", "quota_farmer", _current_quota, h)
+		return
+	if best_role == "Baker" and _entries_to_baker_today >= _current_quota:
+		_blocked_quota_baker_today += 1
+		_log_career_blocked(day, pop_id, "Baker", "quota_baker", _current_quota, h)
+		return
+
 	# All gates passed — request switch
 	var new_role: String = best_role.to_lower()
 	switches_today += 1
@@ -485,6 +549,12 @@ func _evaluate_household(h: Node, day: int) -> void:
 			day, h.current_role, best_role, u_current, best_u, delta, ratio]
 	role_switch_requested.emit(h, new_role)
 	h.switch_cooldown_days = SWITCH_COOLDOWN_DAYS
+
+	# Track entry for quota enforcement
+	if best_role == "Farmer":
+		_entries_to_farmer_today += 1
+	elif best_role == "Baker":
+		_entries_to_baker_today += 1
 
 
 # ─── Producer migration evaluation ───────────────────────────────────────────
@@ -536,6 +606,8 @@ func _reset_eval_diag() -> void:
 		"block_food": 0,
 		"block_cash": 0,
 		"block_margin": 0,
+		"block_quota_farmer": 0,
+		"block_quota_baker": 0,
 		"block_other": 0,
 		"examples_blocked": [],
 		"examples_allowed": [],
@@ -544,13 +616,15 @@ func _reset_eval_diag() -> void:
 
 func _emit_eval_summary(day: int) -> void:
 	var d: Dictionary = _eval_diag
-	var summary: String = "[CAREER EVAL SUMMARY] day=%d evals=%d best(F=%d B=%d H=%d) allowed(F=%d B=%d H=%d) blocked_best(F=%d B=%d H=%d) blocked_reasons(land=%d cd=%d ten=%d food=%d cash=%d margin=%d other=%d)" % [
+	var summary: String = "[CAREER EVAL SUMMARY] day=%d evals=%d best(F=%d B=%d H=%d) allowed(F=%d B=%d H=%d) blocked_best(F=%d B=%d H=%d) blocked_reasons(land=%d cd=%d ten=%d food=%d cash=%d margin=%d other=%d) quota=%d entries(F=%d B=%d) blocked_quota(F=%d B=%d)" % [
 		day, d.total,
 		d.best_farmer, d.best_baker, d.best_stay,
 		d.allowed_farmer, d.allowed_baker, d.allowed_stay,
 		d.blocked_best_farmer, d.blocked_best_baker, d.blocked_best_stay,
 		d.block_land_cap, d.block_cooldown, d.block_tenure,
-		d.block_food, d.block_cash, d.block_margin, d.block_other]
+		d.block_food, d.block_cash, d.block_margin, d.block_other,
+		_current_quota, _entries_to_farmer_today, _entries_to_baker_today,
+		_blocked_quota_farmer_today, _blocked_quota_baker_today]
 	print(summary)
 	if event_bus:
 		event_bus.log(summary)

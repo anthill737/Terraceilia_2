@@ -454,7 +454,7 @@ func _check_eval_summary_on_eval_days(final_day: int) -> void:
 	var format_ok: bool = true
 	for day_key in summary_days:
 		var line: String = summary_days[day_key]
-		for field in ["evals=", "best(F=", "allowed(F=", "blocked_best(F=", "blocked_reasons(land="]:
+		for field in ["evals=", "best(F=", "allowed(F=", "blocked_best(F=", "blocked_reasons(land=", "quota=", "entries(F=", "blocked_quota(F="]:
 			if field not in line:
 				print("  BAD FORMAT missing '%s': %s" % [field, line])
 				format_ok = false

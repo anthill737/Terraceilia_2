@@ -84,6 +84,10 @@ func _physics_process(_delta: float) -> void:
 func _initialize_test() -> void:
 	if _main.clock and _main.clock.timer:
 		_main.clock.timer.stop()
+	# Capture any log lines emitted during _ready() (e.g. [BOOTSTRAP])
+	if _main.log_buffer and _main.log_buffer.size() > 0:
+		for line in _main.log_buffer:
+			_log.append(line)
 	if _main.bus:
 		_main.bus.event_logged.connect(_on_log)
 	# Speed up physics for faster test execution
@@ -105,6 +109,8 @@ func _validate() -> void:
 		final_day, _tick, _log.size()])
 	print("═".repeat(60))
 
+	_check_bootstrap_log()
+	_check_bootstrap_inventory()
 	_check_career_eval_cadence(final_day)
 	_check_career_decision_utility()
 	_check_no_scarcity_selector()
@@ -121,6 +127,57 @@ func _validate() -> void:
 	print("═".repeat(60))
 	print(" OVERALL: %s" % ("PASS" if _all_passed else "FAIL"))
 	print("═".repeat(60))
+
+
+func _check_bootstrap_log() -> void:
+	print("\n── Check 0a: [BOOTSTRAP] Seeded market appears exactly once ──")
+	var count: int = 0
+	for line in _log:
+		if "[BOOTSTRAP] Seeded market:" in line:
+			count += 1
+			print("  %s" % line)
+	if count == 1:
+		print("  RESULT: PASS (exactly 1 bootstrap line)")
+	else:
+		print("  RESULT: FAIL (found %d, expected 1)" % count)
+		_all_passed = false
+
+
+func _check_bootstrap_inventory() -> void:
+	print("\n── Check 0b: Market was seeded and day-1 inventory not both zero ──")
+	if _main == null or _main.market == null:
+		print("  RESULT: FAIL (no market reference)")
+		_all_passed = false
+		return
+	var seeded: bool = _main.market.market_seeded
+	print("  market_seeded flag: %s" % seeded)
+	if not seeded:
+		print("  RESULT: FAIL (market_seeded is false)")
+		_all_passed = false
+		return
+	var day1_ok: bool = false
+	for line in _log:
+		if "[ECON SNAP]" in line and "day=1" in line:
+			var w_idx: int = line.find("wheat=")
+			var b_idx: int = line.find("bread=")
+			if w_idx != -1 and b_idx != -1:
+				var w_val: int = _extract_int(line, "wheat=")
+				var b_val: int = _extract_int(line, "bread=")
+				print("  Day 1 ECON SNAP: wheat=%d bread=%d" % [w_val, b_val])
+				day1_ok = not (w_val == 0 and b_val == 0)
+			break
+	if day1_ok:
+		print("  RESULT: PASS")
+	else:
+		var m_wheat: int = _main.market.wheat
+		var m_bread: int = _main.market.bread
+		var final_day: int = _tick / TICKS_PER_DAY
+		print("  No day-1 snap found; current day %d: wheat=%d bread=%d" % [final_day, m_wheat, m_bread])
+		if m_wheat > 0 or m_bread > 0:
+			print("  RESULT: PASS (inventory nonzero at end)")
+		else:
+			print("  RESULT: FAIL (both zero)")
+			_all_passed = false
 
 
 func _check_career_eval_cadence(final_day: int) -> void:

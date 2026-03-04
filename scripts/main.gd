@@ -350,6 +350,9 @@ func _ready() -> void:
 	_build_spawn_toolbar()
 	_build_economy_bar()
 
+	# Bootstrap: seed market with initial inventory (exactly once per new run)
+	_apply_market_seed()
+
 	# Log startup
 	bus.log("Tick 0: START")
 
@@ -475,6 +478,16 @@ func _load_economy_config() -> void:
 				push_error("Main: Failed to parse economy config: " + json.get_error_message())
 	else:
 		print("Main: Economy config not found at ", config_path, " - using defaults")
+
+
+func _apply_market_seed() -> void:
+	if market == null or market.market_seeded:
+		return
+	var seed_cfg: Dictionary = economy_config.get("market_seed", {})
+	var seed_wheat: int = int(seed_cfg.get("initial_market_wheat", 40))
+	var seed_bread: int = int(seed_cfg.get("initial_market_bread", 20))
+	var seed_seeds: int = int(seed_cfg.get("initial_market_seeds", 0))
+	market.seed_market(seed_wheat, seed_bread, seed_seeds)
 
 
 func _resolve_agent_scene() -> void:

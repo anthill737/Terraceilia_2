@@ -1,4 +1,9 @@
 {
+  "market_seed": {
+    "initial_market_wheat": 40,
+    "initial_market_bread": 20,
+    "initial_market_seeds": 0
+  },
   "prosperity": {
     "enabled": true,
     "smoothing": 0.3,

@@ -146,8 +146,26 @@ const BREAD_EMERGENCY_MAX_SELL: int = 6
 const BREAD_EMERGENCY_COOLDOWN_TICKS: int = 10
 var bread_emergency_cooldown_remaining: int = 0
 
+var market_seeded: bool = false
+
 var event_bus: EventBus = null
 var current_tick: int = 0
+
+
+func seed_market(seed_wheat: int, seed_bread: int, seed_seeds: int) -> void:
+	if market_seeded:
+		return
+	market_seeded = true
+	wheat += seed_wheat
+	bread += seed_bread
+	seeds += seed_seeds
+	_update_producer_hysteresis("wheat", wheat, wheat_target)
+	_update_producer_hysteresis("bread", bread, bread_target)
+	var msg := "[BOOTSTRAP] Seeded market: wheat=%d bread=%d seeds=%d (day=0 tick=0)" % [
+		seed_wheat, seed_bread, seed_seeds]
+	print(msg)
+	if event_bus:
+		event_bus.log(msg)
 
 
 func _agent_label(agent) -> String:

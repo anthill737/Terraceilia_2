@@ -114,6 +114,8 @@ func _validate() -> void:
 	_check_no_mass_churn()
 	_check_log_format_fields()
 	_check_no_bad_pop_names()
+	_check_eval_summary_on_eval_days(final_day)
+	_check_econ_snap_daily(final_day)
 
 	print("")
 	print("═".repeat(60))
@@ -366,6 +368,79 @@ func _check_no_bad_pop_names() -> void:
 		for line in bad_lines:
 			print("    %s" % line)
 		_all_passed = false
+
+
+func _check_eval_summary_on_eval_days(final_day: int) -> void:
+	print("\n── Check 10: [CAREER EVAL SUMMARY] on 7-day cadence ──")
+	var summary_days: Dictionary = {}
+	for line in _log:
+		if "[CAREER EVAL SUMMARY]" not in line:
+			continue
+		var d: int = _extract_int(line, "day=")
+		summary_days[d] = line
+
+	var expected_days: Array[int] = []
+	var dd: int = 7
+	while dd <= final_day:
+		expected_days.append(dd)
+		dd += 7
+
+	var pass_count: int = 0
+	for ed in expected_days:
+		if summary_days.has(ed):
+			print("  Day %2d: PASS" % ed)
+			pass_count += 1
+		else:
+			print("  Day %2d: MISSING - FAIL" % ed)
+			_all_passed = false
+
+	var format_ok: bool = true
+	for day_key in summary_days:
+		var line: String = summary_days[day_key]
+		for field in ["evals=", "best(F=", "allowed(F=", "blocked_best(F=", "blocked_reasons(land="]:
+			if field not in line:
+				print("  BAD FORMAT missing '%s': %s" % [field, line])
+				format_ok = false
+				_all_passed = false
+				break
+
+	if expected_days.is_empty():
+		print("  RESULT: SKIP (no eval days reached)")
+	elif pass_count >= expected_days.size():
+		print("  RESULT: PASS (%d/%d, format=%s)" % [pass_count, expected_days.size(), "OK" if format_ok else "FAIL"])
+	else:
+		print("  RESULT: FAIL (%d/%d)" % [pass_count, expected_days.size()])
+
+
+func _check_econ_snap_daily(final_day: int) -> void:
+	print("\n── Check 11: [ECON SNAP] daily ──")
+	var snap_days: Dictionary = {}
+	for line in _log:
+		if "[ECON SNAP]" not in line:
+			continue
+		var d: int = _extract_int(line, "day=")
+		snap_days[d] = true
+
+	var expected: int = final_day
+	var found: int = snap_days.size()
+	print("  Found %d [ECON SNAP] lines (expected ~%d)" % [found, expected])
+
+	var format_ok: bool = true
+	for line in _log:
+		if "[ECON SNAP]" not in line:
+			continue
+		for field in ["pop=", "fields=", "inv(wheat=", "scar(w=", "profit(F="]:
+			if field not in line:
+				print("  BAD FORMAT missing '%s': %s" % [field, line])
+				format_ok = false
+				_all_passed = false
+				break
+		break
+
+	if found >= expected - 1:
+		print("  RESULT: PASS (format=%s)" % ("OK" if format_ok else "FAIL"))
+	else:
+		print("  RESULT: WARN (fewer than expected)")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -108,6 +108,8 @@ var last_switch_day: int = -999
 # -- Career instrumentation (diagnostic only — no behavior impact) -------------
 var last_career_eval: Dictionary = {}
 var last_career_decision: String = ""
+var last_switch_allowed: bool = false
+var last_block_reason: String = ""
 
 
 # ==============================================================================
@@ -438,6 +440,10 @@ func _base_inspector_data() -> Dictionary:
 		"gate_savings_cash": get_cash(),
 		"gate_food_bread": inv.get_qty("bread") if inv else 0,
 		"gate_food_target": food_reserve.min_reserve_units if food_reserve else 3,
+		"last_switch_allowed": last_switch_allowed,
+		"last_block_reason": last_block_reason,
+		"last_expected_income_farmer": career_eval.last_income_farmer if career_eval else 0.0,
+		"last_expected_income_baker": career_eval.last_income_baker if career_eval else 0.0,
 	}
 	if career_eval:
 		d["scarcity_bonus_farmer"] = career_eval.last_scarcity_bonus_farmer

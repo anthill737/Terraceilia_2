@@ -12,6 +12,7 @@ var all_bakers: Array = []
 
 var next_farmer_id: int = 2
 var next_baker_id: int = 2
+var next_household_id: int = 2
 var _next_person_id: int = 1
 
 

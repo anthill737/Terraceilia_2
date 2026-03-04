@@ -110,8 +110,10 @@ func _validate() -> void:
 	_check_no_scarcity_selector()
 	_check_career_blocked()
 	_check_career_summary(final_day)
+	_check_evals_count_matches()
 	_check_no_mass_churn()
 	_check_log_format_fields()
+	_check_no_bad_pop_names()
 
 	print("")
 	print("═".repeat(60))
@@ -309,7 +311,7 @@ func _check_log_format_fields() -> void:
 		if "[CAREER DECISION]" in line:
 			checked_decision += 1
 			for field in ["day=", "pop=", "from=", "to=", "reason=utility",
-						  "Uc=", "Ub=", "margin=", "cash=", "food="]:
+						  "Uc=", "Ub=", "delta=", "ratio=", "cash=", "food="]:
 				if field not in line:
 					print("  DECISION missing '%s': %s" % [field, line])
 					decision_ok = false
@@ -320,6 +322,50 @@ func _check_log_format_fields() -> void:
 		"PASS" if eval_ok else "FAIL", mini(checked_eval, 3)])
 	print("  [CAREER DECISION] format: %s (checked %d)" % [
 		"PASS" if decision_ok else "FAIL", checked_decision])
+
+
+func _check_evals_count_matches() -> void:
+	print("\n── Check 8: [CAREER SUMMARY] evals matches [CAREER EVAL] count per day ──")
+	var eval_counts: Dictionary = {}
+	var summary_evals: Dictionary = {}
+	for line in _log:
+		if "[CAREER EVAL]" in line:
+			var d: int = _extract_int(line, "day=")
+			eval_counts[d] = eval_counts.get(d, 0) + 1
+		if "[CAREER SUMMARY]" in line:
+			var d: int = _extract_int(line, "day=")
+			var e: int = _extract_int(line, "evals=")
+			summary_evals[d] = e
+
+	var mismatches: int = 0
+	for d in summary_evals:
+		var expected: int = eval_counts.get(d, 0)
+		var actual: int = summary_evals[d]
+		if actual != expected:
+			print("  Day %d: summary evals=%d but [CAREER EVAL] lines=%d MISMATCH" % [d, actual, expected])
+			mismatches += 1
+
+	if mismatches == 0:
+		print("  RESULT: PASS (all days match)")
+	else:
+		print("  RESULT: FAIL (%d mismatches)" % mismatches)
+		_all_passed = false
+
+
+func _check_no_bad_pop_names() -> void:
+	print("\n── Check 9: No @CharacterBody2D@ pop names in logs ──")
+	var bad_lines: Array[String] = []
+	for line in _log:
+		if "CharacterBody2D@" in line and "[NAME FIXUP]" not in line:
+			bad_lines.append(line)
+
+	if bad_lines.is_empty():
+		print("  RESULT: PASS (no unresolved auto-generated names)")
+	else:
+		print("  RESULT: FAIL (%d bad name references)" % bad_lines.size())
+		for line in bad_lines:
+			print("    %s" % line)
+		_all_passed = false
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

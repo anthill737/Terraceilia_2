@@ -1034,6 +1034,19 @@ func export_log() -> void:
 			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
 
 
+# ── Node-name fixup guard ────────────────────────────────────────────────────
+
+func _fixup_node_name(node: Node, role_prefix: String) -> void:
+	var n: String = node.name
+	if n.begins_with("@") or "CharacterBody2D@" in n:
+		var fixed: String = "%s_%d" % [role_prefix, pop_mgr._next_person_id]
+		var msg: String = "[NAME FIXUP] %s → %s (auto-generated name corrected)" % [n, fixed]
+		node.name = fixed
+		print(msg)
+		if event_bus:
+			event_bus.log(msg)
+
+
 # ── Identity helpers (delegate to PopulationManager) ─────────────────────────
 
 func _new_person_id() -> int:
@@ -1497,9 +1510,12 @@ func spawn_household_at(pos: Vector2) -> Node:
 		push_error("AgentScene instantiate() returned null")
 		return null
 
-	h.name = "Household_%d" % (households.size() + 1)
+	h.name = "Household_%d" % pop_mgr.next_household_id
+	pop_mgr.next_household_id += 1
 	h.global_position = pos
 	add_child(h)
+
+	_fixup_node_name(h, "Household")
 
 	await get_tree().process_frame
 
@@ -1701,15 +1717,14 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		var ce = ag.get_node_or_null("CareerEvaluator")
 		var u_cur: float = ce.utility_current if ce else 0.0
 		var u_best: float = maxf(ce.utility_farmer, ce.utility_baker) if ce else 0.0
-		var margin_pct: float = 0.0
-		if u_cur != 0.0:
-			margin_pct = ((u_best / u_cur) - 1.0) * 100.0
+		var conv_delta: float = u_best - u_cur
+		var conv_ratio: float = u_best / maxf(0.01, absf(u_cur))
 		var convert_line: String = "[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role]
 		print(convert_line)
 		if event_bus:
 			event_bus.log(convert_line)
-		ag.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
-			old_role, role.capitalize(), margin_pct, wallet_money])
+		ag.log_event("Switched: %s->%s reason=utility delta=%.2f ratio=%.2f cash=$%.0f" % [
+			old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money])
 		if event_bus:
 			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
 				ag.name, role, pos.x, pos.y, wallet_money])
@@ -1743,6 +1758,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			ag.set_role("Farmer")
 			ag.name = "Farmer_%d" % next_farmer_id
 			next_farmer_id += 1
+			_fixup_node_name(ag, "Farmer")
 
 			# Re-bind HungerNeed for new role label
 			if ag.hunger and ag.inv:
@@ -1780,6 +1796,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			ag.set_role("Baker")
 			ag.name = "Baker_%d" % next_baker_id
 			next_baker_id += 1
+			_fixup_node_name(ag, "Baker")
 
 			if ag.hunger and ag.inv:
 				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
@@ -1971,6 +1988,8 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	f.global_position = pos
 	add_child(f)
 
+	_fixup_node_name(f, "Farmer")
+
 	await get_tree().process_frame
 
 	_assign_new_identity(f)
@@ -2055,6 +2074,8 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	next_baker_id += 1
 	b.global_position = pos
 	add_child(b)
+
+	_fixup_node_name(b, "Baker")
 
 	await get_tree().process_frame
 

@@ -139,6 +139,26 @@ func update_daily(day: int) -> void:
 	_evaluate_producer_migration(day)
 
 	# ── Daily career summary (instrumentation only) ──────────────────────
+	# Sanity: on eval days evals_today must equal # of [CAREER EVAL] lines emitted
+	var expected_eval_agents: int = 0
+	if day % EVAL_INTERVAL_DAYS == 0:
+		for a in all_farmers:
+			if a and is_instance_valid(a) and a.get_node_or_null("CareerEvaluator") != null:
+				expected_eval_agents += 1
+		for a in all_bakers:
+			if a and is_instance_valid(a) and a.get_node_or_null("CareerEvaluator") != null:
+				expected_eval_agents += 1
+		for a in all_households:
+			if a and is_instance_valid(a) and a.get_node_or_null("CareerEvaluator") != null:
+				expected_eval_agents += 1
+		if evals_today < expected_eval_agents:
+			var warn: String = "[CAREER WARN] day=%d evals_today=%d < expected=%d — counter/emit mismatch" % [
+				day, evals_today, expected_eval_agents]
+			push_warning(warn)
+			print(warn)
+			if event_bus:
+				event_bus.log(warn)
+
 	var avg_f: float = farmer_profit_ema
 	var avg_b: float = baker_profit_ema
 	var summary_line: String = "[CAREER SUMMARY] day=%d evals=%d switches=%d blocked=%d avg_profit_farmer=%.2f avg_profit_baker=%.2f reason_counts(scarcity=%d utility=%d)" % [
@@ -178,6 +198,7 @@ func _evaluate_careers_for_all_agents(day: int) -> void:
 
 ## Log [CAREER EVAL] for a single agent including gate status.
 func _log_career_eval(day: int, agent: Node, ce) -> void:
+	evals_today += 1
 	var pop_id: String = agent.person_name if agent.get("person_name") and agent.person_name != "" else agent.name
 	var role: String = agent.current_role if agent.get("current_role") else "?"
 	var cash: float = agent.get_cash() if agent.has_method("get_cash") else 0.0
@@ -315,7 +336,6 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if day % EVAL_INTERVAL_DAYS != 0:
 		return
 
-	evals_today += 1
 	var pop_id: String = h.person_name if h.get("person_name") and h.person_name != "" else h.name
 
 	if h.switch_cooldown_days > 0:
@@ -388,21 +408,20 @@ func _evaluate_household(h: Node, day: int) -> void:
 	switches_today += 1
 	reason_utility_today += 1
 
-	var margin_pct: float = 0.0
-	if u_current != 0.0:
-		margin_pct = ((best_u / u_current) - 1.0) * 100.0
-	var decision_line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility Uc=%.2f Ub=%.2f margin=%.0f%% cash=%.0f food=%d/%d" % [
+	var delta: float = best_u - u_current
+	var ratio: float = best_u / maxf(0.01, absf(u_current))
+	var decision_line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility Uc=%.2f Ub=%.2f delta=%.2f ratio=%.2f cash=%.0f food=%d/%d" % [
 		day, pop_id, h.current_role, best_role,
-		u_current, best_u, margin_pct, cash, bread_count, food_target]
+		u_current, best_u, delta, ratio, cash, bread_count, food_target]
 	print(decision_line)
 	if event_bus:
 		event_bus.log(decision_line)
 	if h.has_method("log_event"):
-		h.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
-			h.current_role, best_role, margin_pct, cash])
+		h.log_event("Switched: %s->%s reason=utility delta=%.2f ratio=%.2f cash=$%.0f" % [
+			h.current_role, best_role, delta, ratio, cash])
 	if h.get("last_career_decision") != null:
-		h.last_career_decision = "day=%d utility %s->%s Uc=%.2f Ub=%.2f margin=%.0f%%" % [
-			day, h.current_role, best_role, u_current, best_u, margin_pct]
+		h.last_career_decision = "day=%d utility %s->%s Uc=%.2f Ub=%.2f delta=%.2f ratio=%.2f" % [
+			day, h.current_role, best_role, u_current, best_u, delta, ratio]
 	role_switch_requested.emit(h, new_role)
 	h.switch_cooldown_days = SWITCH_COOLDOWN_DAYS
 

@@ -21,6 +21,10 @@ const TRAINING_DAYS: Dictionary = {
 	"Baker": 3,
 }
 
+# ─── Scarcity bonus (pressure term, NOT selector) ───────────────────────────
+const SCARCITY_WEIGHT: float = 1.0
+const MAX_SCARCITY_BONUS: float = 1.0
+
 # ─── Stored results (read by inspector / LaborMarket) ────────────────────────
 var utility_farmer: float = 0.0
 var utility_baker: float = 0.0
@@ -43,9 +47,11 @@ var last_diag_expected_farmer: float = 0.0
 var last_diag_expected_baker: float = 0.0
 var last_diag_U_farmer: float = 0.0
 var last_diag_U_baker: float = 0.0
+var last_scarcity_bonus_farmer: float = 0.0
+var last_scarcity_bonus_baker: float = 0.0
 
 
-func evaluate(day: int, agent: Node, econ_stats: Node) -> void:
+func evaluate(day: int, agent: Node, econ_stats: Node, bread_scarcity: float = 0.0, wheat_scarcity: float = 0.0) -> void:
 	if day - last_eval_day < EVAL_INTERVAL_DAYS:
 		return
 	last_eval_day = day
@@ -80,6 +86,10 @@ func evaluate(day: int, agent: Node, econ_stats: Node) -> void:
 		g_farmer = econ_stats.role_rolling_7d_avg("Farmer")
 		g_baker = econ_stats.role_rolling_7d_avg("Baker")
 
+	# ── Scarcity bonus (pressure term, capped) ──────────────────────────
+	var scar_bonus_farmer: float = minf(wheat_scarcity * SCARCITY_WEIGHT, MAX_SCARCITY_BONUS)
+	var scar_bonus_baker: float = minf(bread_scarcity * SCARCITY_WEIGHT, MAX_SCARCITY_BONUS)
+
 	# ── Store intermediates (instrumentation only) ───────────────────────
 	last_income_farmer = income_farmer
 	last_income_baker = income_baker
@@ -95,6 +105,8 @@ func evaluate(day: int, agent: Node, econ_stats: Node) -> void:
 	last_diag_expected_baker = g_baker * sf_baker
 	last_diag_U_farmer = last_diag_expected_farmer + (sk_farmer * 2.0)
 	last_diag_U_baker = last_diag_expected_baker + (sk_baker * 2.0)
+	last_scarcity_bonus_farmer = scar_bonus_farmer
+	last_scarcity_bonus_baker = scar_bonus_baker
 
 	# ── Compute U for each role ──────────────────────────────────────────
 	utility_farmer = _compute_utility(
@@ -102,13 +114,13 @@ func evaluate(day: int, agent: Node, econ_stats: Node) -> void:
 		sk_farmer,
 		_switch_cost(current_role, "Farmer", cooldown),
 		risk if current_role != "Farmer" else 0.0
-	)
+	) + scar_bonus_farmer
 	utility_baker = _compute_utility(
 		income_baker * sf_baker,
 		sk_baker,
 		_switch_cost(current_role, "Baker", cooldown),
 		risk if current_role != "Baker" else 0.0
-	)
+	) + scar_bonus_baker
 
 	match current_role:
 		"Farmer":
@@ -116,7 +128,6 @@ func evaluate(day: int, agent: Node, econ_stats: Node) -> void:
 		"Baker":
 			utility_current = utility_baker
 		_:
-			# Households have no production income of their own
 			utility_current = _compute_utility(pop_avg, 0.0, 0.0, 0.0)
 
 	# ── Recommended role (argmax) ────────────────────────────────────────
@@ -161,6 +172,7 @@ func _switch_cost(current_role: String, target_role: String, cooldown: int) -> f
 
 func get_eval_summary(agent: Node, scarcity_bread: float, scarcity_wheat: float) -> Dictionary:
 	var bread: int = agent.inv.get_qty("bread") if agent.inv else 0
+	var food_target: int = agent.food_reserve.min_reserve_units if agent.get("food_reserve") and agent.food_reserve else 3
 	return {
 		"day": last_eval_day,
 		"agent_id": agent.person_id,
@@ -169,6 +181,7 @@ func get_eval_summary(agent: Node, scarcity_bread: float, scarcity_wheat: float)
 		"cash": agent.get_cash(),
 		"hunger": "%d/%d" % [agent.hunger.hunger_days, agent.hunger.hunger_max_days] if agent.hunger else "?",
 		"bread_reserve": bread,
+		"food_target": food_target,
 		"pop_cashflow_7d_avg": last_pop_avg,
 		"role_profit_7d_avg_farmer": last_global_farmer_avg,
 		"role_profit_7d_avg_baker": last_global_baker_avg,
@@ -191,4 +204,6 @@ func get_eval_summary(agent: Node, scarcity_bread: float, scarcity_wheat: float)
 		"recommended_role": recommended_role,
 		"scarcity_bread": scarcity_bread,
 		"scarcity_wheat": scarcity_wheat,
+		"scarcity_bonus_farmer": last_scarcity_bonus_farmer,
+		"scarcity_bonus_baker": last_scarcity_bonus_baker,
 	}

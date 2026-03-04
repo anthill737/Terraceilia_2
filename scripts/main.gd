@@ -324,6 +324,9 @@ func _ready() -> void:
 	add_child(labor_market)
 	labor_market.process_mode = Node.PROCESS_MODE_PAUSABLE
 	labor_market.bind(market, bus)
+	labor_market.econ_stats = econ_stats
+	labor_market.field_count_ref = field_mgr.all_field_nodes if field_mgr else []
+	labor_market.max_fields = MAX_FIELDS
 	# Share the SAME array objects so labor_market always sees current population
 	labor_market.all_farmers = all_farmers
 	labor_market.all_bakers = all_bakers
@@ -1394,6 +1397,34 @@ func update_inspector() -> void:
 		var scar_col: String = "#cc5555" if scar_b > 0.0 or scar_w > 0.0 else "#556688"
 		lines.append(
 			"[color=%s]Scarcity: bread=%.2f wheat=%.2f[/color]" % [scar_col, scar_b, scar_w])
+		var sbf: float = lce.get("scarcity_bonus_farmer", 0.0)
+		var sbb: float = lce.get("scarcity_bonus_baker", 0.0)
+		if sbf > 0.0 or sbb > 0.0:
+			lines.append(
+				"[color=#aa7744]Scarcity bonus: F=+%.2f  B=+%.2f[/color]" % [sbf, sbb])
+
+	# ── Gate status ──────────────────────────────────────────────────────
+	var eval_day_val: int = d.get("last_eval_day", -1)
+	if eval_day_val >= 0:
+		var g_tenure: int = d.get("gate_tenure", 0)
+		var g_cooldown: int = d.get("gate_cooldown", 0)
+		var g_cash: float = d.get("gate_savings_cash", 0.0)
+		var g_bread: int = d.get("gate_food_bread", 0)
+		var g_ftarget: int = d.get("gate_food_target", 3)
+		var g_freq: int = ceili(g_ftarget * (2.0 / 3.0))
+		var tenure_col: String = "#55cc88" if g_tenure >= 14 else "#cc5555"
+		var cd_col: String = "#55cc88" if g_cooldown == 0 else "#cc5555"
+		var sav_col: String = "#55cc88" if g_cash >= 200.0 else "#cc5555"
+		var food_col: String = "#55cc88" if g_bread >= g_freq else "#cc5555"
+		var fields_now: int = all_field_nodes.size()
+		var lc_col: String = "#55cc88" if fields_now < MAX_FIELDS else "#cc5555"
+		lines.append("[color=#556688]── Gates ──[/color]")
+		lines.append(
+			"[color=%s]Tenure: %d/14d[/color]  [color=%s]Cooldown: %dd[/color]  [color=%s]Savings: $%.0f/$200[/color]" %
+			[tenure_col, g_tenure, cd_col, g_cooldown, sav_col, g_cash])
+		lines.append(
+			"[color=%s]Food: %d/%d[/color]  [color=%s]Land: %d/%d[/color]  [color=#556688]Eval day: %d[/color]" %
+			[food_col, g_bread, g_freq, lc_col, fields_now, MAX_FIELDS, eval_day_val])
 
 	# ── Last career decision ─────────────────────────────────────────────
 	var lcd: String = d.get("last_career_decision", "")

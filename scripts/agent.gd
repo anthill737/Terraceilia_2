@@ -213,11 +213,7 @@ func on_day_changed(day: int) -> void:
 	_person_day = day
 	_roll_cashflow()
 	_progress_skills(current_role)
-	if career_eval:
-		var prev_eval_day: int = career_eval.last_eval_day
-		career_eval.evaluate(day, self, econ_stats)
-		if career_eval.last_eval_day != prev_eval_day:
-			_log_career_eval(day)
+	# Career evaluation is driven by LaborMarket (single authority)
 	if current_job:
 		current_job.on_day_changed(day)
 
@@ -273,27 +269,6 @@ var utility_current: float:
 
 var recommended_role: String:
 	get: return career_eval.recommended_role if career_eval else ""
-
-
-func _log_career_eval(day: int) -> void:
-	var scar_b: float = 1.0 if (market and market.bread <= 0) else 0.0
-	var scar_w: float = 1.0 if (market and market.wheat <= 0) else 0.0
-	last_career_eval = career_eval.get_eval_summary(self, scar_b, scar_w)
-	var ce = career_eval
-	var pop_id: String = person_name if person_name != "" else name
-	var profit_f: float = ce.last_income_farmer * ce.last_sf_farmer
-	var profit_b: float = ce.last_income_baker * ce.last_sf_baker
-	var line: String = "[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f skill(F=%.2f B=%.2f) profit(F=%.2f B=%.2f) U(F=%.2f B=%.2f) recommended=%s" % [
-		day, pop_id, current_role,
-		get_cash(),
-		skill_farmer, skill_baker,
-		profit_f, profit_b,
-		ce.utility_farmer, ce.utility_baker,
-		ce.recommended_role,
-	]
-	print(line)
-	if event_bus:
-		event_bus.log(line)
 
 
 # ==============================================================================
@@ -432,7 +407,7 @@ func set_locations(loc1: Node2D, loc2: Node2D) -> void:
 # ==============================================================================
 
 func _base_inspector_data() -> Dictionary:
-	return {
+	var d: Dictionary = {
 		"name": name,
 		"person_name": person_name if person_name != "" else name,
 		"role": current_role if current_role != "" else get_class(),
@@ -457,7 +432,17 @@ func _base_inspector_data() -> Dictionary:
 		"last_switch_day": last_switch_day,
 		"last_career_eval": last_career_eval,
 		"last_career_decision": last_career_decision,
+		"last_eval_day": career_eval.last_eval_day if career_eval else -1,
+		"gate_tenure": days_in_role,
+		"gate_cooldown": switch_cooldown_days,
+		"gate_savings_cash": get_cash(),
+		"gate_food_bread": inv.get_qty("bread") if inv else 0,
+		"gate_food_target": food_reserve.min_reserve_units if food_reserve else 3,
 	}
+	if career_eval:
+		d["scarcity_bonus_farmer"] = career_eval.last_scarcity_bonus_farmer
+		d["scarcity_bonus_baker"] = career_eval.last_scarcity_bonus_baker
+	return d
 
 
 func get_inspector_data() -> Dictionary:

@@ -24,8 +24,8 @@ const EVAL_INTERVAL_DAYS: int = 7
 const IMPROVEMENT_MARGIN: float = 0.15
 const RECENT_SWITCH_MARGIN: float = 0.25
 const RECENT_SWITCH_WINDOW_DAYS: int = 30
-const SAVINGS_BUFFER_REQUIRED: float = 100.0
-const HUNGER_SAFETY_BREAD: int = 2
+const SAVINGS_BUFFER_REQUIRED: float = 200.0
+const FOOD_BUFFER_FRACTION: float = 2.0 / 3.0
 
 # ─── Migration constants ──────────────────────────────────────────────────────
 const MIGRATION_NO_FOOD_DAYS: int = 4      # Consecutive days without food → migrate
@@ -60,6 +60,9 @@ var all_households: Array = []
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market = null
 var event_bus = null
+var econ_stats = null
+var field_count_ref: Array = []
+var max_fields: int = 10
 
 var _initialized: bool = false
 
@@ -122,6 +125,10 @@ func update_daily(day: int) -> void:
 		if event_bus:
 			event_bus.log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
 
+	# On the 7-day cadence, recompute utility for ALL agents and log [CAREER EVAL]
+	if day % EVAL_INTERVAL_DAYS == 0:
+		_evaluate_careers_for_all_agents(day)
+
 	# Evaluate each household for role switch or migration
 	# Iterate a duplicate to guard against array modification during iteration
 	for h in all_households.duplicate():
@@ -139,6 +146,103 @@ func update_daily(day: int) -> void:
 	print(summary_line)
 	if event_bus:
 		event_bus.log(summary_line)
+
+
+# ─── Unified career evaluation (single authority) ────────────────────────────
+
+## Recompute utility for ALL agents (farmers, bakers, households) and log
+## [CAREER EVAL] for each. Called from update_daily on the 7-day cadence.
+func _evaluate_careers_for_all_agents(day: int) -> void:
+	var all_agents: Array = []
+	for f in all_farmers:
+		if f and is_instance_valid(f):
+			all_agents.append(f)
+	for b in all_bakers:
+		if b and is_instance_valid(b):
+			all_agents.append(b)
+	for h in all_households:
+		if h and is_instance_valid(h):
+			all_agents.append(h)
+
+	for agent in all_agents:
+		var ce = agent.get_node_or_null("CareerEvaluator")
+		if ce == null:
+			continue
+
+		# Force evaluation by resetting last_eval_day so the cadence check passes
+		ce.last_eval_day = -999
+		ce.evaluate(day, agent, econ_stats, bread_scarcity_ema, wheat_scarcity_ema)
+
+		_log_career_eval(day, agent, ce)
+
+
+## Log [CAREER EVAL] for a single agent including gate status.
+func _log_career_eval(day: int, agent: Node, ce) -> void:
+	var pop_id: String = agent.person_name if agent.get("person_name") and agent.person_name != "" else agent.name
+	var role: String = agent.current_role if agent.get("current_role") else "?"
+	var cash: float = agent.get_cash() if agent.has_method("get_cash") else 0.0
+	var bread: int = agent.inv.get_qty("bread") if agent.get("inv") and agent.inv else 0
+	var food_target: int = agent.food_reserve.min_reserve_units if agent.get("food_reserve") and agent.food_reserve else 3
+	var food_required: int = ceili(food_target * FOOD_BUFFER_FRACTION)
+	var profit_f: float = ce.last_income_farmer * ce.last_sf_farmer
+	var profit_b: float = ce.last_income_baker * ce.last_sf_baker
+
+	# Determine best role and gate status for this agent
+	var best_role: String = ce.recommended_role
+	var allowed: int = 1
+	var block: String = "none"
+
+	if best_role != role:
+		# Check gates in priority order
+		if agent.get("switch_cooldown_days") != null and agent.switch_cooldown_days > 0:
+			allowed = 0
+			block = "cooldown"
+		elif agent.get("days_in_role") != null and agent.days_in_role < MIN_TENURE_DAYS:
+			allowed = 0
+			block = "tenure"
+		elif cash < SAVINGS_BUFFER_REQUIRED:
+			allowed = 0
+			block = "savings"
+		elif bread < food_required:
+			allowed = 0
+			block = "food_buffer"
+		elif best_role == "Farmer" and field_count_ref.size() >= max_fields:
+			allowed = 0
+			block = "land_cap"
+		else:
+			# Margin gate
+			var u_best: float = maxf(ce.utility_farmer, ce.utility_baker)
+			var u_cur: float = ce.utility_current
+			var margin: float = IMPROVEMENT_MARGIN
+			var last_sw: int = agent.last_switch_day if agent.get("last_switch_day") != null else -999
+			if last_sw >= 0 and (day - last_sw) < RECENT_SWITCH_WINDOW_DAYS:
+				margin = RECENT_SWITCH_MARGIN
+			if u_cur == 0.0:
+				if u_best <= 0.0:
+					allowed = 0
+					block = "margin_zero"
+			elif u_best < u_cur * (1.0 + margin):
+				allowed = 0
+				block = "margin"
+
+	# Store eval summary on agent for inspector
+	var scar_b: float = 1.0 if (market and market.bread <= 0) else 0.0
+	var scar_w: float = 1.0 if (market and market.wheat <= 0) else 0.0
+	if agent.get("last_career_eval") != null:
+		agent.last_career_eval = ce.get_eval_summary(agent, scar_b, scar_w)
+
+	var line: String = "[CAREER EVAL] day=%d pop=%s role=%s cash=%.2f food=%d/%d skill(F=%.2f B=%.2f) profit(F=%.2f B=%.2f) income(F=%.2f B=%.2f) U(F=%.2f B=%.2f) best=%s allowed=%d block=%s" % [
+		day, pop_id, role, cash,
+		bread, food_target,
+		agent.skill_farmer if agent.get("skill_farmer") != null else 0.0,
+		agent.skill_baker if agent.get("skill_baker") != null else 0.0,
+		profit_f, profit_b,
+		ce.last_income_farmer, ce.last_income_baker,
+		ce.utility_farmer, ce.utility_baker,
+		best_role, allowed, block]
+	print(line)
+	if event_bus:
+		event_bus.log(line)
 
 
 # ─── Household evaluation ────────────────────────────────────────────────────
@@ -223,14 +327,19 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_log_career_blocked(day, pop_id, "?", "tenure", h.days_in_role, h)
 		return
 
-	# Gate: not starving and has minimum food buffer
+	# Gate: not starving
 	var h_hunger = h.get_node_or_null("HungerNeed")
 	if h_hunger and h_hunger.is_starving:
 		_log_career_blocked(day, pop_id, "?", "starving", 0, h)
 		return
+
+	# Gate: food buffer (fraction-based)
 	var h_inv = h.get_node_or_null("Inventory")
-	if h_inv and h_inv.get_qty("bread") < HUNGER_SAFETY_BREAD:
-		_log_career_blocked(day, pop_id, "?", "food_buffer", h_inv.get_qty("bread") if h_inv else 0, h)
+	var bread_count: int = h_inv.get_qty("bread") if h_inv else 0
+	var food_target: int = h.food_reserve.min_reserve_units if h.get("food_reserve") and h.food_reserve else 3
+	var food_required: int = ceili(food_target * FOOD_BUFFER_FRACTION)
+	if bread_count < food_required:
+		_log_career_blocked(day, pop_id, "?", "food_buffer", bread_count, h)
 		return
 
 	# Gate: savings buffer
@@ -255,6 +364,11 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if best_role == h.current_role:
 		return
 
+	# Gate: land cap (block farmer switches when fields are full)
+	if best_role == "Farmer" and field_count_ref.size() >= max_fields:
+		_log_career_blocked(day, pop_id, "Farmer", "land_cap", field_count_ref.size(), h)
+		return
+
 	# Gate: improvement margin (higher if recently switched)
 	var margin: float = IMPROVEMENT_MARGIN
 	var last_sw: int = h.last_switch_day if h.get("last_switch_day") != null else -999
@@ -269,23 +383,26 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_log_career_blocked(day, pop_id, best_role, "margin", int(margin * 100.0), h)
 		return
 
-	# All gates passed — request switch (reason is always "utility" in current code)
+	# All gates passed — request switch
 	var new_role: String = best_role.to_lower()
 	switches_today += 1
 	reason_utility_today += 1
 
-	var decision_line: String = "[CAREER DECISION] pop=%s from=%s to=%s reason=utility day=%d U_F=%.2f U_B=%.2f U_cur=%.2f margin=%.0f%%" % [
-		pop_id, h.current_role, best_role, day,
-		u_farmer, u_baker, u_current, margin * 100.0]
+	var margin_pct: float = 0.0
+	if u_current != 0.0:
+		margin_pct = ((best_u / u_current) - 1.0) * 100.0
+	var decision_line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility Uc=%.2f Ub=%.2f margin=%.0f%% cash=%.0f food=%d/%d" % [
+		day, pop_id, h.current_role, best_role,
+		u_current, best_u, margin_pct, cash, bread_count, food_target]
 	print(decision_line)
 	if event_bus:
 		event_bus.log(decision_line)
 	if h.has_method("log_event"):
 		h.log_event("Switched: %s->%s reason=utility margin=%.0f%% cash=$%.0f" % [
-			h.current_role, best_role, margin * 100.0, cash])
+			h.current_role, best_role, margin_pct, cash])
 	if h.get("last_career_decision") != null:
-		h.last_career_decision = "day=%d utility %s->%s U_F=%.2f U_B=%.2f margin=%.0f%%" % [
-			day, h.current_role, best_role, u_farmer, u_baker, margin * 100.0]
+		h.last_career_decision = "day=%d utility %s->%s Uc=%.2f Ub=%.2f margin=%.0f%%" % [
+			day, h.current_role, best_role, u_current, best_u, margin_pct]
 	role_switch_requested.emit(h, new_role)
 	h.switch_cooldown_days = SWITCH_COOLDOWN_DAYS
 
@@ -323,13 +440,17 @@ func should_suppress_spawn() -> bool:
 
 func _log_career_blocked(day: int, pop_id: String, desired_role: String, block: String, detail_val: int, h: Node) -> void:
 	blocked_today += 1
-	var line: String = "[CAREER BLOCKED] pop=%s desired=%s block=%s day=%d val=%d" % [
-		pop_id, desired_role, block, day, detail_val]
+	var current_role: String = h.current_role if h.get("current_role") else "?"
+	var ce = h.get_node_or_null("CareerEvaluator") if h else null
+	var uc: float = ce.utility_current if ce else 0.0
+	var ub: float = maxf(ce.utility_farmer, ce.utility_baker) if ce else 0.0
+	var line: String = "[CAREER BLOCKED] day=%d pop=%s current=%s desired=%s block=%s Uc=%.2f Ub=%.2f" % [
+		day, pop_id, current_role, desired_role, block, uc, ub]
 	print(line)
 	if event_bus:
 		event_bus.log(line)
 	if h and h.get("last_career_decision") != null:
-		h.last_career_decision = "day=%d blocked=%s (val=%d)" % [day, block, detail_val]
+		h.last_career_decision = "day=%d blocked=%s desired=%s Uc=%.2f Ub=%.2f" % [day, block, desired_role, uc, ub]
 
 
 func _ema(prev: float, new_val: float) -> float:

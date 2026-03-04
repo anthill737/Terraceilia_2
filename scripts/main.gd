@@ -4,7 +4,6 @@ extends Node
 const _PopMgrClass = preload("res://scripts/managers/population_manager.gd")
 const _FieldMgrClass = preload("res://scripts/managers/field_manager.gd")
 const _EconStatsClass = preload("res://scripts/managers/economy_stats_manager.gd")
-const _TradeMgrClass = preload("res://scripts/managers/trade_manager.gd")
 
 var farmer: Agent = null
 var baker: Agent = null
@@ -20,7 +19,6 @@ var prosperity_meter: ProsperityMeter = null
 var pop_mgr: PopulationManager = null
 var field_mgr: FieldManager = null
 var econ_stats: EconomyStatsManager = null
-var trade_mgr = null
 
 # ── Convenience forwards → managers (keeps all existing code working) ─────────
 var MAX_FIELDS: int:
@@ -111,7 +109,6 @@ var prosperity_score_label: Label
 var wealth_score_label: Label
 var food_score_label: Label
 var starvation_score_label: Label
-var trade_score_label: Label
 var population_info_label: Label
 var total_pop_label: Label
 
@@ -339,15 +336,6 @@ func _ready() -> void:
 	labor_market.migrate_requested.connect(_on_migrate_requested)
 	labor_market.role_switch_requested.connect(_on_role_switch_requested)
 	
-	# Initialize trade manager (external import/export counterparty)
-	trade_mgr = _TradeMgrClass.new()
-	trade_mgr.name = "TradeManager"
-	add_child(trade_mgr)
-	trade_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
-	trade_mgr.market = market
-	trade_mgr.event_bus = bus
-	trade_mgr.load_config(economy_config)
-
 	# Assign persistent identities to the initial scene pops
 	_assign_new_identity(farmer)
 	_assign_new_identity(baker)
@@ -426,6 +414,7 @@ func _on_tick(tick: int) -> void:
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
 			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
 			spawn_household_at(spawn_pos)
+			prosperity_meter.record_spawn(calendar.day_index)
 	
 	# Bread emergency liquidity override
 	if market:
@@ -1211,9 +1200,8 @@ func _update_eco_bar() -> void:
 		var w: float = prosperity_meter.prosperity_inputs.get("wealth_health",       0.0)
 		var f: float = prosperity_meter.prosperity_inputs.get("food_security",       0.0)
 		var s: float = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
-		var t: float = prosperity_meter.prosperity_inputs.get("trade_activity",      0.0)
-		eco_prosperity_label.text = "★ %.2f\nW:%.2f F:%.2f S:%.2f T:%.2f" % [
-			prosperity_meter.prosperity_score, w, f, s, t
+		eco_prosperity_label.text = "★ %.2f\nW:%.2f F:%.2f S:%.2f" % [
+			prosperity_meter.prosperity_score, w, f, s
 		]
 
 	# FARMER (baseline)
@@ -1612,10 +1600,6 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Update labor market EMA signals
 	if labor_market:
 		labor_market.update_daily(day)
-
-	# Run external trade (imports/exports) after price update, before agents act
-	if trade_mgr:
-		trade_mgr.on_day_changed(day)
 
 	# Propagate day change to all agents
 	for f in all_farmers:

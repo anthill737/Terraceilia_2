@@ -5,40 +5,19 @@
     "initial_market_seeds": 0
   },
   "career_entry": {
-    "scarcity_expectation_weight_farmer": 2.0,
+    "scarcity_expectation_weight_farmer": 20.0,
     "scarcity_expectation_weight_baker": 2.0,
     "career_entry_quota_pct": 0.10,
     "career_entry_quota_min": 1,
     "career_entry_quota_max": 5
   },
-  "trade": {
-    "trade_enabled": true,
-    "trade_check_interval_days": 1,
-    "import_trigger_inv_threshold": { "wheat": 5, "bread": 5 },
-    "export_trigger_inv_threshold": { "wheat": 50, "bread": 60 },
-    "import_lot_size": { "wheat": 20, "bread": 10 },
-    "export_lot_size": { "wheat": 20, "bread": 20 },
-    "daily_import_cap": { "wheat": 40, "bread": 20 },
-    "daily_export_cap": { "wheat": 60, "bread": 60 },
-    "import_markup_pct": { "wheat": 0.35, "bread": 0.35 },
-    "export_discount_pct": { "wheat": 0.20, "bread": 0.20 },
-    "trade_fee_flat": 0.0,
-    "trade_fee_pct": 0.00,
-    "trade_use_rng": true,
-    "trade_daily_probability": 0.80,
-    "trade_rng_seed": 12345,
-    "treasury_cash_start": 50,
-    "treasury_income_pct": 0.00,
-    "treasury_debug_logs": true
-  },
   "prosperity": {
     "enabled": true,
     "smoothing": 0.3,
     "weights": {
-      "wealth": 0.25,
-      "food": 0.30,
-      "starvation": 0.25,
-      "trade": 0.20
+      "wealth": 0.30,
+      "food": 0.40,
+      "starvation": 0.30
     },
     "wealth_target": 100.0,
     "wealth_per_capita": true,
@@ -47,11 +26,9 @@
     "reserve_target_threshold": 0.8,
     "starvation_window_days": 7,
     "hunger_safe_ratio": 0.5,
-    "trade_window_days": 7,
-    "trade_value_target": 100.0,
     "growth_threshold": 0.70,
     "pause_threshold": 0.60,
-    "growth_cooldown_days": 1,
+    "growth_cooldown_days": 3,
     "log_daily": true
   },
   "population_growth": {

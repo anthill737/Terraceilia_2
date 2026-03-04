@@ -19,7 +19,7 @@ const BAKER_TRAINING_DAYS: int = 3
 const SWITCH_COOLDOWN_DAYS: int = 14
 
 # ─── Utility-based switching gates ─────────────────────────────────────────
-const MIN_TENURE_DAYS: int = 14
+const MIN_TENURE_DAYS: int = 7
 const EVAL_INTERVAL_DAYS: int = 7
 const IMPROVEMENT_MARGIN: float = 0.15
 const RECENT_SWITCH_MARGIN: float = 0.25
@@ -133,9 +133,18 @@ func update_daily(day: int) -> void:
 	farmer_profit_ema = _ema(farmer_profit_ema, farmer_avg_delta)
 	baker_profit_ema = _ema(baker_profit_ema, baker_avg_delta)
 
-	# Update scarcity EMAs (binary per day: 1.0 if stock empty, 0.0 otherwise)
-	var bread_scarce: float = 1.0 if (market != null and market.bread <= 0) else 0.0
-	var wheat_scarce: float = 1.0 if (market != null and market.wheat <= 0) else 0.0
+	# Update scarcity EMAs (proportional: 1.0 when empty, 0.0 at/above target)
+	var bread_scarce: float = 0.0
+	var wheat_scarce: float = 0.0
+	if market != null:
+		if market.bread_target > 0:
+			bread_scarce = clampf(1.0 - float(market.bread) / float(market.bread_target), 0.0, 1.0)
+		elif market.bread <= 0:
+			bread_scarce = 1.0
+		if market.wheat_target > 0:
+			wheat_scarce = clampf(1.0 - float(market.wheat) / float(market.wheat_target), 0.0, 1.0)
+		elif market.wheat <= 0:
+			wheat_scarce = 1.0
 	bread_scarcity_ema = _ema(bread_scarcity_ema, bread_scarce)
 	wheat_scarcity_ema = _ema(wheat_scarcity_ema, wheat_scarce)
 

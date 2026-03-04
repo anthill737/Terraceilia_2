@@ -80,8 +80,8 @@ const DECAY_DISABLE_DAYS: int = 10  # Disable decay for first N days
 const PRODUCER_HYSTERESIS_CONFIG: Dictionary = {
 	"wheat": {
 		"enabled": true,
-		"stop_sell_at_or_above_upper_band": true,
-		"resume_sell_at_or_below_lower_band": true,
+		"stop_sell_at_or_above_upper_band": false,
+		"resume_sell_at_or_below_lower_band": false,
 		"stop_produce_at_or_above_upper_band": true,
 		"resume_produce_at_or_below_lower_band": true
 	},
@@ -148,10 +148,9 @@ var bread_emergency_cooldown_remaining: int = 0
 
 var market_seeded: bool = false
 
-# ─── Town Treasury — funds external trade (imports/exports/emergency) ─────
+# Treasury kept for emergency bread liquidity
 var treasury_cash: float = 0.0
 var treasury_cash_start: float = 0.0
-var treasury_debug_logs: bool = true
 
 var event_bus: EventBus = null
 var current_tick: int = 0
@@ -482,12 +481,11 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
 	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
 	
-	# HYSTERESIS GATE: Check if wheat selling is allowed (skip for survival purchases)
-	if not is_survival and not can_producer_sell("wheat"):
+	# Wheat selling is NEVER blocked — log override when inventory is high
+	var upper_band_check: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
+	if not is_survival and wheat >= upper_band_check:
 		if event_bus:
-			event_bus.log("Tick %d: %s wheat sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(farmer)])
-		_set_result(0, "blocked", "wheat", wheat_price)
-		return 0
+			event_bus.log("[WHEAT SELL OVERRIDE] day=%d inv_high=%d allowing_sell=true" % [current_day, wheat])
 	
 	var farmer_inv: Inventory = get_inv(farmer)
 	var farmer_wallet: Wallet = get_wallet(farmer)
@@ -559,6 +557,10 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	
 	if event_bus and units_bought > 0:
 		event_bus.log("Tick %d: %s wheat sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(farmer), farmer_wheat, units_bought, avg_price, initial_bid, final_bid, reason])
+		var inv_after_sale: int = wheat
+		event_bus.log("[WHEAT SALE] day=%d pop=%s offered=%d cleared=%d avg_price=%.2f inv_before=%d inv_after=%d" % [
+			current_day, _agent_label(farmer), farmer_wheat, units_bought, avg_price,
+			wheat - units_bought, inv_after_sale])
 	
 	return units_bought
 

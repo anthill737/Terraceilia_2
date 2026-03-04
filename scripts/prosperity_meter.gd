@@ -11,10 +11,9 @@ class_name ProsperityMeter
 
 # Configuration - loaded from config/economy_config.json with fallback defaults
 var config: Dictionary = {}
-var WEALTH_WEIGHT: float = 0.25
-var FOOD_WEIGHT: float = 0.30
-var STARVATION_WEIGHT: float = 0.25
-var TRADE_WEIGHT: float = 0.20
+var WEALTH_WEIGHT: float = 0.30
+var FOOD_WEIGHT: float = 0.40
+var STARVATION_WEIGHT: float = 0.30
 var WEALTH_PER_CAPITA: bool = true
 var WEALTH_TARGET: float = 100.0
 var FOOD_BREAD_TARGET_WEIGHT: float = 0.6
@@ -22,8 +21,6 @@ var FOOD_RESERVE_COMPLIANCE_WEIGHT: float = 0.4
 var RESERVE_TARGET_THRESHOLD: float = 0.8
 var STARVATION_WINDOW_DAYS: int = 7
 var HUNGER_SAFE_RATIO: float = 0.5
-var TRADE_WINDOW_DAYS: int = 7
-var TRADE_VALUE_TARGET: float = 100.0
 var PROSPERITY_THRESHOLD_TO_GROW: float = 0.60
 var PROSPERITY_THRESHOLD_TO_PAUSE: float = 0.60
 var GROWTH_COOLDOWN_DAYS: int = 1
@@ -36,7 +33,6 @@ var prosperity_raw: float = 0.5  # Unsmoothed prosperity this day
 var prosperity_inputs: Dictionary = {}  # Breakdown of sub-scores for logging
 var last_spawn_day: int = -999  # Track last spawn for cooldown
 var starvation_events: Array = []  # Ring buffer of starvation days
-var trade_values: Array = []  # Ring buffer of daily trade values
 
 # References
 var event_bus = null
@@ -64,7 +60,6 @@ func _load_config() -> void:
 				WEALTH_WEIGHT = p.get("weights", {}).get("wealth", WEALTH_WEIGHT)
 				FOOD_WEIGHT = p.get("weights", {}).get("food", FOOD_WEIGHT)
 				STARVATION_WEIGHT = p.get("weights", {}).get("starvation", STARVATION_WEIGHT)
-				TRADE_WEIGHT = p.get("weights", {}).get("trade", TRADE_WEIGHT)
 				WEALTH_TARGET = p.get("wealth_target", WEALTH_TARGET)
 				WEALTH_PER_CAPITA = p.get("wealth_per_capita", WEALTH_PER_CAPITA)
 				FOOD_BREAD_TARGET_WEIGHT = p.get("food_bread_target_weight", FOOD_BREAD_TARGET_WEIGHT)
@@ -72,8 +67,6 @@ func _load_config() -> void:
 				RESERVE_TARGET_THRESHOLD = p.get("reserve_target_threshold", RESERVE_TARGET_THRESHOLD)
 				STARVATION_WINDOW_DAYS = p.get("starvation_window_days", STARVATION_WINDOW_DAYS)
 				HUNGER_SAFE_RATIO = p.get("hunger_safe_ratio", HUNGER_SAFE_RATIO)
-				TRADE_WINDOW_DAYS = p.get("trade_window_days", TRADE_WINDOW_DAYS)
-				TRADE_VALUE_TARGET = p.get("trade_value_target", TRADE_VALUE_TARGET)
 				PROSPERITY_THRESHOLD_TO_GROW = p.get("growth_threshold", PROSPERITY_THRESHOLD_TO_GROW)
 				PROSPERITY_THRESHOLD_TO_PAUSE = p.get("pause_threshold", PROSPERITY_THRESHOLD_TO_PAUSE)
 				GROWTH_COOLDOWN_DAYS = p.get("growth_cooldown_days", GROWTH_COOLDOWN_DAYS)
@@ -100,24 +93,16 @@ func update_prosperity(day: int) -> void:
 	if market == null:
 		return
 	
-	# Track current starvation events
 	_track_starvation_events(day)
 	
-	# Track daily trade value from market
-	_track_trade_value(day)
-	
-	# Compute sub-scores (all normalized 0-1)
 	var wealth_score: float = _compute_wealth_health()
 	var food_score: float = _compute_food_security()
-	var starvation_score: float = _compute_starvation_pressure()  # Higher = less pressure
-	var trade_score: float = _compute_trade_activity()
+	var starvation_score: float = _compute_starvation_pressure()
 	
-	# Weighted blend
 	prosperity_raw = (
 		wealth_score * WEALTH_WEIGHT +
 		food_score * FOOD_WEIGHT +
-		starvation_score * STARVATION_WEIGHT +
-		trade_score * TRADE_WEIGHT
+		starvation_score * STARVATION_WEIGHT
 	)
 	prosperity_raw = clamp(prosperity_raw, 0.0, 1.0)
 	
@@ -127,20 +112,18 @@ func update_prosperity(day: int) -> void:
 	else:
 		prosperity_score = prosperity_raw
 	
-	# Store breakdown for logging
 	prosperity_inputs = {
 		"wealth_health": wealth_score,
 		"food_security": food_score,
 		"starvation_pressure": starvation_score,
-		"trade_activity": trade_score,
 		"raw": prosperity_raw,
 		"smoothed": prosperity_score
 	}
 	
 	# Log prosperity summary once per day if enabled
 	if LOG_DAILY and event_bus:
-		event_bus.log("Day %d: Prosperity=%.3f (wealth=%.2f food=%.2f starvation=%.2f trade=%.2f)" % [
-			day, prosperity_score, wealth_score, food_score, starvation_score, trade_score
+		event_bus.log("Day %d: Prosperity=%.3f (wealth=%.2f food=%.2f starvation=%.2f)" % [
+			day, prosperity_score, wealth_score, food_score, starvation_score
 		])
 
 
@@ -169,14 +152,6 @@ func record_starvation_event(day: int) -> void:
 	# Trim to window
 	while starvation_events.size() > 0 and starvation_events[0] < day - STARVATION_WINDOW_DAYS:
 		starvation_events.pop_front()
-
-
-func record_trade_value(_day: int, value: float) -> void:
-	"""Track daily trade value for prosperity calculation."""
-	trade_values.append(value)
-	# Trim to window
-	if trade_values.size() > TRADE_WINDOW_DAYS:
-		trade_values.pop_front()
 
 
 ## Private helper functions for sub-score computation
@@ -279,22 +254,6 @@ func _compute_starvation_pressure() -> float:
 	return (starvation_score + hunger_score) * 0.5
 
 
-func _compute_trade_activity() -> float:
-	"""Compute trade activity score (0-1) based on recent trade volume."""
-	if trade_values.size() == 0:
-		return 0.5  # Neutral if no data yet
-	
-	# Average daily trade value
-	var total_value: float = 0.0
-	for value in trade_values:
-		total_value += value
-	var avg_daily_value = total_value / float(trade_values.size())
-	
-	# Normalize against target
-	var score = avg_daily_value / TRADE_VALUE_TARGET if TRADE_VALUE_TARGET > 0 else 0.0
-	return clamp(score, 0.0, 1.0)
-
-
 func _track_starvation_events(day: int) -> void:
 	"""Check all households for starvation and record events."""
 	for household in households:
@@ -311,15 +270,3 @@ func _track_starvation_events(day: int) -> void:
 		starvation_events.pop_front()
 
 
-func _track_trade_value(_day: int) -> void:
-	"""Record today's total trade value from market."""
-	if market == null:
-		return
-	
-	# Sum wheat and bread trade values
-	var daily_value = market.wheat_total_value + market.bread_total_value
-	trade_values.append(daily_value)
-	
-	# Trim to window
-	if trade_values.size() > TRADE_WINDOW_DAYS:
-		trade_values.pop_front()

@@ -79,6 +79,9 @@ var reason_scarcity_today: int = 0
 ## See SimulationRunner.STARTUP_GRACE_DAYS for the grace window.
 var ever_had_bread_supply: bool = false
 
+# ─── Per-eval-day diagnostic aggregation (reset each eval day) ───────────────
+var _eval_diag: Dictionary = {}
+
 
 ## Call after instantiation to wire market and event bus.
 func bind(p_market, p_event_bus) -> void:
@@ -111,6 +114,9 @@ func update_daily(day: int) -> void:
 	var wheat_scarce: float = 1.0 if (market != null and market.wheat <= 0) else 0.0
 	bread_scarcity_ema = _ema(bread_scarcity_ema, bread_scarce)
 	wheat_scarcity_ema = _ema(wheat_scarcity_ema, wheat_scarce)
+
+	# Daily macro-conditions snapshot for correlation with switching outcomes
+	_emit_econ_snap(day)
 
 	# Periodic diagnostic log (every 5 days)
 	if event_bus and day % 5 == 0:
@@ -173,6 +179,8 @@ func update_daily(day: int) -> void:
 ## Recompute utility for ALL agents (farmers, bakers, households) and log
 ## [CAREER EVAL] for each. Called from update_daily on the 7-day cadence.
 func _evaluate_careers_for_all_agents(day: int) -> void:
+	_reset_eval_diag()
+
 	var all_agents: Array = []
 	for f in all_farmers:
 		if f and is_instance_valid(f):
@@ -194,6 +202,8 @@ func _evaluate_careers_for_all_agents(day: int) -> void:
 		ce.evaluate(day, agent, econ_stats, bread_scarcity_ema, wheat_scarcity_ema)
 
 		_log_career_eval(day, agent, ce)
+
+	_emit_eval_summary(day)
 
 
 ## Log [CAREER EVAL] for a single agent including gate status.
@@ -264,6 +274,57 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 	print(line)
 	if event_bus:
 		event_bus.log(line)
+
+	# ── Aggregation for [CAREER EVAL SUMMARY] ────────────────────────────
+	_eval_diag.total += 1
+	if best_role == "Farmer":
+		_eval_diag.best_farmer += 1
+	else:
+		_eval_diag.best_baker += 1
+
+	if best_role == role:
+		_eval_diag.best_stay += 1
+		_eval_diag.allowed_stay += 1
+	elif allowed == 1:
+		if best_role == "Farmer":
+			_eval_diag.allowed_farmer += 1
+		else:
+			_eval_diag.allowed_baker += 1
+	else:
+		_eval_diag.allowed_stay += 1
+		if best_role == "Farmer":
+			_eval_diag.blocked_best_farmer += 1
+		else:
+			_eval_diag.blocked_best_baker += 1
+		match block:
+			"cooldown":
+				_eval_diag.block_cooldown += 1
+			"tenure":
+				_eval_diag.block_tenure += 1
+			"savings":
+				_eval_diag.block_cash += 1
+			"food_buffer":
+				_eval_diag.block_food += 1
+			"land_cap":
+				_eval_diag.block_land_cap += 1
+			"margin", "margin_zero":
+				_eval_diag.block_margin += 1
+			_:
+				_eval_diag.block_other += 1
+
+	# ── Store per-agent diagnostic fields for inspector ──────────────────
+	if agent.get("last_switch_allowed") != null:
+		agent.last_switch_allowed = (allowed == 1)
+	if agent.get("last_block_reason") != null:
+		agent.last_block_reason = block
+
+	# ── Build example strings (cap at 5 each) ────────────────────────────
+	var ex: String = "Pop %s role=%s Uf=%.2f Ub=%.2f best=%s block=%s cash=%.0f food=%d/%d" % [
+		pop_id, role, ce.utility_farmer, ce.utility_baker, best_role, block, cash, bread, food_target]
+	if best_role != role and allowed == 0 and _eval_diag.examples_blocked.size() < 5:
+		_eval_diag.examples_blocked.append(ex)
+	elif best_role != role and allowed == 1 and _eval_diag.examples_allowed.size() < 5:
+		_eval_diag.examples_allowed.append(ex)
 
 
 # ─── Household evaluation ────────────────────────────────────────────────────
@@ -453,6 +514,71 @@ func _evaluate_producer_migration(_day: int) -> void:
 ## should be suppressed (no point growing population into a famine).
 func should_suppress_spawn() -> bool:
 	return bread_scarcity_ema >= SPAWN_SUPPRESS_SCARCITY
+
+
+# ─── Eval-day diagnostic aggregation ─────────────────────────────────────────
+
+func _reset_eval_diag() -> void:
+	_eval_diag = {
+		"total": 0,
+		"best_farmer": 0,
+		"best_baker": 0,
+		"best_stay": 0,
+		"allowed_farmer": 0,
+		"allowed_baker": 0,
+		"allowed_stay": 0,
+		"blocked_best_farmer": 0,
+		"blocked_best_baker": 0,
+		"blocked_best_stay": 0,
+		"block_land_cap": 0,
+		"block_cooldown": 0,
+		"block_tenure": 0,
+		"block_food": 0,
+		"block_cash": 0,
+		"block_margin": 0,
+		"block_other": 0,
+		"examples_blocked": [],
+		"examples_allowed": [],
+	}
+
+
+func _emit_eval_summary(day: int) -> void:
+	var d: Dictionary = _eval_diag
+	var summary: String = "[CAREER EVAL SUMMARY] day=%d evals=%d best(F=%d B=%d H=%d) allowed(F=%d B=%d H=%d) blocked_best(F=%d B=%d H=%d) blocked_reasons(land=%d cd=%d ten=%d food=%d cash=%d margin=%d other=%d)" % [
+		day, d.total,
+		d.best_farmer, d.best_baker, d.best_stay,
+		d.allowed_farmer, d.allowed_baker, d.allowed_stay,
+		d.blocked_best_farmer, d.blocked_best_baker, d.blocked_best_stay,
+		d.block_land_cap, d.block_cooldown, d.block_tenure,
+		d.block_food, d.block_cash, d.block_margin, d.block_other]
+	print(summary)
+	if event_bus:
+		event_bus.log(summary)
+	for ex in d.examples_blocked:
+		var line: String = "[CAREER EXAMPLE BLOCKED] %s" % ex
+		print(line)
+		if event_bus:
+			event_bus.log(line)
+	for ex in d.examples_allowed:
+		var line: String = "[CAREER EXAMPLE ALLOWED] %s" % ex
+		print(line)
+		if event_bus:
+			event_bus.log(line)
+
+
+func _emit_econ_snap(day: int) -> void:
+	var pop: int = all_farmers.size() + all_bakers.size() + all_households.size()
+	var fields: int = field_count_ref.size()
+	var wheat_inv: int = market.wheat if market else 0
+	var bread_inv: int = market.bread if market else 0
+	var snap: String = "[ECON SNAP] day=%d pop=%d fields=%d/%d inv(wheat=%d bread=%d) scar(w=%.2f b=%.2f) profit(F=%.2f B=%.2f)" % [
+		day, pop, fields, max_fields,
+		wheat_inv, bread_inv,
+		wheat_scarcity_ema, bread_scarcity_ema,
+		farmer_profit_ema, baker_profit_ema]
+	print(snap)
+	if event_bus:
+		event_bus.log(snap)
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────

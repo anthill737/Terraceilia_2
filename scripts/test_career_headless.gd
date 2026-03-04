@@ -123,6 +123,9 @@ func _validate() -> void:
 	_check_eval_summary_on_eval_days(final_day)
 	_check_econ_snap_daily(final_day)
 	_check_trade_activity(final_day)
+	_check_treasury_logs(final_day)
+	_check_import_blocked()
+	_check_import_format()
 
 	print("")
 	print("═".repeat(60))
@@ -527,7 +530,7 @@ func _check_trade_activity(final_day: int) -> void:
 	for line in _log:
 		if "[TRADE STATUS]" not in line:
 			continue
-		for field in ["day=", "imports(wheat=", "exports(wheat=", "cap_rem(wheat_i="]:
+		for field in ["day=", "treasury=", "imports(wheat=", "exports(wheat="]:
 			if field not in line:
 				print("  BAD FORMAT missing '%s': %s" % [field, line])
 				format_ok = false
@@ -541,6 +544,86 @@ func _check_trade_activity(final_day: int) -> void:
 		print("  RESULT: PASS (trade system active)")
 	else:
 		print("  RESULT: WARN (no trade activity — may be OK if RNG skipped or inv never hit threshold)")
+
+
+func _check_treasury_logs(final_day: int) -> void:
+	print("\n── Check 13: [MARKET TREASURY] daily logs ──")
+	var treasury_days: Dictionary = {}
+	for line in _log:
+		if "[MARKET TREASURY]" not in line:
+			continue
+		var d: int = _extract_int(line, "day=")
+		treasury_days[d] = true
+
+	var found: int = treasury_days.size()
+	print("  Found %d [MARKET TREASURY] lines (expected ~%d)" % [found, final_day])
+
+	var format_ok: bool = true
+	for line in _log:
+		if "[MARKET TREASURY]" not in line:
+			continue
+		for field in ["day=", "cash=", "net="]:
+			if field not in line:
+				print("  BAD FORMAT missing '%s': %s" % [field, line])
+				format_ok = false
+				_all_passed = false
+				break
+		break
+
+	if found >= final_day - 1:
+		print("  RESULT: PASS (format=%s)" % ("OK" if format_ok else "FAIL"))
+	else:
+		print("  RESULT: WARN (fewer than expected)")
+
+
+func _check_import_blocked() -> void:
+	print("\n── Check 14: [TRADE IMPORT BLOCKED] occurs at least once ──")
+	var blocked_count: int = 0
+	var first_blocked: String = ""
+	for line in _log:
+		if "[TRADE IMPORT BLOCKED]" in line:
+			blocked_count += 1
+			if first_blocked == "":
+				first_blocked = line
+
+	print("  Total blocked imports: %d" % blocked_count)
+	if blocked_count > 0:
+		print("  First: %s" % first_blocked)
+		var format_ok: bool = true
+		for field in ["reason=insufficient_treasury", "cost=", "treasury="]:
+			if field not in first_blocked:
+				print("  BAD FORMAT missing '%s'" % field)
+				format_ok = false
+				_all_passed = false
+		print("  RESULT: PASS (format=%s)" % ("OK" if format_ok else "FAIL"))
+	else:
+		print("  RESULT: WARN (no blocked imports — may be OK if treasury was sufficient)")
+
+
+func _check_import_format() -> void:
+	print("\n── Check 15: [TRADE IMPORT] includes cost= and treasury_after= ──")
+	var import_count: int = 0
+	var format_ok: bool = true
+	for line in _log:
+		if "[TRADE IMPORT]" not in line:
+			continue
+		if "[TRADE IMPORT BLOCKED]" in line:
+			continue
+		import_count += 1
+		if import_count <= 3:
+			for field in ["cost=", "treasury_after="]:
+				if field not in line:
+					print("  BAD FORMAT missing '%s': %s" % [field, line])
+					format_ok = false
+					_all_passed = false
+					break
+
+	if import_count == 0:
+		print("  No [TRADE IMPORT] lines (treasury may have blocked all)")
+		print("  RESULT: INFO")
+	else:
+		print("  Checked %d imports, format=%s" % [import_count, "OK" if format_ok else "FAIL"])
+		print("  RESULT: %s" % ("PASS" if format_ok else "FAIL"))
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -23,6 +23,11 @@ var use_rng: bool = true
 var daily_probability: float = 0.80
 var rng_seed_val: int = 12345
 
+# ─── Treasury config ──────────────────────────────────────────────────────
+var treasury_cash_start_cfg: float = 0.0
+var treasury_income_pct: float = 0.0
+var treasury_debug_logs: bool = true
+
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market: Market = null
 var event_bus: EventBus = null
@@ -59,6 +64,15 @@ func load_config(cfg: Dictionary) -> void:
 	use_rng = bool(t.get("trade_use_rng", true))
 	daily_probability = float(t.get("trade_daily_probability", 0.80))
 	rng_seed_val = int(t.get("trade_rng_seed", 12345))
+
+	treasury_cash_start_cfg = float(t.get("treasury_cash_start", 0.0))
+	treasury_income_pct = float(t.get("treasury_income_pct", 0.0))
+	treasury_debug_logs = bool(t.get("treasury_debug_logs", true))
+
+	if market:
+		market.treasury_cash_start = treasury_cash_start_cfg
+		market.treasury_cash = treasury_cash_start_cfg
+
 	_init_rng()
 
 
@@ -84,20 +98,28 @@ func _dict_float(d: Dictionary) -> Dictionary:
 func on_day_changed(day: int) -> void:
 	if not enabled or market == null:
 		return
-	if check_interval > 1 and day % check_interval != 0:
-		return
 
-	# Reset daily caps and totals
-	for g in GOODS:
-		_import_rem[g] = import_cap.get(g, 0)
-		_export_rem[g] = export_cap.get(g, 0)
-		_imports_today[g] = 0
-		_exports_today[g] = 0
+	var treasury_before: float = market.treasury_cash
 
-	for g in GOODS:
-		_process_good(day, g)
+	if check_interval <= 1 or day % check_interval == 0:
+		# Reset daily caps and totals
+		for g in GOODS:
+			_import_rem[g] = import_cap.get(g, 0)
+			_export_rem[g] = export_cap.get(g, 0)
+			_imports_today[g] = 0
+			_exports_today[g] = 0
 
-	_emit_status(day)
+		for g in GOODS:
+			_process_good(day, g)
+
+		_emit_status(day)
+
+	if treasury_debug_logs:
+		var delta: float = market.treasury_cash - treasury_before
+		var msg := "[MARKET TREASURY] day=%d cash=%.2f net=%.2f" % [day, market.treasury_cash, delta]
+		print(msg)
+		if event_bus:
+			event_bus.log(msg)
 
 
 func _process_good(day: int, good: String) -> void:
@@ -138,22 +160,27 @@ func _do_import(day: int, good: String, inv_before: int) -> void:
 	var local_price: float = _get_local_price(good)
 	var markup: float = import_markup.get(good, 0.35)
 	var price: float = local_price * (1.0 + markup) + fee_flat
+	var import_cost: float = price * float(qty)
 
-	# Add to market inventory
+	if market.treasury_cash < import_cost:
+		var msg := "[TRADE IMPORT BLOCKED] day=%d good=%s qty=%d cost=%.2f treasury=%.2f local=%.2f reason=insufficient_treasury" % [
+			day, good, qty, import_cost, market.treasury_cash, local_price]
+		print(msg)
+		if event_bus:
+			event_bus.log(msg)
+		return
+
 	_add_inv(good, qty)
 	_import_rem[good] = cap_rem - qty
 	_imports_today[good] += qty
 
-	# Debit market money for the import cost
-	var total_cost: float = price * float(qty)
-	market.money -= total_cost
+	market.treasury_cash -= import_cost
 
-	# Recompute hysteresis after inventory change
 	_recompute_hysteresis(good)
 
 	var inv_after: int = _get_inv(good)
-	var msg := "[TRADE IMPORT] day=%d good=%s qty=%d price=%.2f local=%.2f inv_before=%d inv_after=%d cap_rem=%d" % [
-		day, good, qty, price, local_price, inv_before, inv_after, _import_rem[good]]
+	var msg := "[TRADE IMPORT] day=%d good=%s qty=%d price=%.2f cost=%.2f treasury_after=%.2f local=%.2f inv_before=%d inv_after=%d" % [
+		day, good, qty, price, import_cost, market.treasury_cash, local_price, inv_before, inv_after]
 	print(msg)
 	if event_bus:
 		event_bus.log(msg)
@@ -170,34 +197,31 @@ func _do_export(day: int, good: String, inv_before: int) -> void:
 
 	var local_price: float = _get_local_price(good)
 	var disc: float = export_discount.get(good, 0.20)
-	var price: float = local_price * (1.0 - disc) - fee_flat
+	var price: float = maxf(0.0, local_price * (1.0 - disc) - fee_flat)
+	var export_revenue: float = price * float(qty)
 
-	# Remove from market inventory
 	_remove_inv(good, qty)
 	_export_rem[good] = cap_rem - qty
 	_exports_today[good] += qty
 
-	# Credit market money for the export revenue
-	var total_revenue: float = price * float(qty)
-	market.money += total_revenue
+	market.treasury_cash += export_revenue
 
 	_recompute_hysteresis(good)
 
 	var inv_after: int = _get_inv(good)
-	var msg := "[TRADE EXPORT] day=%d good=%s qty=%d price=%.2f local=%.2f inv_before=%d inv_after=%d cap_rem=%d" % [
-		day, good, qty, price, local_price, inv_before, inv_after, _export_rem[good]]
+	var msg := "[TRADE EXPORT] day=%d good=%s qty=%d price=%.2f revenue=%.2f treasury_after=%.2f local=%.2f inv_before=%d inv_after=%d" % [
+		day, good, qty, price, export_revenue, market.treasury_cash, local_price, inv_before, inv_after]
 	print(msg)
 	if event_bus:
 		event_bus.log(msg)
 
 
 func _emit_status(day: int) -> void:
-	var msg := "[TRADE STATUS] day=%d imports(wheat=%d bread=%d) exports(wheat=%d bread=%d) cap_rem(wheat_i=%d wheat_e=%d bread_i=%d bread_e=%d)" % [
+	var msg := "[TRADE STATUS] day=%d treasury=%.2f imports(wheat=%d bread=%d) exports(wheat=%d bread=%d)" % [
 		day,
+		market.treasury_cash,
 		_imports_today["wheat"], _imports_today["bread"],
-		_exports_today["wheat"], _exports_today["bread"],
-		_import_rem["wheat"], _export_rem["wheat"],
-		_import_rem["bread"], _export_rem["bread"]]
+		_exports_today["wheat"], _exports_today["bread"]]
 	print(msg)
 	if event_bus:
 		event_bus.log(msg)

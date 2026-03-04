@@ -148,6 +148,11 @@ var bread_emergency_cooldown_remaining: int = 0
 
 var market_seeded: bool = false
 
+# ─── Town Treasury — funds external trade (imports/exports/emergency) ─────
+var treasury_cash: float = 0.0
+var treasury_cash_start: float = 0.0
+var treasury_debug_logs: bool = true
+
 var event_bus: EventBus = null
 var current_tick: int = 0
 
@@ -1331,6 +1336,17 @@ func _find_emergency_bread_supplier(bakers: Array) -> Node:
 
 func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: int) -> void:
 	var sell_qty: int = mini(supplier_bread, BREAD_EMERGENCY_MAX_SELL)
+
+	var estimated_cost: float = float(sell_qty) * get_bid_price("bread")
+	if treasury_cash < estimated_cost:
+		if treasury_cash < get_bid_price("bread"):
+			var skip_line: String = "[EMERGENCY SKIPPED] reason=insufficient_treasury cost=%.2f treasury=%.2f" % [
+				estimated_cost, treasury_cash]
+			print(skip_line)
+			if event_bus:
+				event_bus.log(skip_line)
+			return
+
 	var inv_before: int = bread
 	var total_paid: float = 0.0
 
@@ -1339,6 +1355,9 @@ func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: 
 			sell_qty = i
 			break
 		var bid: float = get_bid_price("bread")
+		if treasury_cash < bid:
+			sell_qty = i
+			break
 		if money < bid:
 			sell_qty = i
 			break
@@ -1348,10 +1367,12 @@ func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: 
 			supplier_wallet.credit(bid)
 		bread += 1
 		money -= bid
+		treasury_cash -= bid
 		total_paid += bid
 
-	var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=%d bypassed=true day=%d tick=%d cd=%d" % [
-		_agent_label(supplier), sell_qty, current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS]
+	var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=%d bypassed=true day=%d tick=%d cd=%d cost=%.2f treasury_after=%.2f" % [
+		_agent_label(supplier), sell_qty, current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS,
+		total_paid, treasury_cash]
 	print(trigger_line)
 	if event_bus:
 		event_bus.log(trigger_line)

@@ -122,6 +122,7 @@ func _validate() -> void:
 	_check_no_bad_pop_names()
 	_check_eval_summary_on_eval_days(final_day)
 	_check_econ_snap_daily(final_day)
+	_check_trade_activity(final_day)
 
 	print("")
 	print("═".repeat(60))
@@ -498,6 +499,48 @@ func _check_econ_snap_daily(final_day: int) -> void:
 		print("  RESULT: PASS (format=%s)" % ("OK" if format_ok else "FAIL"))
 	else:
 		print("  RESULT: WARN (fewer than expected)")
+
+
+func _check_trade_activity(final_day: int) -> void:
+	print("\n── Check 12: [TRADE] activity ──")
+	var status_count: int = 0
+	var import_count: int = 0
+	var export_count: int = 0
+	var skip_count: int = 0
+	for line in _log:
+		if "[TRADE STATUS]" in line:
+			status_count += 1
+		elif "[TRADE IMPORT]" in line:
+			import_count += 1
+		elif "[TRADE EXPORT]" in line:
+			export_count += 1
+		elif "[TRADE SKIP]" in line:
+			skip_count += 1
+
+	print("  [TRADE STATUS] lines: %d" % status_count)
+	print("  [TRADE IMPORT] lines: %d" % import_count)
+	print("  [TRADE EXPORT] lines: %d" % export_count)
+	print("  [TRADE SKIP] lines: %d" % skip_count)
+
+	# Validate format of first TRADE STATUS
+	var format_ok: bool = true
+	for line in _log:
+		if "[TRADE STATUS]" not in line:
+			continue
+		for field in ["day=", "imports(wheat=", "exports(wheat=", "cap_rem(wheat_i="]:
+			if field not in line:
+				print("  BAD FORMAT missing '%s': %s" % [field, line])
+				format_ok = false
+				_all_passed = false
+				break
+		break
+
+	if status_count > 0:
+		print("  Format: %s" % ("OK" if format_ok else "FAIL"))
+	if status_count > 0 or import_count > 0:
+		print("  RESULT: PASS (trade system active)")
+	else:
+		print("  RESULT: WARN (no trade activity — may be OK if RNG skipped or inv never hit threshold)")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

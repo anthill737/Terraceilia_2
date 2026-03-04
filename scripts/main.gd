@@ -4,6 +4,7 @@ extends Node
 const _PopMgrClass = preload("res://scripts/managers/population_manager.gd")
 const _FieldMgrClass = preload("res://scripts/managers/field_manager.gd")
 const _EconStatsClass = preload("res://scripts/managers/economy_stats_manager.gd")
+const _TradeMgrClass = preload("res://scripts/managers/trade_manager.gd")
 
 var farmer: Agent = null
 var baker: Agent = null
@@ -19,6 +20,7 @@ var prosperity_meter: ProsperityMeter = null
 var pop_mgr: PopulationManager = null
 var field_mgr: FieldManager = null
 var econ_stats: EconomyStatsManager = null
+var trade_mgr = null
 
 # ── Convenience forwards → managers (keeps all existing code working) ─────────
 var MAX_FIELDS: int:
@@ -337,6 +339,15 @@ func _ready() -> void:
 	labor_market.migrate_requested.connect(_on_migrate_requested)
 	labor_market.role_switch_requested.connect(_on_role_switch_requested)
 	
+	# Initialize trade manager (external import/export counterparty)
+	trade_mgr = _TradeMgrClass.new()
+	trade_mgr.name = "TradeManager"
+	add_child(trade_mgr)
+	trade_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+	trade_mgr.market = market
+	trade_mgr.event_bus = bus
+	trade_mgr.load_config(economy_config)
+
 	# Assign persistent identities to the initial scene pops
 	_assign_new_identity(farmer)
 	_assign_new_identity(baker)
@@ -1601,7 +1612,11 @@ func _on_calendar_day_changed(day: int) -> void:
 	# Update labor market EMA signals
 	if labor_market:
 		labor_market.update_daily(day)
-	
+
+	# Run external trade (imports/exports) after price update, before agents act
+	if trade_mgr:
+		trade_mgr.on_day_changed(day)
+
 	# Propagate day change to all agents
 	for f in all_farmers:
 		if f and is_instance_valid(f):

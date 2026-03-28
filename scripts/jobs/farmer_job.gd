@@ -19,6 +19,11 @@ const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
 const WAIT_TIME: float = 1.0
 
+# Inter-village trade constants
+const TRADE_EVAL_INTERVAL: int = 10
+const MIN_PROFIT_THRESHOLD: float = 0.3
+const TRAVEL_COST_PER_DISTANCE: float = 0.0002
+
 const WHEAT_RECIPE: Dictionary = {
 	"output_good": "wheat",
 	"output_quantity": 10,
@@ -42,6 +47,11 @@ var hysteresis_cooldown_ticks: int = 0
 var _initialized: bool = false
 var warned_no_field_today: bool = false
 
+# Inter-village trade state
+var trade_route_active: bool = false
+var trade_target_village: Node = null
+var _trade_target_market_node: Node2D = null
+
 
 func get_display_name() -> String:
 	return "Farmer"
@@ -51,12 +61,16 @@ func get_job_inspector_data() -> Dictionary:
 	var d: Dictionary = {}
 	d["role"] = "Farmer"
 	var state_str := "idle"
-	if route:
+	if trade_route_active and trade_target_village != null:
+		state_str = "trade→" + trade_target_village.village_name
+	elif route:
 		if route.is_traveling:
 			state_str = "traveling→" + (route.target.name if route.target else "?")
 		elif agent.pending_target != null:
 			state_str = "waiting→" + agent.pending_target.name
 	d["state"] = state_str
+	d["trade_active"] = trade_route_active
+	d["trade_target"] = trade_target_village.village_name if trade_target_village else ""
 	d["seeds"] = inv.get_qty("seeds") if inv else 0
 	d["wheat"] = inv.get_qty("wheat") if inv else 0
 	d["fields"] = fields.size()
@@ -81,6 +95,7 @@ func set_tick(t: int) -> void:
 		hysteresis_cooldown_ticks -= 1
 	_check_travel_timeout()
 	_check_idle_guard()
+	_maybe_evaluate_trade(t)
 
 
 const STARTING_CASH: float = 500.0
@@ -176,6 +191,12 @@ func physics_tick(_delta: float) -> void:
 func _on_arrived(t: Node2D) -> void:
 	agent.travel_ticks = 0
 	agent.idle_ticks = 0
+	if trade_route_active and t == _trade_target_market_node:
+		_on_trade_arrival()
+		if route_targets.size() > 0:
+			agent.pending_target = get_next_target()
+		route.wait(WAIT_TIME)
+		return
 	handle_arrival(t)
 	agent.pending_target = get_next_target()
 	route.wait(WAIT_TIME)
@@ -349,6 +370,9 @@ func _check_idle_guard() -> void:
 	if hysteresis_cooldown_ticks > 0:
 		agent.idle_ticks = 0
 		return
+	if trade_route_active:
+		agent.idle_ticks = 0
+		return
 	if route == null:
 		return
 	if route.is_traveling or route.is_waiting or route.target != null or agent.pending_target != null:
@@ -368,6 +392,8 @@ func _check_idle_guard() -> void:
 func get_status_text() -> String:
 	if hunger.is_starving:
 		return "STARVING (inactive)"
+	if trade_route_active and trade_target_village != null:
+		return "Trading→" + trade_target_village.village_name
 	if route.target == house_node:
 		if route.is_waiting:
 			return "Waiting at House"
@@ -382,3 +408,109 @@ func get_status_text() -> String:
 			return "Waiting at %s" % field_name
 		return "Walking to %s" % field_name
 	return route.get_status_text()
+
+
+# ==============================================================================
+#  Inter-village trade logic
+# ==============================================================================
+
+func _get_world() -> Node:
+	return Engine.get_main_loop().current_scene.get_node_or_null('World')
+
+
+func _maybe_evaluate_trade(tick: int) -> void:
+	var world = _get_world()
+	if world == null or not world.trade_enabled:
+		return
+	if agent.current_village_ref == null or agent.home_village_ref == null:
+		return
+	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
+		return
+	agent.last_trade_eval_tick = tick
+
+	var local_snap: Dictionary = agent.current_village_ref.get_trade_snapshot()
+	if local_snap.is_empty():
+		return
+	var local_price: float = local_snap['wheat_price']
+	# If local market won't accept wheat at all, treat local profit as worthless
+	var local_profit: float = local_price if (market == null or not market.is_market_buy_blocked('wheat')) else -INF
+
+	var best_village: Node = null
+	var best_profit: float = local_profit + MIN_PROFIT_THRESHOLD
+
+	for village in world.get_all_villages():
+		if not is_instance_valid(village) or village == agent.current_village_ref:
+			continue
+		var snap: Dictionary = village.get_trade_snapshot()
+		if snap.is_empty():
+			continue
+		var dist: float = local_snap['position'].distance_to(snap['position'])
+		var travel_cost: float = dist * TRAVEL_COST_PER_DISTANCE
+		var expected_profit: float = snap['wheat_price'] - local_price - travel_cost
+		print('[TRADE EVAL] agent=Farmer local=%.2f best=%.2f target=%s' % [local_price, snap['wheat_price'], village.village_name])
+		if expected_profit > best_profit:
+			best_profit = expected_profit
+			best_village = village
+
+	if best_village != null:
+		_start_travel_to(best_village, 'profit')
+	elif agent.current_village_ref != agent.home_village_ref:
+		# Check if home is now more profitable — trigger return
+		var home_snap: Dictionary = agent.home_village_ref.get_trade_snapshot()
+		if not home_snap.is_empty():
+			var home_profit: float = home_snap['wheat_price']
+			if home_profit > local_profit + MIN_PROFIT_THRESHOLD:
+				print('[TRADE RETURN] agent=Farmer returning to %s reason=price_shift' % agent.home_village_ref.village_name)
+				_start_travel_to(agent.home_village_ref, 'price_shift')
+
+
+func _start_travel_to(target_village: Node, reason: String) -> void:
+	if trade_route_active and trade_target_village == target_village:
+		return  # Already heading there
+	if agent.current_village_ref == null:
+		return
+	var target_mkt_node: Node2D = target_village.get('market_node') as Node2D
+	if target_mkt_node == null:
+		push_warning("FarmerJob: trade target '%s' has no market_node — skipping" % target_village.village_name)
+		return
+	trade_target_village = target_village
+	_trade_target_market_node = target_mkt_node
+	trade_route_active = true
+	print('[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s' % [
+		agent.current_village_ref.village_name, target_village.village_name, reason])
+	agent.pending_target = null
+	route.set_target(_trade_target_market_node)
+
+
+func _on_trade_arrival() -> void:
+	var arrived_village: Node = trade_target_village
+	var arrived_market_node: Node2D = _trade_target_market_node
+
+	# Clear trade state before switching context
+	trade_route_active = false
+	trade_target_village = null
+	_trade_target_market_node = null
+
+	# Switch village context: all further market ops use the new village
+	agent.current_village_ref = arrived_village
+	market = arrived_village.market
+	agent.market = arrived_village.market
+	market_node = arrived_market_node
+
+	# Rebind profit/throttle calculators to new market
+	if profit and market and event_bus:
+		profit.bind(market, event_bus, get_display_name())
+	if inventory_throttle and market and event_bus:
+		inventory_throttle.bind(market, event_bus, get_display_name())
+
+	# Sell all wheat at new market
+	if inv.get_qty("wheat") > 0:
+		var min_price: float = 0.0
+		if profit:
+			min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
+		var _cf_snap: float = agent.get_cash()
+		var qty: int = market.buy_wheat_from_farmer(agent, min_price)
+		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
+		var trade_profit: float = max(0.0, agent.get_cash() - _cf_snap)
+		print('[TRADE SALE] agent=Farmer village=%s qty=%d profit=+%.1f' % [
+			arrived_village.village_name, qty, trade_profit])

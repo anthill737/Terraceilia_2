@@ -352,14 +352,19 @@ func get_market() -> Market:
 ##   expected_profit = sell_price - local_price - travel_cost
 ## and decide whether to travel here.
 func get_trade_snapshot() -> Dictionary:
+	if market == null or not is_instance_valid(market):
+		return {}
 	return {
-		"village_id":       village_id,
-		"village_name":     village_name,
-		"wheat_price":      market.get_bid_price("wheat") if market else 0.0,
-		"bread_price":      market.get_bid_price("bread") if market else 0.0,
-		"wheat_inventory":  market.wheat if market else 0,
-		"bread_inventory":  market.bread if market else 0,
-		"position":         global_position,
+		"village_ref":       self,
+		"village_id":        village_id,
+		"village_name":      village_name,
+		"wheat_price":       market.get_bid_price("wheat"),
+		"bread_price":       market.get_bid_price("bread"),
+		"wheat_inventory":   market.wheat,
+		"bread_inventory":   market.bread,
+		"position":          global_position,
+		"wheat_buy_blocked": not market.can_producer_sell("wheat"),
+		"bread_buy_blocked": not market.can_producer_sell("bread"),
 	}
 
 
@@ -537,6 +542,8 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	f.name = "Farmer_%d" % pop_mgr.next_farmer_id
 	pop_mgr.next_farmer_id += 1
 	f.home_village_id = village_id
+	f.home_village_ref = self
+	f.current_village_ref = self
 	f.position = to_local(pos)
 	add_child(f)
 

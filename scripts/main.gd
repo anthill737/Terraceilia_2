@@ -38,6 +38,10 @@ var _current_speed: float = 1.0
 # ── Pause control ─────────────────────────────────────────────────────────────
 var _is_paused: bool = false
 var _pause_btn: Button = null
+
+# ── Trade toggle + telemetry panel ────────────────────────────────────────────
+var _trade_btn: Button = null
+var _trade_panel: TradePanel = null
 ## Village navigation buttons in the toolbar (one per village).
 var _village_nav_btns: Array[Button] = []
 
@@ -107,6 +111,7 @@ func _ready() -> void:
 	update_ui()
 	_build_spawn_toolbar()
 	_build_economy_bar()
+	_build_trade_panel()
 
 	if village != null:
 		var eb = village.event_bus
@@ -729,6 +734,17 @@ func _build_spawn_toolbar() -> void:
 	# Highlight the initially-selected village button.
 	_refresh_village_nav_highlights(0)
 
+	# ── Trade toggle button ──
+	hbox.add_child(VSeparator.new())
+
+	_trade_btn = Button.new()
+	_trade_btn.text = "Trade: OFF"
+	_trade_btn.tooltip_text = "Toggle inter-village trade on/off"
+	_trade_btn.custom_minimum_size = Vector2(100, 34)
+	_apply_trade_btn_style(false)
+	_trade_btn.pressed.connect(_on_trade_button_pressed)
+	hbox.add_child(_trade_btn)
+
 	place_mode_label = Label.new()
 	place_mode_label.text = ""
 	place_mode_label.add_theme_font_size_override("font_size", 18)
@@ -942,3 +958,73 @@ func _place_entity_at(pos: Vector2) -> void:
 		PlaceMode.HOUSEHOLD:
 			village.spawn_household_at(pos)
 	# Stay in placement mode so the user can place multiple of the same type
+
+
+# ── Trade toggle ───────────────────────────────────────────────────────────────
+
+func _on_trade_button_pressed() -> void:
+	"""Toggle trade on the WorldManager and update button label/style."""
+	if _world_node and _world_node.has_method("toggle_trade"):
+		_world_node.toggle_trade()
+	var trade_on: bool = false
+	if _world_node and _world_node.get("trade_enabled") != null:
+		trade_on = _world_node.trade_enabled
+	_apply_trade_btn_style(trade_on)
+	if _trade_btn:
+		_trade_btn.text = "Trade: ON" if trade_on else "Trade: OFF"
+	if _trade_panel and trade_on:
+		_trade_panel.show()
+
+
+func _apply_trade_btn_style(trade_on: bool) -> void:
+	if _trade_btn == null:
+		return
+	var s := StyleBoxFlat.new()
+	if trade_on:
+		s.bg_color     = Color(0.08, 0.28, 0.12, 0.95)
+		s.border_color = Color(0.25, 1.00, 0.45, 0.95)
+	else:
+		s.bg_color     = Color(0.18, 0.18, 0.23, 0.92)
+		s.border_color = Color(0.45, 0.55, 0.70, 0.80)
+	s.set_border_width_all(2)
+	s.set_corner_radius_all(4)
+	s.set_content_margin_all(5)
+	_trade_btn.add_theme_stylebox_override("normal", s)
+	var sh := s.duplicate() as StyleBoxFlat
+	sh.bg_color = s.bg_color.lightened(0.08)
+	_trade_btn.add_theme_stylebox_override("hover", sh)
+
+
+func _build_trade_panel() -> void:
+	"""Create the TradePanel and attach it to the UI layer as a floating overlay."""
+	var ui_node := get_node_or_null("UI")
+	if ui_node == null:
+		push_error("Main: could not find UI node for TradePanel")
+		return
+
+	var trade_scene := load("res://scenes/ui/TradePanel.tscn") as PackedScene
+	if trade_scene == null:
+		push_error("Main: could not load TradePanel.tscn")
+		return
+	_trade_panel = trade_scene.instantiate() as TradePanel
+	if _trade_panel == null:
+		push_error("Main: TradePanel.tscn did not produce a TradePanel instance")
+		return
+	_trade_panel.name = "TradePanel"
+	_trade_panel.world_node = _world_node
+
+	# Anchor to bottom-right corner of the viewport
+	_trade_panel.layout_mode = 1
+	_trade_panel.anchor_left   = 1.0
+	_trade_panel.anchor_right  = 1.0
+	_trade_panel.anchor_top    = 1.0
+	_trade_panel.anchor_bottom = 1.0
+	_trade_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_trade_panel.grow_vertical   = Control.GROW_DIRECTION_BEGIN
+	_trade_panel.offset_left   = -330.0
+	_trade_panel.offset_right  = -8.0
+	_trade_panel.offset_top    = -350.0
+	_trade_panel.offset_bottom = -8.0
+
+	ui_node.add_child(_trade_panel)
+	_trade_panel.hide()  # visible only when trade is enabled

@@ -414,10 +414,6 @@ func _on_tick(tick: int) -> void:
 			spawn_household_at(spawn_pos)
 			prosperity_meter.record_spawn(calendar.day_index)
 	
-	# Bread emergency liquidity override
-	if market:
-		market.check_bread_emergency(all_bakers)
-
 	# Run audit checks — skip if either base agent has been freed by migration
 	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
 		audit.audit(farmer, baker, market, bus, tick)

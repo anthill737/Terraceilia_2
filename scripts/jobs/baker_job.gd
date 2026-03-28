@@ -793,9 +793,8 @@ func _maybe_evaluate_trade(tick: int) -> void:
 
 	var local_snap: Dictionary = current_village.get_trade_snapshot()
 	var local_bid: float = local_snap.get("bread_price", 0.0)
-	var local_inv: int   = local_snap.get("bread_inventory", 0)
-	# Demand exists if market isn't already saturated (below target ~50).
-	var can_sell_locally: bool = local_inv < 50
+	# Use the authoritative market blocked flag from the snapshot.
+	var can_sell_locally: bool = not local_snap.get("bread_buy_blocked", false)
 	var local_profit: float    = local_bid if can_sell_locally else 0.0
 
 	var best_village = null

@@ -56,11 +56,6 @@ var day_money_start: float = -1.0
 
 var hysteresis_cooldown_ticks: int = 0
 
-# Emergency liquidity flags (set by Market when bread inventory hits zero)
-var emergency_grind_next: bool = false
-var emergency_bake_next: bool = false
-var emergency_sell_next: bool = false
-
 
 func get_display_name() -> String:
 	return "Baker"
@@ -217,12 +212,6 @@ func perform_market_transactions() -> void:
 			agent.pending_target = market_location
 			route.wait(WAIT_TIME)
 			return
-	# Emergency sell: if flagged, force into SELL phase regardless of current phase
-	if emergency_sell_next and phase != Phase.SELL and inv.get_qty("bread") > 0:
-		if event_bus:
-			event_bus.log("[EMERGENCY] Tick %d: Baker %s forcing SELL phase (emergency_sell_next)" % [agent.current_tick, agent.name])
-		phase = Phase.SELL
-
 	match phase:
 		Phase.RESTOCK:
 			if not market.can_producer_produce("bread"):
@@ -258,7 +247,7 @@ func perform_market_transactions() -> void:
 				agent.pending_target = bakery_location
 				route.wait(WAIT_TIME)
 		Phase.SELL:
-			if not market.can_producer_sell("bread") and not emergency_sell_next:
+			if not market.can_producer_sell("bread"):
 				hysteresis_cooldown_ticks = randi_range(5, 15)
 				print("[BUGFIX] Baker SELL blocked by hysteresis → cooldown %d ticks" % hysteresis_cooldown_ticks)
 				if event_bus:
@@ -267,9 +256,7 @@ func perform_market_transactions() -> void:
 				agent.pending_target = bakery_location
 				route.wait(WAIT_TIME)
 				return
-			if emergency_sell_next and event_bus:
-				event_bus.log("[EMERGENCY] Tick %d: Baker %s bypassing sell hysteresis (emergency_sell_next)" % [agent.current_tick, agent.name])
-			if not emergency_sell_next and margin_compression and margin_compression.should_throttle_selling(BREAD_RECIPE):
+			if margin_compression and margin_compression.should_throttle_selling(BREAD_RECIPE):
 				phase = Phase.PRODUCE
 				agent.pending_target = bakery_location
 				route.wait(WAIT_TIME)
@@ -283,24 +270,23 @@ func perform_market_transactions() -> void:
 				return
 			var current_bread: int = inv.get_qty("bread")
 			var sellable: int = max(0, current_bread - BREAD_PRODUCTION_MIN)
-			if inventory_throttle and not emergency_sell_next:
+			if inventory_throttle:
 				sellable = inventory_throttle.apply_to_sell(sellable)
 			if sellable > 0:
 				var min_price: float = 0.0
-				if profit and not emergency_sell_next:
+				if profit:
 					min_price = profit.get_min_acceptable_price(BREAD_RECIPE)
 				var _cf_bsale_snap: float = agent.get_cash()
-				var _bs: int = market.buy_bread_from_agent(agent, sellable, min_price, false, emergency_sell_next)
+				var _bs: int = market.buy_bread_from_agent(agent, sellable, min_price, false)
 				agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_bsale_snap)
 				var btr: Dictionary = market.last_trade_result
 				if _bs > 0:
 					agent.log_event(
-						"Sold %d bread at $%.2f each (%s)%s" %
+						"Sold %d bread at $%.2f each (%s)." %
 						[
 							_bs,
 							btr.get("price", 0.0),
 							btr.get("reason", "?"),
-							" — urgent sale." if emergency_sell_next else "."
 						]
 					)
 				else:
@@ -308,7 +294,6 @@ func perform_market_transactions() -> void:
 						"Could not sell bread (tried to sell %d loaves; %s)." %
 						[sellable, btr.get("reason", "unknown")]
 					)
-			emergency_sell_next = false
 			var current_wheat: int = inv.get_qty("wheat")
 			if current_wheat < WHEAT_LOW_WATERMARK:
 				phase = Phase.RESTOCK
@@ -344,22 +329,7 @@ func start_production() -> void:
 		return
 	route.stop()
 
-	# Emergency priority: bake flour into bread first if flagged
-	if emergency_bake_next and inv.get_qty("flour") > 0:
-		if event_bus:
-			event_bus.log("[EMERGENCY] Tick %d: Baker %s prioritizing BAKING (emergency_bake_next, flour=%d)" % [agent.current_tick, agent.name, inv.get_qty("flour")])
-		emergency_bake_next = false
-		production_state = ProductionState.BAKING
-		process_timer = BAKING_TIME
-		return
-	# Emergency priority: grind wheat into flour first if flagged
-	if emergency_grind_next and inv.get_qty("wheat") > 0:
-		if event_bus:
-			event_bus.log("[EMERGENCY] Tick %d: Baker %s prioritizing GRINDING (emergency_grind_next, wheat=%d)" % [agent.current_tick, agent.name, inv.get_qty("wheat")])
-		emergency_grind_next = false
-		production_state = ProductionState.GRINDING
-		process_timer = GRINDING_TIME
-		return
+
 
 	if inv.get_qty("wheat") > 0:
 		production_state = ProductionState.GRINDING
@@ -561,15 +531,6 @@ func process_baking(delta: float) -> void:
 					"Baked %d loaves of bread (baker skill %.2f, yield ×%.2f)." %
 					[bread_produced, agent.skill_baker, _sk_mult]
 				)
-				# Emergency: immediately go to sell after baking
-				if emergency_sell_next:
-					if event_bus:
-						event_bus.log("[EMERGENCY] Tick %d: Baker %s rushing to SELL after bake (bread=%d)" % [agent.current_tick, agent.name, inv.get_qty("bread")])
-					production_state = ProductionState.IDLE
-					phase = Phase.SELL
-					agent.pending_target = market_location
-					route.wait(WAIT_TIME)
-					return
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
 				var current_wheat: int = inv.get_qty("wheat")
@@ -604,9 +565,6 @@ func process_baking(delta: float) -> void:
 
 
 func on_day_changed(_day: int) -> void:
-	emergency_grind_next = false
-	emergency_bake_next = false
-	emergency_sell_next = false
 	var _br: int = inv.get_qty("bread") if inv else 0
 	var _fl: int = inv.get_qty("flour") if inv else 0
 	agent.log_event(

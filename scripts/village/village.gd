@@ -59,8 +59,6 @@ var calendar = null      # Calendar
 ## ProsperityMeter reference for spawn log messages.
 var prosperity_meter = null  # ProsperityMeter
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-var log_prefix: String = "[Village]"
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 var _seed: int = 0
@@ -93,8 +91,6 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	rng = RandomNumberGenerator.new()
 	rng.seed = seed_val
 
-	log_prefix = "[%s]" % village_name
-
 	# ── Managers ──
 	pop_mgr = PopulationManager.new()
 	pop_mgr.name = "PopulationManager"
@@ -124,7 +120,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	bus.name = "EventBus"
 	add_child(bus)
 	bus.process_mode = Node.PROCESS_MODE_PAUSABLE
-	bus.village_label = village_name
+	bus.village_label = name
 	event_bus = bus
 
 	audit = EconomyAudit.new()
@@ -259,7 +255,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Bootstrap market
 	_apply_market_seed()
 
-	event_bus.log("%s Tick 0: START" % log_prefix)
+	event_bus.log("Tick 0: START")
 
 
 ## Canonical tick entry-point.  World connects SimulationClock.ticked → tick_sim.
@@ -302,8 +298,7 @@ func receive_tick(tick: int) -> void:
 		)
 
 		if event_bus and calendar.day_index % 5 == 0:
-			event_bus.log("%s[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
-				log_prefix,
+			event_bus.log("[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
 				calendar.day_index,
 				prosperity_meter.prosperity_score,
 				prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW,
@@ -544,6 +539,10 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	if b_hunger and b_inv:
 		b_hunger.bind(b.name, b_inv, event_bus, calendar)
 
+	var b_reserve: FoodReserve = b.get_node("FoodReserve") as FoodReserve
+	if b_reserve:
+		b_reserve.bind(b_inv, b_hunger, market, b.get_node("Wallet") as Wallet, event_bus, b.name)
+
 	var bakery_spot := Node2D.new()
 	bakery_spot.name = b.name + "_Bakery"
 	bakery_spot.global_position = pos
@@ -646,9 +645,9 @@ func _on_calendar_day_changed(day: int) -> void:
 		return
 
 	if event_bus:
-		event_bus.log("%s[LAND STATUS] fields=%d/%d" % [log_prefix, all_field_nodes.size(), MAX_FIELDS])
-		event_bus.log("%s[POP STATUS] total=%d/%d (H=%d F=%d B=%d)" % [
-			log_prefix, pop_mgr.count(), MAX_TOTAL_POP,
+		event_bus.log("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
+		event_bus.log("[POP STATUS] total=%d/%d (H=%d F=%d B=%d)" % [
+			pop_mgr.count(), MAX_TOTAL_POP,
 			households.size(), all_farmers.size(), all_bakers.size()])
 
 	if labor_market:
@@ -669,7 +668,7 @@ func _on_calendar_day_changed(day: int) -> void:
 	if not sim_failed and pop_mgr.count() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
 		sim_failed = true
 		if event_bus:
-			event_bus.log("%s[SIM FAIL] Population extinct on day %d" % [log_prefix, day])
+			event_bus.log("[SIM FAIL] Population extinct on day %d" % day)
 
 	var still_pending: Array = []
 	for entry in pending_conversions:
@@ -690,7 +689,7 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	if not is_instance_valid(agent):
 		return
 	if event_bus:
-		event_bus.log("%s[MIGRATION] %s leaving (reason: %s)" % [log_prefix, agent.name, reason])
+		event_bus.log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
 
 	var h_idx := households.find(agent)
 	if h_idx != -1:
@@ -718,7 +717,7 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	var _migrated_name: String = agent.name
 	agent.queue_free()
 	if event_bus:
-		event_bus.log("%s[MIGRATE CONFIRM] %s removed (reason: %s)" % [log_prefix, _migrated_name, reason])
+		event_bus.log("[MIGRATE CONFIRM] %s removed (reason: %s)" % [_migrated_name, reason])
 
 
 func _on_role_switch_requested(household: Node, new_role: String) -> void:
@@ -731,7 +730,7 @@ func _on_role_switch_requested(household: Node, new_role: String) -> void:
 
 	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
 	if event_bus:
-		event_bus.log("%s[MOBILITY] %s: training to become %s (%d days)" % [log_prefix, household.name, new_role, training_days])
+		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
 	if household.has_method("log_event"):
 		household.log_event("Started training to become a %s (%d days to go)." % [new_role.capitalize(), training_days])
 
@@ -746,8 +745,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	var pop_id: String = household.person_name if household.get("person_name") and household.person_name != "" else household.name
 
 	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
-		var block_line := "%s[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
-			log_prefix, pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
+		var block_line := "[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
+			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
 		if event_bus: event_bus.log(block_line)
 		return
 
@@ -766,12 +765,12 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		var conv_delta: float = u_best - u_cur
 		var conv_ratio: float = u_best / maxf(0.01, absf(u_cur))
 		if event_bus:
-			event_bus.log("%s[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [log_prefix, pop_id, old_role, role])
+			event_bus.log("[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role])
 		ag.log_event("Switched from %s to %s — utility gain %.2f, ratio %.2f; had $%.0f." % [
 			old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money])
 		if event_bus:
-			event_bus.log("%s[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
-				log_prefix, ag.name, role, pos.x, pos.y, wallet_money])
+			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
+				ag.name, role, pos.x, pos.y, wallet_money])
 
 		var h_idx := households.find(ag)
 		if h_idx != -1:
@@ -790,7 +789,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 				if not ag.agent_died.is_connected(_on_household_died):
 					ag.agent_died.connect(_on_household_died)
 				if event_bus:
-					event_bus.log("%s[MOBILITY] Farmer conversion aborted — field spawn returned null" % log_prefix)
+					event_bus.log("[MOBILITY] Farmer conversion aborted — field spawn returned null")
 				return
 
 			ag.set_role("Farmer")
@@ -821,8 +820,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			all_farmers.append(ag)
 
 			if event_bus:
-				event_bus.log("%s[LAND] New field for farmer %s at (%.0f, %.0f)" % [
-					log_prefix, ag.name, field_pos.x, field_pos.y])
+				event_bus.log("[LAND] New field for farmer %s at (%.0f, %.0f)" % [
+					ag.name, field_pos.x, field_pos.y])
 
 		elif role == "baker":
 			ag.set_role("Baker")
@@ -832,6 +831,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			if ag.hunger and ag.inv:
 				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
+			if ag.food_reserve:
+				ag.food_reserve.bind(ag.inv, ag.hunger, market, ag.wallet, event_bus, ag.name)
 
 			var bakery_spot := Node2D.new()
 			bakery_spot.name = ag.name + "_Bakery"
@@ -855,8 +856,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 # ============================================================================
 
 func log_population_snapshot() -> void:
-	var line := "%s[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [
-		log_prefix, households.size(), all_farmers.size(), all_bakers.size(),
+	var line := "[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [
+		households.size(), all_farmers.size(), all_bakers.size(),
 		pop_mgr.count() if pop_mgr else 0]
 	print(line)
 	if event_bus:

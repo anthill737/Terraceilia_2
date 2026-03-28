@@ -132,28 +132,17 @@ func _world_to_screen(world_pos: Vector2) -> Vector2:
 func _update_camera() -> void:
 	if _camera == null:
 		return
-	# Centroid tracks selected village only; bounds include all entities so the
-	# camera can scroll to any village without restriction.
-	var selected_positions: Array[Vector2] = []
+	# Only update the scrollable bounds so the camera can reach any village.
+	# Auto-follow / centroid tracking is intentionally disabled — camera moves
+	# only when the user presses a village-nav or World button explicitly.
 	var all_entities: Array = []
 	for group_name: String in ["farmers", "bakers", "households"]:
 		for pop: Node in get_tree().get_nodes_in_group(group_name):
-			if not is_instance_valid(pop):
-				continue
-			var pop2d := pop as Node2D
-			if pop2d:
+			if is_instance_valid(pop) and pop is Node2D:
 				all_entities.append(pop)
-				if village != null and village.is_ancestor_of(pop):
-					selected_positions.append(pop2d.global_position)
 	for fn: Node in get_tree().get_nodes_in_group("fields"):
 		if is_instance_valid(fn):
 			all_entities.append(fn)
-	if not selected_positions.is_empty():
-		var centroid := Vector2.ZERO
-		for p in selected_positions:
-			centroid += p
-		centroid /= float(selected_positions.size())
-		_camera.update_centroid(centroid)
 	if not all_entities.is_empty():
 		_camera.update_bounds(all_entities)
 

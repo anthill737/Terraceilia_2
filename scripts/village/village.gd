@@ -64,6 +64,14 @@ var prosperity_meter = null  # ProsperityMeter
 var _seed: int = 0
 var _config: Dictionary = {}
 
+# ── Village territory / spawn zone ────────────────────────────────────────────
+## World-space anchor for spawn calculations. Initialised in initialize().
+var village_center: Vector2 = Vector2.ZERO
+## Maximum distance from village_center that new agents may spawn.
+var spawn_radius: float = 220.0
+## Minimum distance — prevents all pops from stacking exactly on the centre.
+var inner_spawn_radius: float = 60.0
+
 # ── Convenience forwards → managers (keeps spawn code working) ────────────────
 var MAX_FIELDS: int:
 	get: return field_mgr.MAX_FIELDS if field_mgr else 10
@@ -90,6 +98,13 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Per-village deterministic RNG
 	rng = RandomNumberGenerator.new()
 	rng.seed = seed_val
+
+	# ── Territory anchor (used for local spawn positioning + debug draw) ──
+	# Village nodes are placed at world offsets by WorldManager; the visual
+	# activity area is centred roughly 400 px right and 300 px down from the
+	# node origin, matching WorldManager.VILLAGE_CENTROID_OFFSET.
+	village_center = global_position + Vector2(400.0, 300.0)
+	queue_redraw()
 
 	# ── Managers ──
 	pop_mgr = PopulationManager.new()
@@ -171,6 +186,11 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Wire calendar signals
 	calendar.day_changed.connect(market.on_day_changed)
 	calendar.day_changed.connect(_on_calendar_day_changed)
+
+	# Stamp home village on initial agents so locality is trackable from birth.
+	farmer.home_village_id = village_id
+	baker.home_village_id = village_id
+	household_agent.home_village_id = village_id
 
 	# Wire event_bus and market onto all base agents
 	market.event_bus = bus
@@ -307,7 +327,7 @@ func receive_tick(tick: int) -> void:
 			])
 
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
-			var spawn_pos = Vector2(rng.randf_range(100, 700), rng.randf_range(100, 500))
+			var spawn_pos := get_spawn_point_for_role("household")
 			spawn_household_at(spawn_pos)
 			prosperity_meter.record_spawn(calendar.day_index)
 
@@ -321,20 +341,71 @@ func get_market() -> Market:
 
 func get_population_summary() -> Dictionary:
 	return {
-		"farmers": all_farmers.size(),
-		"bakers": all_bakers.size(),
+		"farmers":    all_farmers.size(),
+		"bakers":     all_bakers.size(),
 		"households": households.size(),
-		"total": pop_mgr.count() if pop_mgr else 0
+		"total":      pop_mgr.count() if pop_mgr else 0,
+		"fields":     all_field_nodes.size(),
+		"max_fields": MAX_FIELDS,
 	}
 
 
 func get_econ_snapshot() -> Dictionary:
-	return {
+	var snap: Dictionary = {
+		"day":         calendar.day_index if calendar else 0,
 		"wheat_price": market.get_bid_price("wheat") if market else 0.0,
 		"bread_price": market.get_bid_price("bread") if market else 0.0,
-		"prosperity":  prosperity_meter.prosperity_score if prosperity_meter else 0.0,
-		"day":         calendar.day_index if calendar else 0,
+		"wheat":       market.wheat if market else 0,
+		"bread":       market.bread if market else 0,
+		"wheat_cap":   market.wheat_capacity if market else 999999999,
+		"bread_cap":   market.bread_capacity if market else 999999999,
+		"prosperity_score":      prosperity_meter.prosperity_score if prosperity_meter else 0.0,
+		"prosperity_wealth":     (prosperity_meter.prosperity_inputs.get("wealth_health", 0.0)
+		                          if prosperity_meter else 0.0),
+		"prosperity_food":       (prosperity_meter.prosperity_inputs.get("food_security", 0.0)
+		                          if prosperity_meter else 0.0),
+		"prosperity_starvation": (prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
+		                          if prosperity_meter else 0.0),
 	}
+	# Baseline farmer — first valid farmer in this village
+	var f: Node = farmer if (farmer != null and is_instance_valid(farmer)) else (
+		all_farmers[0] if all_farmers.size() > 0 and is_instance_valid(all_farmers[0]) else null)
+	if f != null:
+		var f_inv  := f.get_node_or_null("Inventory")      as Inventory
+		var f_hngr := f.get_node_or_null("HungerNeed")     as HungerNeed
+		var f_wlt  := f.get_node_or_null("Wallet")         as Wallet
+		var f_cap  := f.get_node_or_null("InventoryCapacity") as InventoryCapacity
+		snap["baseline_farmer"] = {
+			"cash":        f_wlt.money       if f_wlt  else 0.0,
+			"seeds":       f_inv.get_qty("seeds") if f_inv  else 0,
+			"wheat":       f_inv.get_qty("wheat") if f_inv  else 0,
+			"bread":       f_inv.get_qty("bread") if f_inv  else 0,
+			"hunger_days": f_hngr.hunger_days     if f_hngr else 0,
+			"hunger_max":  f_hngr.hunger_max_days if f_hngr else 5,
+			"status":      f.get_status_text()    if f.has_method("get_status_text") else "",
+			"inv_total":   f_cap.current_total()  if f_cap  else 0,
+			"inv_max":     f_cap.max_items        if f_cap  else 0,
+		}
+	# Baseline baker — first valid baker in this village
+	var b: Node = baker if (baker != null and is_instance_valid(baker)) else (
+		all_bakers[0] if all_bakers.size() > 0 and is_instance_valid(all_bakers[0]) else null)
+	if b != null:
+		var b_inv  := b.get_node_or_null("Inventory")      as Inventory
+		var b_hngr := b.get_node_or_null("HungerNeed")     as HungerNeed
+		var b_wlt  := b.get_node_or_null("Wallet")         as Wallet
+		var b_cap  := b.get_node_or_null("InventoryCapacity") as InventoryCapacity
+		snap["baseline_baker"] = {
+			"cash":        b_wlt.money       if b_wlt  else 0.0,
+			"wheat":       b_inv.get_qty("wheat") if b_inv  else 0,
+			"flour":       b_inv.get_qty("flour") if b_inv  else 0,
+			"bread":       b_inv.get_qty("bread") if b_inv  else 0,
+			"hunger_days": b_hngr.hunger_days     if b_hngr else 0,
+			"hunger_max":  b_hngr.hunger_max_days if b_hngr else 5,
+			"status":      b.get_status_text()    if b.has_method("get_status_text") else "",
+			"inv_total":   b_cap.current_total()  if b_cap  else 0,
+			"inv_max":     b_cap.max_items        if b_cap  else 0,
+		}
+	return snap
 
 
 # ── Spawn helpers (relocated from main.gd) ────────────────────────────────────
@@ -441,6 +512,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		return null
 	f.name = "Farmer_%d" % pop_mgr.next_farmer_id
 	pop_mgr.next_farmer_id += 1
+	f.home_village_id = village_id
 	f.position = to_local(pos)
 	add_child(f)
 
@@ -520,6 +592,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 		return null
 	b.name = "Baker_%d" % pop_mgr.next_baker_id
 	pop_mgr.next_baker_id += 1
+	b.home_village_id = village_id
 	b.position = to_local(pos)
 	add_child(b)
 
@@ -586,6 +659,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	h.name = "Household_%d" % pop_mgr.next_household_id
 	pop_mgr.next_household_id += 1
+	h.home_village_id = village_id
 	h.position = to_local(pos)
 	add_child(h)
 
@@ -777,12 +851,13 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			households.remove_at(h_idx)
 		if ag.agent_died.is_connected(_on_household_died):
 			ag.agent_died.disconnect(_on_household_died)
+		# Ensure converted agent retains the correct home village.
+		ag.home_village_id = village_id
 
 		if role == "farmer":
-			var field_pos := Vector2(
-				clamp(pos.x + rng.randf_range(-150.0, 150.0), 50.0, 750.0),
-				clamp(pos.y + rng.randf_range(-150.0, 150.0), 50.0, 550.0)
-			)
+			# Use village-local spawn helper so the new field stays inside the
+			# correct village territory regardless of world offset.
+			var field_pos := get_spawn_point_for_role("farmer")
 			var pre_field := spawn_field_at(field_pos, null, true)
 			if pre_field == null:
 				households.append(ag)
@@ -911,6 +986,25 @@ func _apply_market_seed() -> void:
 # SPAWN POSITIONING
 # ============================================================================
 
+## Returns a world-space point within this village's spawn zone.
+## All auto-spawns (growth, conversion, replacement) must call this so no
+## agent ever appears outside the correct village territory.
+func get_spawn_point_for_role(role: String) -> Vector2:
+	var angle := rng.randf() * TAU
+	var r := rng.randf_range(inner_spawn_radius, spawn_radius)
+	# Slight role bias (visual clustering only — does not affect economy)
+	match role:
+		"farmer":
+			# Bias toward the left/field side of the village area
+			angle = rng.randf_range(PI * 0.6, PI * 1.4)
+		"baker":
+			# Bias toward the centre-right (bakery side)
+			angle = rng.randf_range(-PI * 0.3, PI * 0.3)
+		_:
+			pass  # households and unknown roles use full circle
+	return village_center + Vector2(cos(angle), sin(angle)) * r
+
+
 func _get_next_farmer_position() -> Vector2:
 	var base_x := 80.0
 	var base_y := 480.0
@@ -929,3 +1023,34 @@ func _get_next_baker_position() -> Vector2:
 	@warning_ignore("integer_division")
 	var row := (offset / 200) * 60
 	return Vector2(base_x + col, base_y + row)
+
+
+# ============================================================================
+# DEBUG VISUALIZATION
+# ============================================================================
+
+func _draw() -> void:
+	"""Draw territory indicators for visual debugging.
+	Shows spawn radius circle, inner exclusion zone, centre dot, and name label.
+	All coordinates are local space (village origin = (0,0))."""
+	if village_center == Vector2.ZERO:
+		return
+
+	var local_center := to_local(village_center)
+
+	# Outer spawn-radius boundary (faint blue)
+	draw_arc(local_center, spawn_radius, 0.0, TAU, 72, Color(0.35, 0.65, 1.0, 0.22), 2.0)
+	# Inner exclusion zone (even fainter)
+	draw_arc(local_center, inner_spawn_radius, 0.0, TAU, 36, Color(0.35, 0.65, 1.0, 0.12), 1.5)
+	# Centre marker cross
+	var cs := 10.0
+	draw_line(local_center + Vector2(-cs, 0), local_center + Vector2(cs, 0),
+		Color(0.5, 0.80, 1.0, 0.55), 2.0)
+	draw_line(local_center + Vector2(0, -cs), local_center + Vector2(0, cs),
+		Color(0.5, 0.80, 1.0, 0.55), 2.0)
+	# Village name label above the radius circle
+	var font := ThemeDB.fallback_font
+	if font:
+		draw_string(font, local_center + Vector2(0, -spawn_radius - 12),
+			village_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 16,
+			Color(0.65, 0.88, 1.0, 0.80))

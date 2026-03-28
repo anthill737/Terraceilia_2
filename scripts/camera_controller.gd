@@ -8,7 +8,9 @@ const BOUNDS_PADDING: float = 400.0
 
 var _target_zoom: float = 1.0
 var _dragging: bool = false
-var _auto_follow: bool = true
+## False by default — camera moves only on explicit button press (fly_to / pan_to).
+## Set to true only when legacy single-village follow is intentionally enabled.
+var _auto_follow: bool = false
 var _target_position: Vector2 = Vector2.ZERO
 # Default bounds span two villages (Village2 ends at ~x=2800); updated at runtime.
 var _world_min: Vector2 = Vector2(-500, -500)

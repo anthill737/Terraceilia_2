@@ -13,6 +13,9 @@ var person_id: int = 0
 var person_name: String = ""
 var life_events: Array[String] = []
 var _person_day: int = 0
+## Village this agent was spawned in. Set by Village.spawn_*_at() and role-conversion
+## so locality can always be recovered without traversing the scene tree.
+var home_village_id: int = 0
 
 # -- Role management -----------------------------------------------------------
 var current_role: String = ""

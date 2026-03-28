@@ -196,43 +196,38 @@ func _refresh_flows(world: Node) -> void:
 		if not (v and is_instance_valid(v)):
 			continue
 		var vname: String = _village_name(v)
-		var wheat_out: int = 0
-		var bread_out: int = 0
-		var wheat_in:  int = 0
-		var bread_in:  int = 0
+		var wheat_away: int = 0  # agents from this village carrying wheat elsewhere
+		var bread_away: int = 0  # agents from this village carrying bread elsewhere
+		var wheat_stock: int = 0
+		var bread_stock: int = 0
 
-		# Use Village.get_trade_snapshot() when available (T1)
+		# Market stock levels from Village.get_trade_snapshot() (T1 API)
 		if v.has_method("get_trade_snapshot"):
 			var snap: Dictionary = v.get_trade_snapshot()
-			wheat_out = snap.get("wheat_exported", 0)
-			wheat_in  = snap.get("wheat_imported", 0)
-			bread_out = snap.get("bread_exported", 0)
-			bread_in  = snap.get("bread_imported", 0)
-		else:
-			# Fallback: scan agents to approximate flows
-			for group in ["farmers", "bakers"]:
-				for agent in get_tree().get_nodes_in_group(group):
-					if not is_instance_valid(agent):
-						continue
-					var home = agent.get("home_village_ref")
-					var cur  = agent.get("current_village_ref")
-					if home == null or cur == null:
-						continue
-					if not is_instance_valid(home) or not is_instance_valid(cur):
-						continue
-					if home == v and cur != v:
-						if group == "farmers":
-							wheat_out += int(agent.get("wheat") if agent.get("wheat") != null else 0)
-						else:
-							bread_out += int(agent.get("bread") if agent.get("bread") != null else 0)
-					elif home != v and cur == v:
-						if group == "farmers":
-							wheat_in += int(agent.get("wheat") if agent.get("wheat") != null else 0)
-						else:
-							bread_in += int(agent.get("bread") if agent.get("bread") != null else 0)
+			wheat_stock = snap.get("wheat_qty", 0)
+			bread_stock = snap.get("bread_qty", 0)
 
-		lines.append("[b]%s[/b]  wheat ↑%d ↓%d  bread ↑%d ↓%d" % [
-			vname, wheat_out, wheat_in, bread_out, bread_in
+		# Scan agents to count goods currently carried away from this village
+		for group in ["farmers", "bakers"]:
+			for agent in get_tree().get_nodes_in_group(group):
+				if not is_instance_valid(agent):
+					continue
+				var home = agent.get("home_village_ref")
+				var cur  = agent.get("current_village_ref")
+				if home == null or cur == null:
+					continue
+				if not is_instance_valid(home) or not is_instance_valid(cur):
+					continue
+				if home == v and cur != v:
+					var inv = agent.get("inv")
+					if inv != null:
+						if group == "farmers":
+							wheat_away += inv.get_qty("wheat") if inv.has_method("get_qty") else 0
+						else:
+							bread_away += inv.get_qty("bread") if inv.has_method("get_qty") else 0
+
+		lines.append("[b]%s[/b]  stock wheat %d bread %d  away wheat %d bread %d" % [
+			vname, wheat_stock, bread_stock, wheat_away, bread_away
 		])
 
 	if lines.is_empty():
@@ -249,6 +244,7 @@ func _refresh_profit() -> void:
 		for agent in get_tree().get_nodes_in_group(group):
 			if not is_instance_valid(agent):
 				continue
+			# trade_profit_total is set by FarmerJob/BakerJob on each completed trade sale (T2/T3)
 			var profit = agent.get("trade_profit_total")
 			if profit == null:
 				continue
@@ -294,15 +290,15 @@ func _village_name(v: Node) -> String:
 
 func _agent_cargo(agent: Node) -> String:
 	var parts: Array[String] = []
-	var wheat = agent.get("wheat")
-	if wheat != null and int(wheat) > 0:
-		parts.append("wheat×%d" % int(wheat))
-	var flour = agent.get("flour")
-	if flour != null and int(flour) > 0:
-		parts.append("flour×%d" % int(flour))
-	var bread = agent.get("bread")
-	if bread != null and int(bread) > 0:
-		parts.append("bread×%d" % int(bread))
+	var inv = agent.get("inv")
+	if inv == null:
+		return "(empty)"
+	for good in ["wheat", "flour", "bread"]:
+		if not inv.has_method("get_qty"):
+			break
+		var qty: int = inv.get_qty(good)
+		if qty > 0:
+			parts.append("%s×%d" % [good, qty])
 	if parts.is_empty():
 		return "(empty)"
 	return ", ".join(parts)

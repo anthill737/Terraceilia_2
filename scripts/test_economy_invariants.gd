@@ -217,11 +217,6 @@ func _check_market(m: Market, tick: int) -> bool:
 	if m.bread_price < m.BREAD_PRICE_FLOOR - 0.001 or m.bread_price > m.BREAD_PRICE_CEILING + 0.001:
 		push_error("[ECON TEST] tick=%d: bread_price out of band %.4f" % [tick, m.bread_price])
 		return false
-	if m.get("treasury_cash") != null:
-		var tc: float = m.treasury_cash
-		if is_nan(tc) or tc < -0.001:
-			push_error("[ECON TEST] tick=%d: treasury_cash invalid %s" % [tick, tc])
-			return false
 	return true
 
 

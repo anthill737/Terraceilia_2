@@ -1,180 +1,78 @@
 extends Node
 
-# Force-load manager scripts so their class_names are resolved before main.gd
-const _PopMgrClass = preload("res://scripts/managers/population_manager.gd")
-const _FieldMgrClass = preload("res://scripts/managers/field_manager.gd")
-const _EconStatsClass = preload("res://scripts/managers/economy_stats_manager.gd")
+# ── Village reference (economy delegated to village.gd) ───────────────────────
+## Resolved in _ready() after World._ready() spawns Village1.
+var village: Village = null
 
-var farmer: Agent = null
-var baker: Agent = null
-var market: Market = null
-var household_agent: Agent = null
+# ── Simulation clock (world-level — controls Engine.time_scale) ───────────────
 var clock: SimulationClock = null
-var bus: EventBus = null
-var audit: EconomyAudit = null
-var calendar: Calendar = null
-var prosperity_meter: ProsperityMeter = null
 
-# ── Managers ──────────────────────────────────────────────────────────────────
-var pop_mgr: PopulationManager = null
-var field_mgr: FieldManager = null
-var econ_stats: EconomyStatsManager = null
+# ── Camera ────────────────────────────────────────────────────────────────────
+var _camera: Camera2D = null
 
-# ── Convenience forwards → managers (keeps all existing code working) ─────────
-var MAX_FIELDS: int:
-	get: return field_mgr.MAX_FIELDS if field_mgr else 10
-var MAX_TOTAL_POP: int:
-	get: return pop_mgr.MAX_TOTAL_POP if pop_mgr else 50
-var all_fields: Array:
-	get: return field_mgr.all_fields if field_mgr else []
-var all_field_nodes: Array:
-	get: return field_mgr.all_field_nodes if field_mgr else []
-var field_assignment_map: Dictionary:
-	get: return field_mgr.field_assignment_map if field_mgr else {}
-var next_field_id: int:
-	get: return field_mgr.next_field_id if field_mgr else 3
-	set(v):
-		if field_mgr: field_mgr.next_field_id = v
-var all_farmers: Array:
-	get: return pop_mgr.all_farmers if pop_mgr else []
-var all_bakers: Array:
-	get: return pop_mgr.all_bakers if pop_mgr else []
-var households: Array:
-	get: return pop_mgr.households if pop_mgr else []
-var next_farmer_id: int:
-	get: return pop_mgr.next_farmer_id if pop_mgr else 2
-	set(v):
-		if pop_mgr: pop_mgr.next_farmer_id = v
-var next_baker_id: int:
-	get: return pop_mgr.next_baker_id if pop_mgr else 2
-	set(v):
-		if pop_mgr: pop_mgr.next_baker_id = v
-
-var AgentScene: PackedScene = null
-var spawn_info_label: Label = null
-
-# Placement mode state
+# ── Placement mode ────────────────────────────────────────────────────────────
 enum PlaceMode { NONE, FIELD, FARMER, BAKER, HOUSEHOLD }
 var place_mode: PlaceMode = PlaceMode.NONE
-var placement_cursor: ColorRect = null  # Ghost preview at mouse
-var place_mode_label: Label = null      # Status text showing current mode
+var placement_cursor: ColorRect = null
+var place_mode_label: Label = null
+var spawn_info_label: Label = null
 
-# Household management
-var market_node: Node2D = null
-var event_bus: EventBus = null
-var economy_config: Dictionary = {}
-
-# Labor market (occupational mobility + migration)
-var labor_market: LaborMarket = null
-var pending_conversions: Array = []  # [{household, role, days_remaining}]
-
-# UI Labels
-var farmer_money_label: Label
-var farmer_seeds_label: Label
-var farmer_wheat_label: Label
-var farmer_bread_label: Label
-var farmer_days_until_starve_label: Label
-var farmer_starving_label: Label
-var farmer_status_label: Label
-var market_money_label: Label
-var market_seeds_label: Label
-var market_wheat_label: Label
-var market_wheat_cap_label: Label
-var market_bread_label: Label
-var market_bread_cap_label: Label
-var wheat_price_label: Label
-var bread_price_label: Label
-var baker_money_label: Label
-var baker_wheat_label: Label
-var baker_flour_label: Label
-var baker_bread_label: Label
-var baker_food_bread_label: Label
-var baker_days_until_starve_label: Label
-var baker_starving_label: Label
-var baker_status_label: Label
-var household_money_label: Label
-var household_bread_label: Label
-var household_bread_consumed_label: Label
-var household_hunger_label: Label
-var household_starving_label: Label
-var household_status_label: Label
-var farmer_inventory_label: Label
-var baker_inventory_label: Label
-var household_inventory_label: Label
-var event_log: RichTextLabel
-var export_log_button: Button
-var jump_to_bottom_button: Button
-var sim_speed_label: Label
-var prosperity_score_label: Label
-var wealth_score_label: Label
-var food_score_label: Label
-var starvation_score_label: Label
-var population_info_label: Label
-var total_pop_label: Label
-
-# Economy HUD bar (replaces scrollable sidebar cards)
-var eco_sim_label: Label        = null   # Day · Speed
-var eco_village_label: Label    = null   # Pop + Fields
-var eco_market_label: Label     = null   # Wheat/Bread prices + inventory
-var eco_prosperity_label: Label = null   # Prosperity score + inputs
-var eco_farmer_label: Label     = null   # Baseline farmer compact stats
-var eco_baker_label: Label      = null   # Baseline baker compact stats
-var _current_speed: float = 1.0          # Tracks sim speed for eco bar
-
-# Pause control
-var _is_paused: bool = false
-var _pause_btn: Button = null
-
-# Simulation failure state
+# ── Simulation failure state ──────────────────────────────────────────────────
 var sim_failed: bool = false
 var _sim_fail_banner: PanelContainer = null
 
-# Camera
-var _camera: Camera2D = null
+# ── Economy HUD bar labels ────────────────────────────────────────────────────
+var eco_sim_label: Label        = null
+var eco_village_label: Label    = null
+var eco_market_label: Label     = null
+var eco_prosperity_label: Label = null
+var eco_farmer_label: Label     = null
+var eco_baker_label: Label      = null
+var _current_speed: float = 1.0
 
-# Pop Inspector — UI lives in `PopInspectorDock` (scripts/ui/pop_inspector_dock.gd)
+# ── Pause control ─────────────────────────────────────────────────────────────
+var _is_paused: bool = false
+var _pause_btn: Button = null
+
+# ── Pop Inspector ─────────────────────────────────────────────────────────────
 var selected_pop: Node = null
 var pop_inspector: PopInspectorDock = null
-## World-space radius for click-selecting a pop (sprite is ~20×20 units).
 const POP_PICK_RADIUS_WORLD: float = 16.0
 
-# Forwarded to managers (kept for backward compat)
-var _next_person_id: int:
-	get: return pop_mgr._next_person_id if pop_mgr else 1
-	set(v):
-		if pop_mgr: pop_mgr._next_person_id = v
-
+# ── Event log ─────────────────────────────────────────────────────────────────
+var event_log: RichTextLabel = null
+var export_log_button: Button = null
+var jump_to_bottom_button: Button = null
+var sim_speed_label: Label = null
 var log_lines: Array[String] = []
-var log_buffer: Array[String] = []  # Full log for export (not trimmed)
-var user_at_bottom: bool = true  # Track if user is at bottom for sticky auto-scroll
+var log_buffer: Array[String] = []
+var user_at_bottom: bool = true
 const MAX_LOG_LINES: int = 200
-const SCROLL_THRESHOLD: int = 50  # Pixels from bottom to consider "at bottom"
+const SCROLL_THRESHOLD: int = 50
 
 
 func _ready() -> void:
-	# Keep main node + UI alive (responsive) while simulation is paused
+	# Keep main node + UI always alive (responsive while paused)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var ui_node := get_node_or_null("UI")
 	if ui_node != null:
 		ui_node.process_mode = Node.PROCESS_MODE_ALWAYS
 
-	# ── Create managers (before anything else accesses forwarded properties) ──
-	pop_mgr = PopulationManager.new()
-	pop_mgr.name = "PopulationManager"
-	add_child(pop_mgr)
-	pop_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+	# ── Simulation clock (world-level) ──
+	clock = SimulationClock.new()
+	clock.name = "SimulationClock"
+	add_child(clock)
+	clock.process_mode = Node.PROCESS_MODE_PAUSABLE
+	clock.speed_changed.connect(_on_speed_changed)
 
-	field_mgr = FieldManager.new()
-	field_mgr.name = "FieldManager"
-	add_child(field_mgr)
-	field_mgr.process_mode = Node.PROCESS_MODE_PAUSABLE
+	# Wire clock ticks to World → forwarded to all villages
+	var world_node := get_node_or_null("World")
+	if world_node and world_node.has_method("on_simulation_tick"):
+		clock.ticked.connect(world_node.on_simulation_tick)
+	else:
+		push_error("Main: Could not connect clock to World.on_simulation_tick")
 
-	econ_stats = EconomyStatsManager.new()
-	econ_stats.name = "EconomyStatsManager"
-	add_child(econ_stats)
-	econ_stats.process_mode = Node.PROCESS_MODE_PAUSABLE
-
-	# Camera (world view with zoom/pan)
+	# ── Camera ──
 	var cam := Camera2D.new()
 	cam.name = "WorldCamera"
 	cam.set_script(preload("res://scripts/camera_controller.gd"))
@@ -184,176 +82,28 @@ func _ready() -> void:
 	cam.make_current()
 	_camera = cam
 
-	# Load economy config
-	_load_economy_config()
-	
-	# Load the unified Agent.tscn used for all spawns
-	_resolve_agent_scene()
-	
-	# Create simulation systems
-	# All simulation nodes are marked PAUSABLE so get_tree().paused = true stops them.
-	# (Main node itself is PROCESS_MODE_ALWAYS so _input/_process keep working for UI.)
-	clock = SimulationClock.new()
-	clock.name = "SimulationClock"
-	add_child(clock)
-	clock.process_mode = Node.PROCESS_MODE_PAUSABLE
-	clock.ticked.connect(_on_tick)
-	clock.speed_changed.connect(_on_speed_changed)
-	
-	bus = EventBus.new()
-	bus.name = "EventBus"
-	add_child(bus)
-	bus.process_mode = Node.PROCESS_MODE_PAUSABLE
-	bus.event_logged.connect(_on_event_logged)
-	
-	audit = EconomyAudit.new()
-	audit.name = "EconomyAudit"
-	add_child(audit)
-	audit.process_mode = Node.PROCESS_MODE_PAUSABLE
-	
-	calendar = Calendar.new()
-	calendar.name = "Calendar"
-	add_child(calendar)
-	calendar.process_mode = Node.PROCESS_MODE_PAUSABLE
-	
-	prosperity_meter = ProsperityMeter.new()
-	prosperity_meter.name = "ProsperityMeter"
-	add_child(prosperity_meter)
-	prosperity_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
-	
-	# Store EventBus reference for spawn function
-	event_bus = bus
+	# ── Resolve village reference (World._ready() has already run) ──
+	# World node spawns Village1 in its own _ready() via spawn_initial_villages().
+	# By the time Main._ready() runs, Village1 is in the tree.
+	village = get_node_or_null("World/Village1") as Village
+	if village == null:
+		push_error("Main: Could not find World/Village1 — World.gd must spawn it in _ready()")
+	else:
+		# Wire the village's event_bus to the main log panel
+		if village.event_bus != null:
+			village.event_bus.event_logged.connect(_on_event_logged)
+		# TODO: connect village.village_extinct signal when T4 adds it
 
-	# Wire managers now that event_bus exists
-	field_mgr.bind(bus)
-	
-	# Get references to scene nodes
-	var house = get_node("House")
-	var field1_node = get_node("Field1")
-	var field2_node = get_node("Field2")
-	market_node = get_node("MarketNode")
-	var bakery = get_node("Bakery")
-	var household_home = get_node("HouseholdHome")
-	farmer = get_node("Farmer")
-	baker = get_node("Baker")
-	household_agent = get_node("HouseholdAgent")
-	
-	# Register initial entities with managers
-	var field1_plot = field1_node as FieldPlot
-	var field2_plot = field2_node as FieldPlot
-	field_mgr.register_field(field1_node, field1_plot)
-	field_mgr.register_field(field2_node, field2_plot)
-	pop_mgr.register_farmer(farmer)
-	pop_mgr.register_baker(baker)
-	field_mgr.field_assignment_map[field1_node] = farmer
-	field_mgr.field_assignment_map[field2_node] = farmer
-	
-	# Create market instance
-	market = Market.new()
-	market.name = "Market"
-	add_child(market)
-	market.process_mode = Node.PROCESS_MODE_PAUSABLE
-
-	# Wire calendar day_changed to market for daily price adjustments
-	calendar.day_changed.connect(market.on_day_changed)
-	# Wire calendar day_changed to labor market handler
-	calendar.day_changed.connect(_on_calendar_day_changed)
-	
-	# Wire event bus and market to all initial agents
-	market.event_bus = bus
-	farmer.event_bus = bus
-	farmer.market = market
-	farmer.econ_stats = econ_stats
-	baker.event_bus = bus
-	baker.market = market
-	baker.econ_stats = econ_stats
-	household_agent.event_bus = bus
-	household_agent.market = market
-	household_agent.econ_stats = econ_stats
-	
-	# Wire HungerNeed components (must happen before set_role)
-	var farmer_inv: Inventory = farmer.get_node("Inventory") as Inventory
-	var farmer_hunger: HungerNeed = farmer.get_node("HungerNeed") as HungerNeed
-	farmer_hunger.bind("Farmer", farmer_inv, bus, calendar)
-	
-	var baker_inv: Inventory = baker.get_node("Inventory") as Inventory
-	var baker_hunger: HungerNeed = baker.get_node("HungerNeed") as HungerNeed
-	baker_hunger.bind("Baker", baker_inv, bus, calendar)
-	
-	var household_inv: Inventory = household_agent.get_node("Inventory") as Inventory
-	var household_hunger: HungerNeed = household_agent.get_node("HungerNeed") as HungerNeed
-	household_hunger.bind("Household", household_inv, bus, calendar)
-	
-	# Bind food reserves (must happen before set_role so job activate() sees them)
-	var farmer_food_reserve: FoodReserve = farmer.get_node("FoodReserve") as FoodReserve
-	if farmer_food_reserve:
-		farmer_food_reserve.bind(farmer_inv, farmer_hunger, market, farmer.get_node("Wallet") as Wallet, bus, "Farmer")
-	var baker_food_reserve: FoodReserve = baker.get_node("FoodReserve") as FoodReserve
-	if baker_food_reserve:
-		baker_food_reserve.bind(baker_inv, baker_hunger, market, baker.get_node("Wallet") as Wallet, bus, "Baker")
-	var household_food_reserve: FoodReserve = household_agent.get_node("FoodReserve") as FoodReserve
-	if household_food_reserve:
-		household_food_reserve.bind(household_inv, household_hunger, market, household_agent.get_node("Wallet") as Wallet, bus, "Household")
-	
-	# Activate roles — creates job components, sets sprite colors, adds to groups
-	farmer.set_role("Farmer")
-	farmer.set_route_nodes(house, market_node)
-	farmer.set_fields([field1_plot, field2_plot], [field1_node, field2_node])
-	
-	baker.set_role("Baker")
-	baker.set_locations(bakery, market_node)
-	
-	household_agent.set_role("Household")
-	household_agent.set_locations(household_home, market_node)
-	
-	# Register baseline household for prosperity tracking
-	pop_mgr.register_household(household_agent)
-	
-	# Connect death signal
-	household_agent.agent_died.connect(_on_household_died)
-	
-	# Bind prosperity meter references
-	prosperity_meter.bind_references(bus, market, households)
-	
-	# Initialize labor market
-	labor_market = LaborMarket.new()
-	labor_market.name = "LaborMarket"
-	add_child(labor_market)
-	labor_market.process_mode = Node.PROCESS_MODE_PAUSABLE
-	labor_market.bind(market, bus)
-	labor_market.econ_stats = econ_stats
-	labor_market.pop_mgr = pop_mgr
-	labor_market.load_career_entry_config(economy_config)
-	labor_market.field_count_ref = field_mgr.all_field_nodes if field_mgr else []
-	labor_market.max_fields = MAX_FIELDS
-	# Share the SAME array objects so labor_market always sees current population
-	labor_market.all_farmers = all_farmers
-	labor_market.all_bakers = all_bakers
-	labor_market.all_households = households
-	# Connect labor market signals
-	labor_market.migrate_requested.connect(_on_migrate_requested)
-	labor_market.role_switch_requested.connect(_on_role_switch_requested)
-	
-	# Assign persistent identities to the initial scene pops
-	_assign_new_identity(farmer)
-	_assign_new_identity(baker)
-	_assign_new_identity(household_agent)
-
-	# Get UI label references
+	# ── Build UI ──
 	get_ui_labels()
-	
-	# Initial UI update
 	update_ui()
-	
-	# Build spawn toolbar and economy HUD bar
 	_build_spawn_toolbar()
 	_build_economy_bar()
 
-	# Bootstrap: seed market with initial inventory (exactly once per new run)
-	_apply_market_seed()
-
-	# Log startup
-	bus.log("Tick 0: START")
+	if village != null:
+		var eb = village.event_bus
+		if eb:
+			eb.log("Tick 0: START")
 
 
 func _process(_delta: float) -> void:
@@ -361,62 +111,6 @@ func _process(_delta: float) -> void:
 	_update_spawn_info()
 	_update_placement_cursor()
 	_update_camera()
-
-
-func _on_tick(tick: int) -> void:
-	if sim_failed:
-		return
-	# Update calendar
-	calendar.set_tick(tick)
-	
-	# Tick all field plots via manager
-	field_mgr.tick_all()
-	
-	# Update tick for all agents (dynamic tracking)
-	if market:
-		market.set_tick(tick)
-	for f in all_farmers:
-		if f and is_instance_valid(f):
-			f.set_tick(tick)
-	for b in all_bakers:
-		if b and is_instance_valid(b):
-			b.set_tick(tick)
-	
-	# Tick all households
-	for h in households:
-		if h and is_instance_valid(h):
-			h.set_tick(tick)
-	
-	# Update prosperity meter
-	if prosperity_meter:
-		prosperity_meter.update_prosperity(calendar.day_index)
-		
-		# [SCARCITY GUARD] Suppress pop growth during food scarcity — but NEVER when
-		# population is already zero (we need at least one household to create demand).
-		var suppress_spawn: bool = (
-			labor_market != null and
-			labor_market.should_suppress_spawn() and
-			households.size() > 0
-		)
-		
-		# Log spawn decision every 5 days to aid debugging
-		if event_bus and calendar.day_index % 5 == 0:
-			event_bus.log("[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
-				calendar.day_index,
-				prosperity_meter.prosperity_score,
-				prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW,
-				suppress_spawn,
-				households.size()
-			])
-		
-		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
-			var spawn_pos = Vector2(randf_range(100, 700), randf_range(100, 500))
-			spawn_household_at(spawn_pos)
-			prosperity_meter.record_spawn(calendar.day_index)
-	
-	# Run audit checks — skip if either base agent has been freed by migration
-	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
-		audit.audit(farmer, baker, market, bus, tick)
 
 
 func _screen_to_world(screen_pos: Vector2) -> Vector2:
@@ -430,22 +124,20 @@ func _world_to_screen(world_pos: Vector2) -> Vector2:
 func _update_camera() -> void:
 	if _camera == null:
 		return
+	# Use scene groups — agents add themselves when set_role() is called.
+	# This works for single-village; multi-village will scope groups per village later.
 	var positions: Array[Vector2] = []
 	var all_entities: Array = []
-	for f in all_farmers:
-		if f and is_instance_valid(f):
-			positions.append((f as Node2D).global_position)
-			all_entities.append(f)
-	for b in all_bakers:
-		if b and is_instance_valid(b):
-			positions.append((b as Node2D).global_position)
-			all_entities.append(b)
-	for h in households:
-		if h and is_instance_valid(h):
-			positions.append((h as Node2D).global_position)
-			all_entities.append(h)
-	for fn in all_field_nodes:
-		if fn and is_instance_valid(fn):
+	for group_name: String in ["farmers", "bakers", "households"]:
+		for pop: Node in get_tree().get_nodes_in_group(group_name):
+			if not is_instance_valid(pop):
+				continue
+			var pop2d := pop as Node2D
+			if pop2d:
+				positions.append(pop2d.global_position)
+				all_entities.append(pop)
+	for fn: Node in get_tree().get_nodes_in_group("fields"):
+		if is_instance_valid(fn):
 			all_entities.append(fn)
 	if not positions.is_empty():
 		var centroid := Vector2.ZERO
@@ -457,49 +149,392 @@ func _update_camera() -> void:
 		_camera.update_bounds(all_entities)
 
 
-func _load_economy_config() -> void:
-	"""Load economy configuration from JSON file."""
-	var config_path = "res://config/economy_config.json"
-	if FileAccess.file_exists(config_path):
-		var file = FileAccess.open(config_path, FileAccess.READ)
-		if file:
-			var json_text = file.get_as_text()
-			file.close()
-			var json = JSON.new()
-			var parse_result = json.parse(json_text)
-			if parse_result == OK:
-				economy_config = json.data
-				print("Main: Loaded economy config from ", config_path)
-			else:
-				push_error("Main: Failed to parse economy config: " + json.get_error_message())
-	else:
-		print("Main: Economy config not found at ", config_path, " - using defaults")
+func _input(event: InputEvent) -> void:
+	if clock != null and not sim_failed:
+		if event.is_action_pressed("speed_up"):
+			clock.increase_speed()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.is_action_pressed("speed_down"):
+			clock.decrease_speed()
+			get_viewport().set_input_as_handled()
+			return
+
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if place_mode != PlaceMode.NONE:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+			return
+
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
+			_toggle_pause()
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_SPACE and not event.ctrl_pressed and not event.alt_pressed:
+			_recenter_camera()
+			get_viewport().set_input_as_handled()
+			return
+		if event.keycode == KEY_ESCAPE and place_mode != PlaceMode.NONE:
+			_cancel_placement()
+			get_viewport().set_input_as_handled()
+			return
 
 
-func _apply_market_seed() -> void:
-	if market == null or market.market_seeded:
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var screen_pos: Vector2 = event.position
+		var world_pos: Vector2 = _screen_to_world(screen_pos)
+		var r2: float = POP_PICK_RADIUS_WORLD * POP_PICK_RADIUS_WORLD
+
+		var best_pop: Node = null
+		var best_d2: float = INF
+		for group_name: String in ["farmers", "bakers", "households"]:
+			for pop: Node in get_tree().get_nodes_in_group(group_name):
+				if not is_instance_valid(pop):
+					continue
+				var pop2d := pop as Node2D
+				if pop2d == null:
+					continue
+				var d2: float = pop2d.global_position.distance_squared_to(world_pos)
+				if d2 <= r2 and d2 < best_d2:
+					best_d2 = d2
+					best_pop = pop
+
+		if best_pop != null:
+			select_pop(best_pop)
+			get_viewport().set_input_as_handled()
+			return
+
+		if place_mode != PlaceMode.NONE:
+			_place_entity_at(world_pos)
+			get_viewport().set_input_as_handled()
+
+
+func _on_world_click(_event: InputEvent) -> void:
+	pass  # Superseded by _input(); kept so old signal connections don't crash
+
+
+func _on_speed_changed(new_speed: float) -> void:
+	_current_speed = new_speed
+	if sim_speed_label and not _is_paused:
+		sim_speed_label.text = "Speed: %.1fx" % new_speed
+
+
+func _recenter_camera() -> void:
+	if _camera == null:
 		return
-	var seed_cfg: Dictionary = economy_config.get("market_seed", {})
-	var seed_wheat: int = int(seed_cfg.get("initial_market_wheat", 40))
-	var seed_bread: int = int(seed_cfg.get("initial_market_bread", 20))
-	var seed_seeds: int = int(seed_cfg.get("initial_market_seeds", 0))
-	market.seed_market(seed_wheat, seed_bread, seed_seeds)
-
-
-func _resolve_agent_scene() -> void:
-	"""Load the unified Agent.tscn used for all new spawns and role conversions."""
-	if AgentScene != null:
+	var positions: Array[Vector2] = []
+	for group_name: String in ["farmers", "bakers", "households"]:
+		for pop: Node in get_tree().get_nodes_in_group(group_name):
+			if is_instance_valid(pop):
+				positions.append((pop as Node2D).global_position)
+	if positions.is_empty():
+		_camera.recenter(Vector2(300, 400))
 		return
-	var path := "res://scenes/Agent.tscn"
-	if ResourceLoader.exists(path):
-		AgentScene = load(path)
-		print("Main: AgentScene loaded from ", path)
-	else:
-		push_error("FATAL: AgentScene not found at " + path)
+	var centroid := Vector2.ZERO
+	for p in positions:
+		centroid += p
+	centroid /= float(positions.size())
+	_camera.recenter(centroid)
 
+
+func _toggle_pause() -> void:
+	if sim_failed:
+		return
+	_is_paused = !_is_paused
+	get_tree().paused = _is_paused
+
+	if _pause_btn != null:
+		if _is_paused:
+			_pause_btn.text = "▶ Resume"
+			var s := StyleBoxFlat.new()
+			s.bg_color        = Color(0.28, 0.14, 0.02, 0.95)
+			s.border_color    = Color(1.00, 0.60, 0.10, 0.95)
+			s.set_border_width_all(2)
+			s.set_corner_radius_all(4)
+			s.set_content_margin_all(5)
+			_pause_btn.add_theme_stylebox_override("normal", s)
+			var sh := s.duplicate() as StyleBoxFlat
+			sh.bg_color = Color(0.36, 0.20, 0.04, 1.0)
+			_pause_btn.add_theme_stylebox_override("hover", sh)
+		else:
+			_pause_btn.text = "⏸ Pause"
+			var s := StyleBoxFlat.new()
+			s.bg_color        = Color(0.18, 0.18, 0.23, 0.92)
+			s.border_color    = Color(0.82, 0.72, 0.28, 0.85)
+			s.set_border_width_all(2)
+			s.set_corner_radius_all(4)
+			s.set_content_margin_all(5)
+			_pause_btn.add_theme_stylebox_override("normal", s)
+			var sh := s.duplicate() as StyleBoxFlat
+			sh.bg_color = Color(0.26, 0.26, 0.32, 0.95)
+			_pause_btn.add_theme_stylebox_override("hover", sh)
+
+	if sim_speed_label != null:
+		sim_speed_label.text = "PAUSED" if _is_paused else "Speed: %.1fx" % _current_speed
+
+
+func _show_sim_fail_banner(day: int) -> void:
+	if _sim_fail_banner != null:
+		return
+	var ui_node := get_node_or_null("UI")
+	if ui_node == null:
+		return
+
+	_sim_fail_banner = PanelContainer.new()
+	_sim_fail_banner.name = "SimStatusBanner"
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.55, 0.05, 0.05, 0.95)
+	style.border_color = Color(1.0, 0.2, 0.2, 1.0)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(12)
+	_sim_fail_banner.add_theme_stylebox_override("panel", style)
+
+	var label := Label.new()
+	label.text = "TOWN EXTINCT — Simulation paused  (day %d)" % day
+	label.add_theme_font_size_override("font_size", 28)
+	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sim_fail_banner.add_child(label)
+
+	_sim_fail_banner.layout_mode = 1
+	_sim_fail_banner.anchors_preset = Control.PRESET_CENTER_TOP
+	_sim_fail_banner.anchor_left = 0.5
+	_sim_fail_banner.anchor_right = 0.5
+	_sim_fail_banner.anchor_top = 0.0
+	_sim_fail_banner.offset_top = 60
+	_sim_fail_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	ui_node.add_child(_sim_fail_banner)
+
+
+func _on_event_logged(msg: String) -> void:
+	log_lines.append(msg)
+	log_buffer.append(msg)
+
+	while log_lines.size() > MAX_LOG_LINES:
+		log_lines.pop_front()
+
+	if event_log:
+		event_log.clear()
+		for line in log_lines:
+			event_log.append_text(line + "\n")
+		if user_at_bottom:
+			event_log.scroll_to_line(event_log.get_line_count())
+
+
+func _on_log_scroll(_value: float) -> void:
+	if event_log:
+		var vscroll = event_log.get_v_scroll_bar()
+		if vscroll:
+			var max_scroll = vscroll.max_value - vscroll.page
+			user_at_bottom = (max_scroll - vscroll.value) <= SCROLL_THRESHOLD
+
+
+func _on_jump_to_bottom() -> void:
+	user_at_bottom = true
+	if event_log:
+		event_log.scroll_to_line(event_log.get_line_count())
+
+
+func export_log() -> void:
+	print("export_log() called - buffer size: ", log_buffer.size())
+
+	var log_snapshot = log_buffer.duplicate()
+
+	var dir = DirAccess.open("user://")
+	if not dir:
+		print("ERROR: Could not open user:// directory")
+		if event_log:
+			event_log.append_text("[ERROR] Could not access user directory\n")
+		return
+
+	if not dir.dir_exists("logs"):
+		var err = dir.make_dir("logs")
+		if err != OK:
+			if event_log:
+				event_log.append_text("[ERROR] Failed to create logs directory\n")
+			return
+
+	var datetime = Time.get_datetime_dict_from_system()
+	var filename = "economy_log_%04d-%02d-%02d_%02d-%02d-%02d.txt" % [
+		datetime.year, datetime.month, datetime.day,
+		datetime.hour, datetime.minute, datetime.second
+	]
+	var path = "user://logs/" + filename
+
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		for line in log_snapshot:
+			file.store_line(line)
+		file.close()
+		var abs_path = ProjectSettings.globalize_path(path)
+		if event_log:
+			event_log.append_text("[EXPORT] Log saved to: %s\n" % abs_path)
+			event_log.append_text("[EXPORT] (%d lines written)\n" % log_snapshot.size())
+	else:
+		var err = FileAccess.get_open_error()
+		if event_log:
+			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
+
+
+func get_ui_labels() -> void:
+	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
+	if log_vbox:
+		event_log = log_vbox.get_node_or_null("EventLog")
+		export_log_button = log_vbox.get_node_or_null("ExportLogButton")
+		if export_log_button:
+			export_log_button.pressed.connect(export_log)
+		if log_vbox.has_node("JumpToBottomButton"):
+			jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
+			jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
+
+	if event_log:
+		var vscroll = event_log.get_v_scroll_bar()
+		if vscroll:
+			vscroll.value_changed.connect(_on_log_scroll)
+
+	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
+	if pop_inspector:
+		# Pass village.econ_stats and field-count getter; both may be null until T4 fills initialize()
+		var econ_stats = village.econ_stats if (village != null and village.get("econ_stats") != null) else null
+		var max_f: int = village.field_mgr.MAX_FIELDS if (village != null and village.field_mgr != null) else 10
+		pop_inspector.configure(econ_stats, max_f, Callable(self, "_inspector_field_count_for_dock"))
+		if not pop_inspector.dismiss_requested.is_connected(_on_pop_inspector_dismiss):
+			pop_inspector.dismiss_requested.connect(_on_pop_inspector_dismiss)
+
+
+func update_ui() -> void:
+	_update_eco_bar()
+	update_inspector()
+
+
+func _eco_cap_display(cap: int) -> String:
+	if cap >= 1_000_000_000:
+		return "∞"
+	if cap >= 1_000_000:
+		var m: float = float(cap) / 1_000_000.0
+		return ("%.0fM" % m) if m < 100.0 else "∞"
+	if cap >= 10_000:
+		return "%dk" % int(round(float(cap) / 1000.0))
+	return str(cap)
+
+
+func _update_eco_bar() -> void:
+	"""Refresh all six economy-bar section labels from village snapshot data."""
+	if village == null or not is_instance_valid(village):
+		return
+
+	var snap: Dictionary = village.get_econ_snapshot()
+	var pop: Dictionary  = village.get_population_summary()
+
+	# SIM
+	if eco_sim_label:
+		eco_sim_label.text = "Day %d\n%.1f×" % [snap.get("day", 0), _current_speed]
+
+	# VILLAGE
+	if eco_village_label:
+		eco_village_label.text = (
+			"Population %d — households %d, farmers %d, bakers %d\nFields %d of %d"
+			% [pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
+			   pop.get("bakers", 0), pop.get("fields", 0), pop.get("max_fields", 10)]
+		)
+
+	# MARKET
+	if eco_market_label:
+		var wc: String = _eco_cap_display(snap.get("wheat_cap", 999999999))
+		var bc: String = _eco_cap_display(snap.get("bread_cap", 999999999))
+		eco_market_label.text = (
+			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
+				snap.get("wheat", 0), wc, snap.get("wheat_price", 0.0),
+				snap.get("bread", 0), bc, snap.get("bread_price", 0.0)
+			]
+		)
+
+	# PROSPERITY
+	if eco_prosperity_label:
+		eco_prosperity_label.text = (
+			"Score %.2f\nWealth %.2f · Food %.2f · Hunger pressure %.2f" % [
+				snap.get("prosperity_score", 0.0),
+				snap.get("prosperity_wealth", 0.0),
+				snap.get("prosperity_food", 0.0),
+				snap.get("prosperity_starvation", 0.0)
+			]
+		)
+
+	# FARMER baseline
+	if eco_farmer_label:
+		var fd: Dictionary = snap.get("baseline_farmer", {})
+		if fd.is_empty():
+			eco_farmer_label.text = "(none)"
+		else:
+			eco_farmer_label.text = (
+				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
+				% [fd.get("cash", 0.0), fd.get("seeds", 0), fd.get("wheat", 0), fd.get("bread", 0),
+				   fd.get("hunger_days", 0), fd.get("hunger_max", 5),
+				   fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
+			)
+
+	# BAKER baseline
+	if eco_baker_label:
+		var bd: Dictionary = snap.get("baseline_baker", {})
+		if bd.is_empty():
+			eco_baker_label.text = "(none)"
+		else:
+			eco_baker_label.text = (
+				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
+				% [bd.get("cash", 0.0), bd.get("wheat", 0), bd.get("flour", 0), bd.get("bread", 0),
+				   bd.get("hunger_days", 0), bd.get("hunger_max", 5),
+				   bd.get("status", ""), bd.get("inv_total", 0), bd.get("inv_max", 0)]
+			)
+
+
+# ── Pop Inspector ──────────────────────────────────────────────────────────────
+
+func _inspector_field_count_for_dock() -> int:
+	if village == null or not is_instance_valid(village):
+		return 0
+	return village.get_population_summary().get("fields", 0)
+
+
+func _on_pop_inspector_dismiss() -> void:
+	selected_pop = null
+
+
+func select_pop(pop: Node) -> void:
+	if not is_instance_valid(pop):
+		return
+	selected_pop = pop
+	update_inspector()
+
+
+func update_inspector() -> void:
+	if pop_inspector == null:
+		return
+	if selected_pop == null or not is_instance_valid(selected_pop):
+		selected_pop = null
+	pop_inspector.refresh(selected_pop)
+
+
+# ── Spawn info bar ─────────────────────────────────────────────────────────────
+
+func _update_spawn_info() -> void:
+	if spawn_info_label == null or village == null:
+		return
+	var pop: Dictionary = village.get_population_summary()
+	spawn_info_label.text = "Fields: %d | Farmers: %d | Bakers: %d | Pop: %d" % [
+		pop.get("fields", 0),
+		pop.get("farmers", 0),
+		pop.get("bakers", 0),
+		pop.get("households", 0)
+	]
+
+
+# ── Toolbar ────────────────────────────────────────────────────────────────────
 
 func _build_spawn_toolbar() -> void:
-	"""Build the top toolbar row inside LeftColumn (proper container child)."""
 	var toolbar = PanelContainer.new()
 	toolbar.name = "SpawnToolbar"
 
@@ -592,7 +627,6 @@ func _build_spawn_toolbar() -> void:
 	_pause_btn.pressed.connect(_toggle_pause)
 	hbox.add_child(_pause_btn)
 
-	# Center camera button
 	var center_btn := Button.new()
 	center_btn.text = "Center"
 	center_btn.tooltip_text = "Recenter camera on town  [Space]"
@@ -600,19 +634,16 @@ func _build_spawn_toolbar() -> void:
 	center_btn.pressed.connect(_recenter_camera)
 	hbox.add_child(center_btn)
 
-	# Second row: placement mode status
 	place_mode_label = Label.new()
 	place_mode_label.text = ""
 	place_mode_label.add_theme_font_size_override("font_size", 18)
 	place_mode_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.5))
 	vbox_outer.add_child(place_mode_label)
 
-	# Insert toolbar into LeftColumn at index 0 (above WorldSpacer)
 	var left_column = get_node("UI/HUDRoot/Layout/LeftColumn")
 	left_column.add_child(toolbar)
 	left_column.move_child(toolbar, 0)
 
-	# WorldSpacer gets the click receiver and placement cursor
 	var world_spacer = get_node("UI/HUDRoot/Layout/LeftColumn/WorldSpacer")
 
 	var click_receiver := Control.new()
@@ -632,7 +663,6 @@ func _build_spawn_toolbar() -> void:
 
 
 func _build_economy_bar() -> void:
-	"""Build the economy HUD as two horizontal rows so long text fits without clipping."""
 	var bar := PanelContainer.new()
 	bar.name = "EcoBar"
 
@@ -670,14 +700,12 @@ func _build_economy_bar() -> void:
 	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
 	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
 
-	# Insert into LeftColumn at index 1 (after toolbar, before WorldSpacer)
 	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
 	left_column.add_child(bar)
 	left_column.move_child(bar, 1)
 
 
 func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, expand: bool) -> Label:
-	"""Add one labelled section to the economy bar and return its content Label."""
 	if hbox.get_child_count() > 0:
 		var sep := VSeparator.new()
 		var sep_style := StyleBoxFlat.new()
@@ -719,13 +747,11 @@ func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, ex
 
 
 func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Button:
-	"""Create a styled toolbar button with a color indicator."""
 	var btn = Button.new()
 	btn.text = text
 	btn.tooltip_text = tooltip
 	btn.custom_minimum_size = Vector2(70, 30)
-	
-	# Style the button
+
 	var normal_style = StyleBoxFlat.new()
 	normal_style.bg_color = Color(0.2, 0.2, 0.25, 0.9)
 	normal_style.border_color = color
@@ -733,887 +759,22 @@ func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Butt
 	normal_style.set_corner_radius_all(4)
 	normal_style.set_content_margin_all(4)
 	btn.add_theme_stylebox_override("normal", normal_style)
-	
+
 	var hover_style = normal_style.duplicate()
 	hover_style.bg_color = Color(0.3, 0.3, 0.35, 0.95)
 	btn.add_theme_stylebox_override("hover", hover_style)
-	
+
 	var pressed_style = normal_style.duplicate()
 	pressed_style.bg_color = color.lerp(Color.BLACK, 0.5)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
-	
+
 	return btn
 
 
-func _update_spawn_info() -> void:
-	if spawn_info_label:
-		spawn_info_label.text = "Fields: %d | Farmers: %d | Bakers: %d | Pop: %d" % [
-			all_fields.size(), all_farmers.size(), all_bakers.size(), households.size()
-		]
-
-
-func _input(event: InputEvent) -> void:
-	# ── Keyboard shortcuts (run before GUI so hotkeys always work) ────────────
-	if clock != null and not sim_failed:
-		if event.is_action_pressed("speed_up"):
-			clock.increase_speed()
-			get_viewport().set_input_as_handled()
-			return
-		elif event.is_action_pressed("speed_down"):
-			clock.decrease_speed()
-			get_viewport().set_input_as_handled()
-			return
-
-	# Right-click cancel placement (must run in _input so it takes priority over camera pan)
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-		if place_mode != PlaceMode.NONE:
-			_cancel_placement()
-			get_viewport().set_input_as_handled()
-			return
-
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
-			_toggle_pause()
-			get_viewport().set_input_as_handled()
-			return
-		if event.keycode == KEY_SPACE and not event.ctrl_pressed and not event.alt_pressed:
-			_recenter_camera()
-			get_viewport().set_input_as_handled()
-			return
-		if event.keycode == KEY_ESCAPE and place_mode != PlaceMode.NONE:
-			_cancel_placement()
-			get_viewport().set_input_as_handled()
-			return
-
-func _unhandled_input(event: InputEvent) -> void:
-	# Runs AFTER GUI buttons/panels have had a chance to consume clicks.
-	# HUDRoot/Layout/LeftColumn/WorldSpacer use MOUSE_FILTER_IGNORE so world
-	# clicks reach here; sidebar panels and toolbar still use STOP and eat first.
-
-	# Left-click: pop selection + placement (only reaches here if no GUI ate it)
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		var screen_pos: Vector2 = event.position
-		var world_pos: Vector2 = _screen_to_world(screen_pos)
-		var r2: float = POP_PICK_RADIUS_WORLD * POP_PICK_RADIUS_WORLD
-
-		# World-space hit (works at any zoom; ignores embedded ColorRect sprites that use MOUSE_FILTER_IGNORE)
-		var best_pop: Node = null
-		var best_d2: float = INF
-		for group_name: String in ["farmers", "bakers", "households"]:
-			for pop: Node in get_tree().get_nodes_in_group(group_name):
-				if not is_instance_valid(pop):
-					continue
-				var pop2d := pop as Node2D
-				if pop2d == null:
-					continue
-				var d2: float = pop2d.global_position.distance_squared_to(world_pos)
-				if d2 <= r2 and d2 < best_d2:
-					best_d2 = d2
-					best_pop = pop
-
-		if best_pop != null:
-			select_pop(best_pop)
-			get_viewport().set_input_as_handled()
-			return
-
-		# Nothing was clicked — handle placement if active
-		if place_mode != PlaceMode.NONE:
-			_place_entity_at(world_pos)
-			get_viewport().set_input_as_handled()
-
-
-func _on_world_click(_event: InputEvent) -> void:
-	pass  # Superseded by _input() above; kept so old signal connections don't crash
-
-
-func _on_speed_changed(new_speed: float) -> void:
-	_current_speed = new_speed
-	if sim_speed_label and not _is_paused:
-		sim_speed_label.text = "Speed: %.1fx" % new_speed
-
-
-func _recenter_camera() -> void:
-	if _camera == null:
-		return
-	var positions: Array[Vector2] = []
-	for f in all_farmers:
-		if f and is_instance_valid(f):
-			positions.append((f as Node2D).global_position)
-	for b in all_bakers:
-		if b and is_instance_valid(b):
-			positions.append((b as Node2D).global_position)
-	for h in households:
-		if h and is_instance_valid(h):
-			positions.append((h as Node2D).global_position)
-	if positions.is_empty():
-		_camera.recenter(Vector2(300, 400))
-		return
-	var centroid := Vector2.ZERO
-	for p in positions:
-		centroid += p
-	centroid /= float(positions.size())
-	_camera.recenter(centroid)
-
-
-func _toggle_pause() -> void:
-	if sim_failed:
-		return
-	_is_paused = !_is_paused
-	get_tree().paused = _is_paused
-
-	# Update pause button appearance
-	if _pause_btn != null:
-		if _is_paused:
-			_pause_btn.text = "▶ Resume"
-			var s := StyleBoxFlat.new()
-			s.bg_color        = Color(0.28, 0.14, 0.02, 0.95)
-			s.border_color    = Color(1.00, 0.60, 0.10, 0.95)
-			s.set_border_width_all(2)
-			s.set_corner_radius_all(4)
-			s.set_content_margin_all(5)
-			_pause_btn.add_theme_stylebox_override("normal", s)
-			var sh := s.duplicate() as StyleBoxFlat
-			sh.bg_color = Color(0.36, 0.20, 0.04, 1.0)
-			_pause_btn.add_theme_stylebox_override("hover", sh)
-		else:
-			_pause_btn.text = "⏸ Pause"
-			var s := StyleBoxFlat.new()
-			s.bg_color        = Color(0.18, 0.18, 0.23, 0.92)
-			s.border_color    = Color(0.82, 0.72, 0.28, 0.85)
-			s.set_border_width_all(2)
-			s.set_corner_radius_all(4)
-			s.set_content_margin_all(5)
-			_pause_btn.add_theme_stylebox_override("normal", s)
-			var sh := s.duplicate() as StyleBoxFlat
-			sh.bg_color = Color(0.26, 0.26, 0.32, 0.95)
-			_pause_btn.add_theme_stylebox_override("hover", sh)
-
-	# Update speed label
-	if sim_speed_label != null:
-		sim_speed_label.text = "PAUSED" if _is_paused else "Speed: %.1fx" % _current_speed
-
-
-func _trigger_sim_failure(day: int, tick: int) -> void:
-	sim_failed = true
-	get_tree().paused = true
-
-	var fail_line: String = "[SIM FAIL] Town extinct day=%d tick=%d" % [day, tick]
-	print(fail_line)
-	if event_bus:
-		event_bus.log(fail_line)
-
-	log_population_snapshot()
-
-	var m_bread: int = market.bread if market else -1
-	var m_wheat: int = market.wheat if market else -1
-	var m_seeds: int = market.seeds if market else -1
-
-	var hyst_bread_sell: bool = not market.can_producer_sell("bread") if market else false
-	var hyst_bread_prod: bool = not market.can_producer_produce("bread") if market else false
-	var hyst_wheat_sell: bool = not market.can_producer_sell("wheat") if market else false
-	var hyst_wheat_prod: bool = not market.can_producer_produce("wheat") if market else false
-
-	var training: int = pending_conversions.size()
-
-	if event_bus:
-		event_bus.log(
-			"[SIM FAIL SNAPSHOT] day=%d tick=%d total=%d market(bread=%d wheat=%d seeds=%d) hysteresis(bread_sell=%s bread_prod=%s wheat_sell=%s wheat_prod=%s) training=%d" % [
-				day, tick, pop_mgr.count(),
-				m_bread, m_wheat, m_seeds,
-				hyst_bread_sell, hyst_bread_prod, hyst_wheat_sell, hyst_wheat_prod,
-				training
-			])
-
-	_show_sim_fail_banner(day)
-
-	if _pause_btn != null:
-		_pause_btn.text = "EXTINCT"
-		_pause_btn.disabled = true
-
-
-func _show_sim_fail_banner(day: int) -> void:
-	if _sim_fail_banner != null:
-		return
-	var ui_node := get_node_or_null("UI")
-	if ui_node == null:
-		return
-
-	_sim_fail_banner = PanelContainer.new()
-	_sim_fail_banner.name = "SimStatusBanner"
-
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.55, 0.05, 0.05, 0.95)
-	style.border_color = Color(1.0, 0.2, 0.2, 1.0)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(12)
-	_sim_fail_banner.add_theme_stylebox_override("panel", style)
-
-	var label := Label.new()
-	label.text = "TOWN EXTINCT — Simulation paused  (day %d)" % day
-	label.add_theme_font_size_override("font_size", 28)
-	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_sim_fail_banner.add_child(label)
-
-	_sim_fail_banner.layout_mode = 1
-	_sim_fail_banner.anchors_preset = Control.PRESET_CENTER_TOP
-	_sim_fail_banner.anchor_left = 0.5
-	_sim_fail_banner.anchor_right = 0.5
-	_sim_fail_banner.anchor_top = 0.0
-	_sim_fail_banner.offset_top = 60
-	_sim_fail_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	ui_node.add_child(_sim_fail_banner)
-
-
-func _on_event_logged(msg: String) -> void:
-	log_lines.append(msg)
-	log_buffer.append(msg)  # Keep full log for export
-	
-	# Trim display log to max lines
-	while log_lines.size() > MAX_LOG_LINES:
-		log_lines.pop_front()
-	
-	# Update event log display
-	if event_log:
-		event_log.clear()
-		for line in log_lines:
-			event_log.append_text(line + "\n")
-		
-		# Only auto-scroll if user is at bottom
-		if user_at_bottom:
-			event_log.scroll_to_line(event_log.get_line_count())
-
-
-func _on_log_scroll(_value: float) -> void:
-	# Check if user scrolled away from bottom
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			var max_scroll = vscroll.max_value - vscroll.page
-			var current_scroll = vscroll.value
-			# User is at bottom if within threshold pixels
-			user_at_bottom = (max_scroll - current_scroll) <= SCROLL_THRESHOLD
-
-
-func _on_jump_to_bottom() -> void:
-	# Re-enable auto-scroll and scroll to bottom
-	user_at_bottom = true
-	if event_log:
-		event_log.scroll_to_line(event_log.get_line_count())
-
-
-func export_log() -> void:
-	print("export_log() called - buffer size: ", log_buffer.size())
-	
-	# Create a snapshot of the buffer to avoid modification during iteration
-	var log_snapshot = log_buffer.duplicate()
-	
-	var dir = DirAccess.open("user://")
-	if not dir:
-		print("ERROR: Could not open user:// directory")
-		if event_log:
-			event_log.append_text("[ERROR] Could not access user directory\n")
-		return
-	
-	print("Opened user:// directory")
-	
-	if not dir.dir_exists("logs"):
-		print("Creating logs directory")
-		var err = dir.make_dir("logs")
-		if err != OK:
-			print("ERROR: Failed to create logs directory: ", err)
-			if event_log:
-				event_log.append_text("[ERROR] Failed to create logs directory\n")
-			return
-	
-	var datetime = Time.get_datetime_dict_from_system()
-	var filename = "economy_log_%04d-%02d-%02d_%02d-%02d-%02d.txt" % [
-		datetime.year, datetime.month, datetime.day,
-		datetime.hour, datetime.minute, datetime.second
-	]
-	var path = "user://logs/" + filename
-	print("Attempting to save to: ", path)
-	
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		print("File opened successfully, writing ", log_snapshot.size(), " lines...")
-		for line in log_snapshot:
-			file.store_line(line)
-		file.close()
-		print("File closed successfully")
-		
-		# Convert user:// path to absolute file system path
-		var abs_path = ProjectSettings.globalize_path(path)
-		print("Absolute path: ", abs_path)
-		
-		# Update event log directly to avoid recursion
-		if event_log:
-			event_log.append_text("[EXPORT] Log saved to: %s\n" % abs_path)
-			event_log.append_text("[EXPORT] (%d lines written)\n" % log_snapshot.size())
-	else:
-		var err = FileAccess.get_open_error()
-		print("ERROR: Failed to open file for writing: ", err)
-		if event_log:
-			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
-
-
-# ── Node-name fixup guard ────────────────────────────────────────────────────
-
-func _fixup_node_name(node: Node, role_prefix: String) -> void:
-	var n: String = node.name
-	if n.begins_with("@") or "CharacterBody2D@" in n:
-		var fixed: String = "%s_%d" % [role_prefix, pop_mgr._next_person_id]
-		var msg: String = "[NAME FIXUP] %s → %s (auto-generated name corrected)" % [n, fixed]
-		node.name = fixed
-		print(msg)
-		if event_bus:
-			event_bus.log(msg)
-
-
-# ── Identity helpers (delegate to PopulationManager) ─────────────────────────
-
-func _new_person_id() -> int:
-	return pop_mgr.new_person_id()
-
-
-func _assign_new_identity(pop: Node) -> void:
-	pop_mgr.assign_identity(pop)
-
-
-func _transfer_identity_data(to_pop: Node, pid: int, pname: String,
-		events: Array, new_role: String,
-		skill_f: float = 0.25, skill_b: float = 0.25) -> void:
-	pop_mgr.transfer_identity_data(to_pop, pid, pname, events, new_role, skill_f, skill_b)
-
-
-# ── Global cashflow helpers (delegate to EconomyStatsManager) ─────────────────
-
-func _roll_global_cashflow() -> void:
-	econ_stats.roll_daily()
-
-
-func global_role_rolling_7d_sum(role: String) -> float:
-	return econ_stats.role_rolling_7d_sum(role)
-
-
-func global_role_rolling_7d_avg(role: String) -> float:
-	return econ_stats.role_rolling_7d_avg(role)
-
-
-func get_ui_labels() -> void:
-	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
-	if log_vbox:
-		event_log = log_vbox.get_node_or_null("EventLog")
-		export_log_button = log_vbox.get_node_or_null("ExportLogButton")
-		if export_log_button:
-			export_log_button.pressed.connect(export_log)
-		if log_vbox.has_node("JumpToBottomButton"):
-			jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
-			jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
-
-	# Connect scroll detection for sticky auto-scroll
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			vscroll.value_changed.connect(_on_log_scroll)
-
-	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
-	if pop_inspector:
-		pop_inspector.configure(econ_stats, MAX_FIELDS, Callable(self, "_inspector_field_count_for_dock"))
-		if not pop_inspector.dismiss_requested.is_connected(_on_pop_inspector_dismiss):
-			pop_inspector.dismiss_requested.connect(_on_pop_inspector_dismiss)
-
-	# Connect pop_clicked for the initial scene agents
-	if is_instance_valid(farmer):
-		farmer.pop_clicked.connect(select_pop)
-	if is_instance_valid(baker):
-		baker.pop_clicked.connect(select_pop)
-	if is_instance_valid(household_agent):
-		household_agent.pop_clicked.connect(select_pop)
-
-
-func update_ui() -> void:
-	_update_eco_bar()
-	update_inspector()
-
-
-func _eco_cap_display(cap: int) -> String:
-	"""Short label for huge storage caps so the HUD does not stretch off-screen."""
-	if cap >= 1_000_000_000:
-		return "∞"
-	if cap >= 1_000_000:
-		var m: float = float(cap) / 1_000_000.0
-		return ("%.0fM" % m) if m < 100.0 else "∞"
-	if cap >= 10_000:
-		return "%dk" % int(round(float(cap) / 1000.0))
-	return str(cap)
-
-
-func _update_eco_bar() -> void:
-	"""Refresh all six economy-bar section labels."""
-	# SIM
-	if eco_sim_label and calendar:
-		eco_sim_label.text = "Day %d\n%.1f×" % [calendar.day_index, _current_speed]
-
-	# VILLAGE
-	if eco_village_label:
-		var _f: int = get_tree().get_nodes_in_group("farmers").size()
-		var _b: int = get_tree().get_nodes_in_group("bakers").size()
-		var _h: int = get_tree().get_nodes_in_group("households").size()
-		eco_village_label.text = (
-			"Population %d — households %d, farmers %d, bakers %d\nFields %d of %d"
-			% [_h + _f + _b, _h, _f, _b, all_field_nodes.size(), MAX_FIELDS]
-		)
-
-	# MARKET
-	if eco_market_label and market:
-		var wc: String = _eco_cap_display(market.wheat_capacity)
-		var bc: String = _eco_cap_display(market.bread_capacity)
-		eco_market_label.text = (
-			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
-				market.wheat, wc, market.wheat_price,
-				market.bread, bc, market.bread_price
-			]
-		)
-
-	# PROSPERITY
-	if eco_prosperity_label and prosperity_meter:
-		var w: float = prosperity_meter.prosperity_inputs.get("wealth_health",       0.0)
-		var f: float = prosperity_meter.prosperity_inputs.get("food_security",       0.0)
-		var s: float = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
-		eco_prosperity_label.text = (
-			"Score %.2f\nWealth %.2f · Food %.2f · Hunger pressure %.2f" % [
-				prosperity_meter.prosperity_score, w, f, s
-			]
-		)
-
-	# FARMER (baseline)
-	if eco_farmer_label:
-		if farmer and is_instance_valid(farmer):
-			var fh: HungerNeed        = farmer.get_node("HungerNeed")        as HungerNeed
-			var fi: Inventory         = farmer.get_node("Inventory")         as Inventory
-			var fw: Wallet            = farmer.get_node("Wallet")            as Wallet
-			var fc: InventoryCapacity = farmer.get_node("InventoryCapacity") as InventoryCapacity
-			eco_farmer_label.text = (
-				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [
-					fw.money,
-					fi.get_qty("seeds"), fi.get_qty("wheat"), fi.get_qty("bread"),
-					fh.hunger_days, fh.hunger_max_days,
-					farmer.get_status_text(),
-					fc.current_total(), fc.max_items
-				]
-			)
-		else:
-			eco_farmer_label.text = "(none)"
-
-	# BAKER (baseline)
-	if eco_baker_label:
-		if baker and is_instance_valid(baker):
-			var bh: HungerNeed        = baker.get_node("HungerNeed")        as HungerNeed
-			var bi: Inventory         = baker.get_node("Inventory")         as Inventory
-			var bw: Wallet            = baker.get_node("Wallet")            as Wallet
-			var bc: InventoryCapacity = baker.get_node("InventoryCapacity") as InventoryCapacity
-			eco_baker_label.text = (
-				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [
-					bw.money,
-					bi.get_qty("wheat"), bi.get_qty("flour"), bi.get_qty("bread"),
-					bh.hunger_days, bh.hunger_max_days,
-					baker.get_status_text(),
-					bc.current_total(), bc.max_items
-				]
-			)
-		else:
-			eco_baker_label.text = "(none)"
-
-
-func get_total_population() -> int:
-	return pop_mgr.count()
-
-
-func log_population_snapshot() -> void:
-	var h: int = get_tree().get_nodes_in_group("households").size()
-	var f: int = get_tree().get_nodes_in_group("farmers").size()
-	var b: int = get_tree().get_nodes_in_group("bakers").size()
-	var line: String = "[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [h, f, b, pop_mgr.count()]
-	print(line)
-	if event_bus:
-		event_bus.log(line)
-
-
-# ============================================================================
-# POP INSPECTOR — UI in PopInspectorDock (scripts/ui/pop_inspector_dock.gd)
-# ============================================================================
-
-func _inspector_field_count_for_dock() -> int:
-	return all_field_nodes.size()
-
-
-func _on_pop_inspector_dismiss() -> void:
-	selected_pop = null
-
-
-func select_pop(pop: Node) -> void:
-	"""Called when any pop emits pop_clicked. Opens the inspector panel."""
-	if not is_instance_valid(pop):
-		return
-	selected_pop = pop
-	update_inspector()
-
-
-func update_inspector() -> void:
-	if pop_inspector == null:
-		return
-	if selected_pop == null or not is_instance_valid(selected_pop):
-		selected_pop = null
-	pop_inspector.refresh(selected_pop)
-
-
-func spawn_household_at(pos: Vector2) -> Node:
-	"""Spawn a new household using unified Agent.tscn + set_role()."""
-
-	if AgentScene == null:
-		push_error("Cannot spawn household: AgentScene not loaded")
-		return null
-
-	# Hard population cap
-	var total_pop := get_total_population()
-	if total_pop >= MAX_TOTAL_POP:
-		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		if event_bus:
-			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		return null
-
-	var h: Agent = AgentScene.instantiate() as Agent
-	if h == null:
-		push_error("AgentScene instantiate() returned null")
-		return null
-
-	h.name = "Household_%d" % pop_mgr.next_household_id
-	pop_mgr.next_household_id += 1
-	h.global_position = pos
-	add_child(h)
-
-	_fixup_node_name(h, "Household")
-
-	await get_tree().process_frame
-
-	_assign_new_identity(h)
-
-	h.market = market
-	h.event_bus = event_bus
-	h.econ_stats = econ_stats
-	h.set_role("Household")
-
-	# Wire HungerNeed
-	var spawned_hunger: HungerNeed = h.get_node("HungerNeed") as HungerNeed
-	var spawned_inv: Inventory = h.get_node("Inventory") as Inventory
-	if spawned_hunger and spawned_inv:
-		spawned_hunger.bind(h.name, spawned_inv, event_bus, calendar)
-
-	# Create home
-	var home := Node2D.new()
-	home.name = h.name + "_Home"
-	home.global_position = pos
-	add_child(home)
-
-	h.set_locations(home, market_node)
-
-	# Register
-	households.append(h)
-
-	h.agent_died.connect(_on_household_died)
-
-	if event_bus:
-		event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_meter.prosperity_score])
-
-	h.pop_clicked.connect(select_pop)
-
-	return h
-
-
-## Handle household starvation death - remove from all simulation lists.
-## Accepts both old HouseholdAgent and new Agent (from agent_died signal).
-func _on_household_died(agent_node: Node) -> void:
-	var idx := households.find(agent_node)
-	if idx != -1:
-		households.remove_at(idx)
-
-	if agent_node.is_in_group("households"):
-		agent_node.remove_from_group("households")
-	if agent_node.is_in_group("agents"):
-		agent_node.remove_from_group("agents")
-
-	# Old HouseholdAgent queue_frees itself; new Agent does not — safe to call either way
-	agent_node.queue_free()
-
-
-# ============================================================================
-# LABOR MARKET - Occupational mobility, migration, and role conversion
-# ============================================================================
-
-## Called once per game day when the calendar emits day_changed.
-func _on_calendar_day_changed(day: int) -> void:
-	if sim_failed:
-		return
-	# Daily village-capacity status (always visible in log to aid debugging)
-	print("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
-	print("[POP STATUS] total=%d/%d (households=%d farmers=%d bakers=%d)" % [
-		pop_mgr.count(), MAX_TOTAL_POP,
-		households.size(), all_farmers.size(), all_bakers.size()])
-	
-	# Update labor market EMA signals
-	if labor_market:
-		labor_market.update_daily(day)
-
-	# Propagate day change to all agents
-	for f in all_farmers:
-		if f and is_instance_valid(f):
-			f.on_day_changed(day)
-	for b in all_bakers:
-		if b and is_instance_valid(b):
-			b.on_day_changed(day)
-	for h in households:
-		if h and is_instance_valid(h):
-			h.on_day_changed(day)
-	
-	# Aggregate global cashflow after all pop rollovers
-	_roll_global_cashflow()
-
-	# Extinction detection — PopulationManager.count() is the ONLY authority
-	if not sim_failed and pop_mgr.count() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
-		_trigger_sim_failure(day, clock.tick if clock else 0)
-
-	# Process pending role conversions (decrement countdown, spawn when ready)
-	var still_pending: Array = []
-	for entry in pending_conversions:
-		var h = entry["household"]
-		var role: String = entry["role"]
-		var days_left: int = entry["days_remaining"] - 1
-		if not is_instance_valid(h):
-			continue  # Household already removed (e.g. starved during training)
-		if days_left <= 0:
-			_perform_role_conversion(h, role)
-		else:
-			entry["days_remaining"] = days_left
-			still_pending.append(entry)
-	pending_conversions = still_pending
-
-
-## Handle a migrate_requested signal from LaborMarket.
-## Removes the agent from tracking arrays and eliminates it from the world.
-func _on_migrate_requested(agent: Node, reason: String) -> void:
-	if not is_instance_valid(agent):
-		return
-	if event_bus:
-		event_bus.log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
-	
-	# Remove from households if it's a household agent
-	var h_idx := households.find(agent)
-	if h_idx != -1:
-		households.remove_at(h_idx)
-		agent.remove_from_group("households")
-		agent.remove_from_group("agents")
-	
-	# Remove from farmers if it's a farmer
-	var f_idx := all_farmers.find(agent)
-	if f_idx != -1:
-		all_farmers.remove_at(f_idx)
-		# Step 1: Remove fields from registry
-		for fn in all_field_nodes:
-			if is_instance_valid(fn) and field_assignment_map.get(fn, null) == agent:
-				field_assignment_map[fn] = null
-		# Step 2: Bulk-clear farmer's field references (no per-field rebuild)
-		if agent.has_method("clear_fields_for_removal"):
-			agent.clear_fields_for_removal()
-	
-	# Remove from bakers if it's a baker
-	var b_idx := all_bakers.find(agent)
-	if b_idx != -1:
-		all_bakers.remove_at(b_idx)
-	
-	# Also remove from pending_conversions if present
-	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
-	
-	if agent.has_method("log_event"):
-		agent.log_event("Left town — %s." % reason)
-	var _migrated_name: String = agent.name
-	agent.queue_free()
-	print("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
-	if event_bus:
-		event_bus.log("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
-
-
-## Handle a role_switch_requested signal from LaborMarket.
-## Queues a pending conversion that will resolve after a training delay.
-func _on_role_switch_requested(household: Node, new_role: String) -> void:
-	if not is_instance_valid(household):
-		return
-	
-	# Skip if this household is already queued for conversion
-	for entry in pending_conversions:
-		if entry["household"] == household:
-			return
-	
-	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
-	if event_bus:
-		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
-	if household.has_method("log_event"):
-		household.log_event(
-			"Started training to become a %s (%d days to go)." % [new_role.capitalize(), training_days]
-		)
-
-	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
-
-
-## Perform the actual role conversion.
-## New-style Agent: in-place set_role() — identity, wallet, skills persist automatically.
-## Old-style subclass: falls back to despawn + spawn + transfer.
-func _perform_role_conversion(household: Node, role: String) -> void:
-	if not is_instance_valid(household):
-		return
-
-	var from_role: String = household.current_role if household.get("current_role") else "?"
-	var pop_id: String = household.person_name if household.get("person_name") and household.person_name != "" else household.name
-
-	# [LAND] Gate farmer conversions on field capacity (only valid conversion block)
-	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
-		var block_line: String = "[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
-			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
-		print(block_line)
-		if event_bus:
-			event_bus.log(block_line)
-		return
-
-	var pos: Vector2 = household.global_position
-	var wallet_money: float = 0.0
-	var hw: Wallet = household.get_node_or_null("Wallet") as Wallet
-	if hw:
-		wallet_money = hw.money
-
-	# ── NEW-STYLE in-place conversion (Agent + job components) ──────────────
-	if household is Agent and (household as Agent).current_job != null:
-		var ag: Agent = household as Agent
-		var old_role: String = ag.current_role
-		var ce = ag.get_node_or_null("CareerEvaluator")
-		var u_cur: float = ce.utility_current if ce else 0.0
-		var u_best: float = maxf(ce.utility_farmer, ce.utility_baker) if ce else 0.0
-		var conv_delta: float = u_best - u_cur
-		var conv_ratio: float = u_best / maxf(0.01, absf(u_cur))
-		var convert_line: String = "[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role]
-		print(convert_line)
-		if event_bus:
-			event_bus.log(convert_line)
-		ag.log_event(
-			"Switched from %s to %s — hoped for a better living (utility gain %.2f, ratio %.2f); had $%.0f in pocket." %
-			[old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money]
-		)
-		if event_bus:
-			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
-				ag.name, role, pos.x, pos.y, wallet_money])
-
-		# Remove from households tracking (set_role handles Godot groups)
-		var h_idx := households.find(ag)
-		if h_idx != -1:
-			households.remove_at(h_idx)
-
-		# Disconnect old death signal
-		if ag.agent_died.is_connected(_on_household_died):
-			ag.agent_died.disconnect(_on_household_died)
-
-		if role == "farmer":
-			# Spawn field atomically first
-			var field_pos := Vector2(
-				clamp(pos.x + randf_range(-150.0, 150.0), 50.0, 750.0),
-				clamp(pos.y + randf_range(-150.0, 150.0), 50.0, 550.0)
-			)
-			var pre_field := spawn_field_at(field_pos, null, true)
-			if pre_field == null:
-				# Re-add to households since conversion failed
-				households.append(ag)
-				if ag.agent_died and not ag.agent_died.is_connected(_on_household_died):
-					ag.agent_died.connect(_on_household_died)
-				if event_bus:
-					event_bus.log("[MOBILITY] Farmer conversion aborted — field spawn returned null")
-				return
-
-			# In-place switch!
-			ag.set_role("Farmer")
-			ag.name = "Farmer_%d" % next_farmer_id
-			next_farmer_id += 1
-			_fixup_node_name(ag, "Farmer")
-
-			# Re-bind HungerNeed for new role label
-			if ag.hunger and ag.inv:
-				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
-
-			# Wire FoodReserve
-			if ag.food_reserve:
-				ag.food_reserve.bind(ag.inv, ag.hunger, market, ag.wallet, event_bus, ag.name)
-
-			# Create home
-			var home := Node2D.new()
-			home.name = ag.name + "_Home"
-			home.global_position = pos
-			var home_marker := ColorRect.new()
-			home_marker.name = "HomeMarker"
-			home_marker.offset_left = -12.0
-			home_marker.offset_top = -12.0
-			home_marker.offset_right = 12.0
-			home_marker.offset_bottom = 12.0
-			home_marker.color = Color(0.2, 0.5, 1, 0.6)
-			home.add_child(home_marker)
-			add_child(home)
-
-			# Assign field BEFORE set_route_nodes
-			_assign_field_to_farmer(pre_field, ag)
-			ag.set_route_nodes(home, market_node)
-
-			all_farmers.append(ag)
-
-			if event_bus:
-				event_bus.log("[LAND] New field spawned for farmer %s at (%.0f, %.0f)" % [
-					ag.name, field_pos.x, field_pos.y])
-
-		elif role == "baker":
-			ag.set_role("Baker")
-			ag.name = "Baker_%d" % next_baker_id
-			next_baker_id += 1
-			_fixup_node_name(ag, "Baker")
-
-			if ag.hunger and ag.inv:
-				ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
-
-			# Create bakery spot
-			var bakery_spot := Node2D.new()
-			bakery_spot.name = ag.name + "_Bakery"
-			bakery_spot.global_position = pos
-			var bakery_marker := ColorRect.new()
-			bakery_marker.name = "BakeryMarker"
-			bakery_marker.offset_left = -12.0
-			bakery_marker.offset_top = -12.0
-			bakery_marker.offset_right = 12.0
-			bakery_marker.offset_bottom = 12.0
-			bakery_marker.color = Color(1, 0.8, 0.2, 0.6)
-			bakery_spot.add_child(bakery_marker)
-			add_child(bakery_spot)
-
-			ag.set_locations(bakery_spot, market_node)
-			all_bakers.append(ag)
-
-		return
-
-
-# ============================================================================
-# PLACEMENT MODE - Click-to-place entities in the world
-# ============================================================================
+# ── Placement mode ─────────────────────────────────────────────────────────────
 
 func _enter_placement_mode(mode: PlaceMode) -> void:
-	"""Enter placement mode for the given entity type."""
 	if place_mode == mode:
-		# Clicking same button again cancels
 		_cancel_placement()
 		return
 	place_mode = mode
@@ -1636,7 +797,6 @@ func _enter_placement_mode(mode: PlaceMode) -> void:
 
 
 func _cancel_placement() -> void:
-	"""Exit placement mode."""
 	place_mode = PlaceMode.NONE
 	if placement_cursor:
 		placement_cursor.visible = false
@@ -1644,7 +804,6 @@ func _cancel_placement() -> void:
 
 
 func _update_placement_cursor() -> void:
-	"""Move the ghost cursor to follow the mouse."""
 	if place_mode == PlaceMode.NONE or placement_cursor == null:
 		return
 	var mouse_pos = get_viewport().get_mouse_position()
@@ -1668,350 +827,16 @@ func _update_placement_label() -> void:
 
 
 func _place_entity_at(pos: Vector2) -> void:
-	"""Place the selected entity type at the given world position."""
+	"""Delegate placement spawns to the active village."""
+	if village == null:
+		return
 	match place_mode:
 		PlaceMode.FIELD:
-			spawn_field_at(pos)
+			village.spawn_field_at(pos)
 		PlaceMode.FARMER:
-			spawn_farmer_at(pos)
+			village.spawn_farmer_at(pos)
 		PlaceMode.BAKER:
-			spawn_baker_at(pos)
+			village.spawn_baker_at(pos)
 		PlaceMode.HOUSEHOLD:
-			spawn_household_at(pos)
-	# Stay in placement mode so user can place multiple of the same type
-	# (click the button again or press Esc to stop)
-
-
-# ============================================================================
-# SPAWN SYSTEM - Entity creation with full wiring
-# ============================================================================
-
-func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool = false) -> Node2D:
-	"""Spawn a new field at the given position.
-	If assign_to is provided the field is assigned directly (no popup).
-	skip_auto_assign=true leaves the field unassigned (used for atomic farmer conversion).
-	Otherwise falls back to auto-assign (single farmer) or popup (multiple farmers)."""
-	# Hard land cap — never exceed MAX_FIELDS
-	if all_field_nodes.size() >= MAX_FIELDS:
-		print("[LAND] Spawn blocked — cap reached (%d/%d)" % [all_field_nodes.size(), MAX_FIELDS])
-		if event_bus:
-			event_bus.log("[LAND] Spawn blocked — cap reached (%d/%d)" % [all_field_nodes.size(), MAX_FIELDS])
-		return null
-	# Create field node with FieldPlot script
-	var field_node = Node2D.new()
-	field_node.name = "Field%d" % next_field_id
-	next_field_id += 1
-	field_node.set_script(load("res://scripts/field_plot.gd"))
-	field_node.global_position = pos
-	
-	# Add visual marker (matches existing field style)
-	var marker = ColorRect.new()
-	marker.name = "FieldMarker"
-	marker.offset_left = -15.0
-	marker.offset_top = -15.0
-	marker.offset_right = 15.0
-	marker.offset_bottom = 15.0
-	marker.color = Color(0.4, 0.3, 0.1, 1)
-	field_node.add_child(marker)
-	
-	# Add a label underneath showing the field name
-	var name_label = Label.new()
-	name_label.name = "FieldLabel"
-	name_label.text = field_node.name
-	name_label.position = Vector2(-20, 18)
-	name_label.add_theme_font_size_override("font_size", 16)
-	name_label.add_theme_color_override("font_color", Color(0.8, 0.7, 0.4))
-	field_node.add_child(name_label)
-	
-	add_child(field_node)
-	
-	# Register with field manager
-	field_mgr.register_field(field_node, field_node)
-	
-	if event_bus:
-		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
-	
-	# Resolve assignment unless caller requests deferred assignment (atomic conversion path).
-	# 1) skip_auto_assign=true  → leave unassigned; caller assigns externally.
-	# 2) Explicit assign_to     → assign directly, no popup.
-	# 3) Single farmer in world → auto-assign silently.
-	# 4) Multiple farmers       → show user popup to choose.
-	if not skip_auto_assign:
-		if assign_to != null and is_instance_valid(assign_to):
-			_assign_field_to_farmer(field_node, assign_to)
-		elif all_farmers.size() == 1 and is_instance_valid(all_farmers[0]):
-			_assign_field_to_farmer(field_node, all_farmers[0])
-		else:
-			_show_field_assignment_popup(field_node, pos)
-	
-	return field_node
-
-
-func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
-	"""Spawn a new farmer using Agent.tscn + set_role("Farmer").
-	initial_field_node, when provided, is assigned BEFORE set_route_nodes so that
-	_rebuild_route never sees an empty fields array during construction."""
-	if AgentScene == null:
-		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn farmer: AgentScene not loaded")
-		return null
-
-	# Hard population cap
-	var total_pop := get_total_population()
-	if total_pop >= MAX_TOTAL_POP:
-		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		if event_bus:
-			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		return null
-
-	var f: Agent = AgentScene.instantiate() as Agent
-	if f == null:
-		push_error("AgentScene instantiate() returned null")
-		return null
-	f.name = "Farmer_%d" % next_farmer_id
-	next_farmer_id += 1
-	f.global_position = pos
-	add_child(f)
-
-	_fixup_node_name(f, "Farmer")
-
-	await get_tree().process_frame
-
-	_assign_new_identity(f)
-
-	f.market = market
-	f.event_bus = event_bus
-	f.econ_stats = econ_stats
-	f.set_role("Farmer")
-
-	# Wire HungerNeed
-	var f_hunger: HungerNeed = f.get_node("HungerNeed") as HungerNeed
-	var f_inv: Inventory = f.get_node("Inventory") as Inventory
-	if f_hunger and f_inv:
-		f_hunger.bind(f.name, f_inv, event_bus, calendar)
-
-	# Wire FoodReserve
-	var f_reserve: FoodReserve = f.get_node("FoodReserve") as FoodReserve
-	if f_reserve:
-		f_reserve.bind(f_inv, f_hunger, market, f.get_node("Wallet") as Wallet, event_bus, f.name)
-
-	# Create home
-	var home := Node2D.new()
-	home.name = f.name + "_Home"
-	home.global_position = pos
-	var home_marker := ColorRect.new()
-	home_marker.name = "HomeMarker"
-	home_marker.offset_left = -12.0
-	home_marker.offset_top = -12.0
-	home_marker.offset_right = 12.0
-	home_marker.offset_bottom = 12.0
-	home_marker.color = Color(0.2, 0.5, 1, 0.6)
-	home.add_child(home_marker)
-	add_child(home)
-
-	# Assign initial field BEFORE set_route_nodes
-	if initial_field_node != null and is_instance_valid(initial_field_node):
-		_assign_field_to_farmer(initial_field_node, f)
-
-	f.set_route_nodes(home, market_node)
-
-	# Register
-	all_farmers.append(f)
-
-	# Absorb orphaned fields
-	var absorbed: int = 0
-	for fn in all_field_nodes:
-		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == null:
-			_assign_field_to_farmer(fn, f)
-			absorbed += 1
-
-	if event_bus:
-		var msg: String = "PLACED: %s at (%d, %d)" % [f.name, int(pos.x), int(pos.y)]
-		if absorbed > 0:
-			msg += " → absorbed %d unassigned field(s)" % absorbed
-		event_bus.log(msg)
-
-	f.pop_clicked.connect(select_pop)
-
-	return f
-
-
-func spawn_baker_at(pos: Vector2) -> Node:
-	"""Spawn a new baker using Agent.tscn + set_role("Baker")."""
-	if AgentScene == null:
-		if event_bus:
-			event_bus.log("[ERROR] Cannot spawn baker: AgentScene not loaded")
-		return null
-
-	# Hard population cap
-	var total_pop := get_total_population()
-	if total_pop >= MAX_TOTAL_POP:
-		print("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		if event_bus:
-			event_bus.log("[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, MAX_TOTAL_POP])
-		return null
-
-	var b: Agent = AgentScene.instantiate() as Agent
-	if b == null:
-		push_error("AgentScene instantiate() returned null")
-		return null
-	b.name = "Baker_%d" % next_baker_id
-	next_baker_id += 1
-	b.global_position = pos
-	add_child(b)
-
-	_fixup_node_name(b, "Baker")
-
-	await get_tree().process_frame
-
-	_assign_new_identity(b)
-
-	b.market = market
-	b.event_bus = event_bus
-	b.econ_stats = econ_stats
-	b.set_role("Baker")
-
-	# Wire HungerNeed
-	var b_hunger: HungerNeed = b.get_node("HungerNeed") as HungerNeed
-	var b_inv: Inventory = b.get_node("Inventory") as Inventory
-	if b_hunger and b_inv:
-		b_hunger.bind(b.name, b_inv, event_bus, calendar)
-
-	# Create bakery spot
-	var bakery_spot := Node2D.new()
-	bakery_spot.name = b.name + "_Bakery"
-	bakery_spot.global_position = pos
-	var bakery_marker := ColorRect.new()
-	bakery_marker.name = "BakeryMarker"
-	bakery_marker.offset_left = -12.0
-	bakery_marker.offset_top = -12.0
-	bakery_marker.offset_right = 12.0
-	bakery_marker.offset_bottom = 12.0
-	bakery_marker.color = Color(1, 0.8, 0.2, 0.6)
-	bakery_spot.add_child(bakery_marker)
-	add_child(bakery_spot)
-
-	b.set_locations(bakery_spot, market_node)
-
-	# Register
-	all_bakers.append(b)
-
-	if event_bus:
-		event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
-
-	b.pop_clicked.connect(select_pop)
-
-	return b
-
-
-# ============================================================================
-# FIELD ASSIGNMENT POPUP
-# ============================================================================
-
-func _assign_field_to_farmer(field_node: Node2D, new_farmer) -> void:
-	field_mgr.assign_field(field_node, new_farmer)
-
-
-func _show_field_assignment_popup(field_node: Node2D, world_pos: Vector2) -> void:
-	"""Show a popup near the placed field asking which farmer to assign it to."""
-	if all_farmers.size() == 0:
-		return  # No farmers yet, nothing to assign
-	
-	# Convert world position to canvas/UI position
-	var vp_size = get_viewport().get_visible_rect().size
-	var screen_pos = world_pos + Vector2(20, -60)  # Offset so popup is above/right of field
-	screen_pos = screen_pos.clamp(Vector2(4, 4), vp_size - Vector2(180, 20))
-	
-	# Build popup on the CanvasLayer (always on top)
-	var ui_layer = get_node_or_null("UI")
-	if ui_layer == null:
-		return
-	
-	var popup = PanelContainer.new()
-	popup.name = "FieldAssignPopup"
-	popup.position = screen_pos
-	
-	var bg = StyleBoxFlat.new()
-	bg.bg_color = Color(0.08, 0.1, 0.13, 0.97)
-	bg.border_color = Color(0.5, 0.7, 0.4, 1.0)
-	bg.set_border_width_all(2)
-	bg.set_corner_radius_all(6)
-	bg.set_content_margin_all(10)
-	popup.add_theme_stylebox_override("panel", bg)
-	
-	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 5)
-	popup.add_child(vbox)
-	
-	var title = Label.new()
-	title.text = "Assign %s to:" % field_node.name
-	title.add_theme_font_size_override("font_size", 18)
-	title.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6))
-	vbox.add_child(title)
-	
-	var sep = HSeparator.new()
-	vbox.add_child(sep)
-	
-	# One button per farmer
-	var farmer_colors = [Color(0.3, 0.7, 1.0), Color(1.0, 0.6, 0.2), Color(0.4, 1.0, 0.5), Color(1.0, 0.4, 0.7)]
-	for i in range(all_farmers.size()):
-		var f = all_farmers[i]
-		if not is_instance_valid(f):
-			continue
-		var btn = Button.new()
-		btn.text = f.name
-		btn.custom_minimum_size = Vector2(140, 28)
-		var fc = farmer_colors[i % farmer_colors.size()]
-		var btn_style = StyleBoxFlat.new()
-		btn_style.bg_color = fc.lerp(Color.BLACK, 0.55)
-		btn_style.border_color = fc
-		btn_style.set_border_width_all(1)
-		btn_style.set_corner_radius_all(3)
-		btn_style.set_content_margin_all(4)
-		btn.add_theme_stylebox_override("normal", btn_style)
-		var hover_style = btn_style.duplicate()
-		hover_style.bg_color = fc.lerp(Color.BLACK, 0.35)
-		btn.add_theme_stylebox_override("hover", hover_style)
-		var fn_ref = field_node
-		var farmer_ref = f
-		btn.pressed.connect(func():
-			_assign_field_to_farmer(fn_ref, farmer_ref)
-			popup.queue_free()
-		)
-		vbox.add_child(btn)
-	
-	# Skip button
-	var skip_btn = Button.new()
-	skip_btn.text = "Skip (no farmer)"
-	skip_btn.custom_minimum_size = Vector2(140, 24)
-	skip_btn.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	skip_btn.pressed.connect(func(): popup.queue_free())
-	vbox.add_child(skip_btn)
-	
-	ui_layer.add_child(popup)
-
-
-# ============================================================================
-# SPAWN HELPERS - Positioning
-# ============================================================================
-
-func _get_next_farmer_position() -> Vector2:
-	"""Position new farmers near the house area."""
-	var base_x = 80.0
-	var base_y = 480.0
-	var offset = (all_farmers.size()) * 40
-	var col = offset % 200
-	@warning_ignore("integer_division")
-	var row = (offset / 200) * 60
-	return Vector2(base_x + col, base_y + row)
-
-
-func _get_next_baker_position() -> Vector2:
-	"""Position new bakers near the bakery area."""
-	var base_x = 350.0
-	var base_y = 410.0
-	var offset = (all_bakers.size()) * 40
-	var col = offset % 200
-	@warning_ignore("integer_division")
-	var row = (offset / 200) * 60
-	return Vector2(base_x + col, base_y + row)
+			village.spawn_household_at(pos)
+	# Stay in placement mode so the user can place multiple of the same type

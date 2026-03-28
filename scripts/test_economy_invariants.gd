@@ -99,16 +99,17 @@ func _physics_process(_delta: float) -> void:
 
 	_tick += 1
 	_main.clock.tick = _tick
-	_main._on_tick(_tick)
+	_main.village.receive_tick(_tick)
 
 	if not _verify_invariants(_tick):
 		_suite_done = true
 		get_tree().quit(1)
 		return
 
-	var day_index: int = _main.calendar.day_index if _main.calendar else _tick / TICKS_PER_DAY
+	var _village := _main.village
+	var day_index: int = _village.calendar.day_index if (_village != null and _village.calendar != null) else _tick / TICKS_PER_DAY
 	var max_ticks: int = _max_days * TICKS_PER_DAY
-	var sim_failed: bool = _main.get("sim_failed") == true
+	var sim_failed: bool = _village != null and _village.sim_failed
 
 	if sim_failed or _tick >= max_ticks:
 		if not _verify_invariants(_tick):
@@ -138,7 +139,7 @@ func _survival_requirement_met(sim_failed: bool, day_index: int) -> bool:
 		return true
 	if sim_failed:
 		return day_index >= _min_survival_days
-	var pm = _main.pop_mgr as PopulationManager
+	var pm = _main.village.pop_mgr as PopulationManager if _main.village != null else null
 	var pop_n: int = pm.count() if pm else 0
 	return pop_n > 0 and day_index >= _min_survival_days
 
@@ -177,7 +178,7 @@ func _parse_seeds_csv(tail: String) -> void:
 
 
 func _verify_invariants(tick: int) -> bool:
-	var m = _main.market as Market
+	var m = _main.village.get_market() if _main.village != null else null
 	if m == null or not is_instance_valid(m):
 		push_error("[ECON TEST] tick=%d: market missing or invalid" % tick)
 		return false
@@ -217,11 +218,6 @@ func _check_market(m: Market, tick: int) -> bool:
 	if m.bread_price < m.BREAD_PRICE_FLOOR - 0.001 or m.bread_price > m.BREAD_PRICE_CEILING + 0.001:
 		push_error("[ECON TEST] tick=%d: bread_price out of band %.4f" % [tick, m.bread_price])
 		return false
-	if m.get("treasury_cash") != null:
-		var tc: float = m.treasury_cash
-		if is_nan(tc) or tc < -0.001:
-			push_error("[ECON TEST] tick=%d: treasury_cash invalid %s" % [tick, tc])
-			return false
 	return true
 
 
@@ -257,7 +253,7 @@ func _check_agent(agent: Node, tick: int) -> bool:
 
 func _collect_pops() -> Array:
 	var out: Array = []
-	var pm = _main.pop_mgr as PopulationManager
+	var pm = _main.village.pop_mgr as PopulationManager if _main.village != null else null
 	if pm == null:
 		return out
 	for x in pm.all_farmers:

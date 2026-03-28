@@ -140,17 +140,7 @@ var producer_hysteresis_state: Dictionary = {
 	}
 }
 
-# ─── Bread emergency liquidity override ──────────────────────────────────────
-const BREAD_EMERGENCY_INV: int = 0
-const BREAD_EMERGENCY_MAX_SELL: int = 6
-const BREAD_EMERGENCY_COOLDOWN_TICKS: int = 10
-var bread_emergency_cooldown_remaining: int = 0
-
 var market_seeded: bool = false
-
-# Treasury kept for emergency bread liquidity
-var treasury_cash: float = 0.0
-var treasury_cash_start: float = 0.0
 
 var event_bus: EventBus = null
 var current_tick: int = 0
@@ -212,10 +202,6 @@ func set_tick(t: int) -> void:
 			BAND_LOWER_BID_MULTIPLIER
 		])
 	
-	# Tick down bread emergency cooldown
-	if bread_emergency_cooldown_remaining > 0:
-		bread_emergency_cooldown_remaining -= 1
-
 	# Enforce price floors and ceilings
 	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
 	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
@@ -715,13 +701,12 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	return units_bought
 
 
-func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0, is_survival: bool = false, is_emergency: bool = false) -> int:
+func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0, is_survival: bool = false) -> int:
 	"""Buy a specific amount of bread from any agent using micro-fill approach.
 	Stops when bid drops below min_acceptable_price or inventory/money constraints hit.
-	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats.
-	is_emergency: If true, bypasses producer sell hysteresis (bread emergency override)."""
-	
-	if not is_survival and not is_emergency and agent.is_in_group("bakers") and not can_producer_sell("bread"):
+	is_survival: If true, allows purchase even above upper_band but doesn't update clearing stats."""
+
+	if not is_survival and agent.is_in_group("bakers") and not can_producer_sell("bread"):
 		if event_bus:
 			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
 		_set_result(0, "blocked", "bread", bread_price)
@@ -935,11 +920,10 @@ func on_day_changed(day: int) -> void:
 	
 	# Daily bread status diagnostic
 	if event_bus:
-		event_bus.log("[BREAD STATUS] day=%d inv=%d paused_sell=%s paused_prod=%s emergency_cd=%d" % [
+		event_bus.log("[BREAD STATUS] day=%d inv=%d paused_sell=%s paused_prod=%s" % [
 			day, bread,
 			not can_producer_sell("bread"),
-			not can_producer_produce("bread"),
-			bread_emergency_cooldown_remaining])
+			not can_producer_produce("bread")])
 
 	# Reset daily flow counters
 	wheat_sold_today = 0
@@ -1269,138 +1253,3 @@ func _adjust_bread_price(day: int) -> void:
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				old_price, bread_price, update_reason
 			])
-
-
-# ==============================================================================
-#  BREAD EMERGENCY LIQUIDITY OVERRIDE
-# ==============================================================================
-
-func check_bread_emergency(bakers: Array) -> void:
-	if bread > BREAD_EMERGENCY_INV:
-		return
-	if bread_emergency_cooldown_remaining > 0:
-		return
-
-	var detect_line: String = "[BREAD EMPTY DETECTED] day=%d tick=%d inv=0" % [current_day, current_tick]
-	print(detect_line)
-	if event_bus:
-		event_bus.log(detect_line)
-
-	var supplier = _find_emergency_bread_supplier(bakers)
-	if supplier == null:
-		var skip_line: String = "[EMERGENCY SKIPPED] no supplier found day=%d tick=%d" % [current_day, current_tick]
-		print(skip_line)
-		if event_bus:
-			event_bus.log(skip_line)
-		bread_emergency_cooldown_remaining = BREAD_EMERGENCY_COOLDOWN_TICKS
-		return
-
-	var supplier_inv: Inventory = get_inv(supplier)
-	var supplier_bread: int = supplier_inv.get_qty("bread")
-
-	if supplier_bread > 0:
-		_emergency_inject_bread(supplier, supplier_inv, supplier_bread)
-	else:
-		_emergency_set_priority(supplier, supplier_inv)
-
-	bread_emergency_cooldown_remaining = BREAD_EMERGENCY_COOLDOWN_TICKS
-
-
-func _find_emergency_bread_supplier(bakers: Array) -> Node:
-	var best_bread_supplier = null
-	var best_bread_qty: int = 0
-	var flour_supplier = null
-	var wheat_supplier = null
-
-	for b in bakers:
-		if not (b and is_instance_valid(b)):
-			continue
-		var b_inv: Inventory = get_inv(b)
-		if b_inv == null:
-			continue
-		var b_bread: int = b_inv.get_qty("bread")
-		if b_bread > best_bread_qty:
-			best_bread_qty = b_bread
-			best_bread_supplier = b
-		if flour_supplier == null and b_inv.get_qty("flour") > 0:
-			flour_supplier = b
-		if wheat_supplier == null and b_inv.get_qty("wheat") > 0:
-			wheat_supplier = b
-
-	if best_bread_supplier != null:
-		return best_bread_supplier
-	if flour_supplier != null:
-		return flour_supplier
-	if wheat_supplier != null:
-		return wheat_supplier
-	return null
-
-
-func _emergency_inject_bread(supplier, supplier_inv: Inventory, supplier_bread: int) -> void:
-	var sell_qty: int = mini(supplier_bread, BREAD_EMERGENCY_MAX_SELL)
-
-	var estimated_cost: float = float(sell_qty) * get_bid_price("bread")
-	if treasury_cash < estimated_cost:
-		if treasury_cash < get_bid_price("bread"):
-			var skip_line: String = "[EMERGENCY SKIPPED] reason=insufficient_treasury cost=%.2f treasury=%.2f" % [
-				estimated_cost, treasury_cash]
-			print(skip_line)
-			if event_bus:
-				event_bus.log(skip_line)
-			return
-
-	var inv_before: int = bread
-	var total_paid: float = 0.0
-
-	for i in range(sell_qty):
-		if supplier_inv.get_qty("bread") <= 0:
-			sell_qty = i
-			break
-		var bid: float = get_bid_price("bread")
-		if treasury_cash < bid:
-			sell_qty = i
-			break
-		if money < bid:
-			sell_qty = i
-			break
-		supplier_inv.remove("bread", 1)
-		var supplier_wallet: Wallet = get_wallet(supplier)
-		if supplier_wallet:
-			supplier_wallet.credit(bid)
-		bread += 1
-		money -= bid
-		treasury_cash -= bid
-		total_paid += bid
-
-	var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=%d bypassed=true day=%d tick=%d cd=%d cost=%.2f treasury_after=%.2f" % [
-		_agent_label(supplier), sell_qty, current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS,
-		total_paid, treasury_cash]
-	print(trigger_line)
-	if event_bus:
-		event_bus.log(trigger_line)
-
-
-func _emergency_set_priority(supplier, supplier_inv: Inventory) -> void:
-	var job = supplier.get("current_job")
-	if job == null:
-		return
-
-	var flour: int = supplier_inv.get_qty("flour")
-	var wheat: int = supplier_inv.get_qty("wheat")
-	var action: String = ""
-
-	if flour > 0:
-		job.set("emergency_bake_next", true)
-		job.set("emergency_sell_next", true)
-		action = "bake+sell_next"
-	elif wheat > 0:
-		job.set("emergency_grind_next", true)
-		job.set("emergency_sell_next", true)
-		action = "grind+sell_next"
-
-	if action != "":
-		var trigger_line: String = "[EMERGENCY TRIGGERED] supplier=%s qty=0 bypassed=false day=%d tick=%d cd=%d priority=%s" % [
-			_agent_label(supplier), current_day, current_tick, BREAD_EMERGENCY_COOLDOWN_TICKS, action]
-		print(trigger_line)
-		if event_bus:
-			event_bus.log(trigger_line)

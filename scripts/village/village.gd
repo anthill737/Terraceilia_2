@@ -386,7 +386,7 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 	field_node.name = "Field%d" % field_mgr.next_field_id
 	field_mgr.next_field_id += 1
 	field_node.set_script(load("res://scripts/field_plot.gd"))
-	field_node.global_position = pos
+	field_node.position = to_local(pos)
 
 	var marker = ColorRect.new()
 	marker.name = "FieldMarker"
@@ -441,7 +441,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		return null
 	f.name = "Farmer_%d" % pop_mgr.next_farmer_id
 	pop_mgr.next_farmer_id += 1
-	f.global_position = pos
+	f.position = to_local(pos)
 	add_child(f)
 
 	_fixup_node_name(f, "Farmer")
@@ -520,7 +520,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 		return null
 	b.name = "Baker_%d" % pop_mgr.next_baker_id
 	pop_mgr.next_baker_id += 1
-	b.global_position = pos
+	b.position = to_local(pos)
 	add_child(b)
 
 	_fixup_node_name(b, "Baker")
@@ -545,7 +545,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 
 	var bakery_spot := Node2D.new()
 	bakery_spot.name = b.name + "_Bakery"
-	bakery_spot.global_position = pos
+	bakery_spot.position = to_local(pos)
 	var bakery_marker := ColorRect.new()
 	bakery_marker.name = "BakeryMarker"
 	bakery_marker.offset_left = -12.0
@@ -586,7 +586,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	h.name = "Household_%d" % pop_mgr.next_household_id
 	pop_mgr.next_household_id += 1
-	h.global_position = pos
+	h.position = to_local(pos)
 	add_child(h)
 
 	_fixup_node_name(h, "Household")
@@ -607,7 +607,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	var home := Node2D.new()
 	home.name = h.name + "_Home"
-	home.global_position = pos
+	home.position = to_local(pos)
 	add_child(home)
 
 	h.set_locations(home, market_node)

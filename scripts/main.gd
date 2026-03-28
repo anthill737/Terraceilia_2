@@ -714,14 +714,14 @@ func _build_spawn_toolbar() -> void:
 	# ── Village navigation ──
 	hbox.add_child(VSeparator.new())
 
-	_village_nav_btns = []
+	_village_nav_btns.clear()
 	if _world_node and _world_node.get("villages") != null:
 		for i in range(_world_node.villages.size()):
 			var v: Village = _world_node.villages[i]
 			if v == null:
 				continue
 			var vbtn := Button.new()
-			var vdisplay: String = v.name
+			var vdisplay: String = v.village_name if v.get("village_name") and v.village_name != "" else v.name
 			vbtn.text = vdisplay
 			vbtn.tooltip_text = "Center camera on %s" % vdisplay
 			vbtn.custom_minimum_size = Vector2(80, 34)

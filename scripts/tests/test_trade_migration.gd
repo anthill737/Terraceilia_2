@@ -18,11 +18,14 @@ const TICKS_PER_DAY: int = 10
 const FRAMES_PER_TICK: int = 6
 
 ## How many ticks to run each scenario.
-const TRADE_OFF_TICKS: int = 25
-const TRADE_ON_TICKS: int = 30
-const RETURN_MIGRATE_TICKS: int = 30
-const RETURN_FLIP_TICKS: int = 30
-const DETERM_TICKS: int = 35
+## Villages are 2000px apart; at SPEED=100 and 240fps physics the agent needs
+## ~4800 physics frames (~800 ticks at FRAMES_PER_TICK=6) to cross the gap.
+## We use 1000 ticks for travel scenarios to give comfortable headroom.
+const TRADE_OFF_TICKS: int = 25       # Only needs > TRADE_EVAL_INTERVAL (10)
+const TRADE_ON_TICKS: int = 1000      # Enough for eval (10) + travel (800) + margin
+const RETURN_MIGRATE_TICKS: int = 1000  # Same: allow full migration
+const RETURN_FLIP_TICKS: int = 1000     # After price flip: allow full return travel
+const DETERM_TICKS: int = 1000          # Enough to capture post-arrival state
 
 ## How much higher the "attractive" village prices are vs the home village.
 ## 3× is well above any travel cost the spec mandates, ensuring migration triggers.
@@ -345,8 +348,20 @@ func _check_no_migration() -> void:
 func _check_migration_occurred() -> void:
 	if _any_agent_migrated():
 		print("[TRADE TEST] PASS: Test 2 — at least one agent migrated to the better market")
+		return
+
+	# Diagnose failure: did any agent at least initiate travel?
+	var trade_initiated: bool = false
+	for a in _collect_agents():
+		var job = a.get("current_job")
+		if job != null and job.get("trade_route_active") != null and job.trade_route_active:
+			trade_initiated = true
+			break
+
+	if trade_initiated:
+		_fail("Test 2: trade travel was initiated but agent did not arrive in %d ticks (check SPEED/distance)" % TRADE_ON_TICKS)
 	else:
-		_fail("Test 2: no agent migrated in %d ticks despite V2 prices being %.0f× higher" % [
+		_fail("Test 2: no trade evaluation or migration in %d ticks despite V2 prices %.0f× higher (T2/T3 eval loop running?)" % [
 			TRADE_ON_TICKS, PRICE_MULTIPLIER])
 
 

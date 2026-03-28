@@ -158,8 +158,10 @@ func evaluate(day: int, agent: Node, econ_stats: Node, bread_scarcity: float = 0
 	# ── Life-event log ───────────────────────────────────────────────────
 	var best_u: float = maxf(utility_farmer, utility_baker)
 	if agent.has_method("log_event"):
-		agent.log_event("Career eval: current=%s Uc=%.2f best=%s Ub=%.2f" % [
-			current_role, utility_current, recommended_role, best_u])
+		agent.log_event(
+			"Thought about changing jobs — staying as %s feels like %.1f; switching to %s looks like %.1f." %
+			[current_role, utility_current, recommended_role, best_u]
+		)
 
 
 func _compute_utility(income: float, skill: float, switch_cost: float, risk: float) -> float:

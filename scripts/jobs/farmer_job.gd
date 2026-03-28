@@ -228,7 +228,10 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		inv.add("seeds", actual_seeds)
 		if event_bus:
 			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds, skill=%.2f)" % [agent.current_tick, field_name, actual_wheat, actual_seeds, agent.skill_farmer])
-		agent.log_event("Harvested %d wht + %d seeds (sk=%.2f ×%.2f)" % [actual_wheat, actual_seeds, agent.skill_farmer, _sk_mult])
+		agent.log_event(
+			"Harvested %d wheat and %d seeds (farmer skill %.2f, yield ×%.2f)." %
+			[actual_wheat, actual_seeds, agent.skill_farmer, _sk_mult]
+		)
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
 		if not market.can_producer_produce("wheat"):
 			if event_bus:
@@ -242,7 +245,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 			inv.remove("seeds", 5)
 			if event_bus:
 				event_bus.log("Tick %d: Farmer planted %s (-5 seeds)" % [agent.current_tick, field_name])
-			agent.log_event("Planted field")
+			agent.log_event("Planted a field (spent 5 seeds).")
 		elif inventory_throttle and not should_plant:
 			if event_bus:
 				event_bus.log("Tick %d: Farmer SKIPPED planting %s (throttle %.0f%%)" % [agent.current_tick, field_name, inventory_throttle.production_throttle * 100.0])
@@ -262,7 +265,9 @@ func handle_market_arrival() -> void:
 		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_wheat_snap)
 		if _ws > 0:
 			var wtr: Dictionary = market.last_trade_result
-			agent.log_event("Sold %d wheat @$%.2f (%s)" % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")])
+			agent.log_event(
+				"Sold %d wheat at $%.2f each (%s)." % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")]
+			)
 	if inv.get_qty("seeds") < 20:
 		var _cf_seeds_snap: float = agent.get_cash()
 		market.sell_seeds_to_farmer(agent)
@@ -277,15 +282,23 @@ func handle_market_arrival() -> void:
 		if bought > 0 and event_bus:
 			event_bus.log("Tick %d: Farmer bought %d bread for food buffer" % [agent.current_tick, bought])
 		if bought == 0:
-			agent.log_event("Bread buy FAILED: wanted=%d, mkt=%d, reason=%s" % [needed, btr.get("market_bread", -1), btr.get("reason", "unknown")])
+			agent.log_event(
+				"Could not buy bread (wanted %d loaves; market had %d; %s)." %
+				[needed, btr.get("market_bread", -1), btr.get("reason", "unknown")]
+			)
 		else:
-			agent.log_event("Bread buy: got=%d/%d @$%.2f (%s)" % [bought, needed, btr.get("price", 0.0), btr.get("reason", "?")])
+			agent.log_event(
+				"Bought %d of %d loaves of bread at $%.2f each (%s)." %
+				[bought, needed, btr.get("price", 0.0), btr.get("reason", "?")]
+			)
 
 
 func on_day_changed(_day: int) -> void:
 	var _w: float = inv.get_qty("wheat") if inv else 0
 	var _b: int   = inv.get_qty("bread") if inv else 0
-	agent.log_event("── $%.0f  wht=%d  br=%d" % [agent.get_cash(), _w, _b])
+	agent.log_event(
+		"End of day: has $%.0f, %d wheat in stock, %d bread in stock." % [agent.get_cash(), _w, _b]
+	)
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:
 		if cur_money <= day_money_start:

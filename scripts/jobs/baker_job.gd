@@ -246,9 +246,14 @@ func perform_market_transactions() -> void:
 					agent.cashflow_today_expense += max(0.0, _cf_wbuy_snap - agent.get_cash())
 					var wtr: Dictionary = market.last_trade_result
 					if _bw > 0:
-						agent.log_event("Bought %d wheat @$%.2f (%s)" % [_bw, wtr.get("price", 0.0), wtr.get("reason", "?")])
+						agent.log_event(
+							"Bought %d wheat at $%.2f each (%s)." % [_bw, wtr.get("price", 0.0), wtr.get("reason", "?")]
+						)
 					elif adjusted_target > 0:
-						agent.log_event("Wheat buy FAILED: wanted=%d, reason=%s" % [adjusted_target, wtr.get("reason", "unknown")])
+						agent.log_event(
+							"Could not buy wheat (wanted %d units; %s)." %
+							[adjusted_target, wtr.get("reason", "unknown")]
+						)
 				phase = Phase.PRODUCE
 				agent.pending_target = bakery_location
 				route.wait(WAIT_TIME)
@@ -289,9 +294,20 @@ func perform_market_transactions() -> void:
 				agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_bsale_snap)
 				var btr: Dictionary = market.last_trade_result
 				if _bs > 0:
-					agent.log_event("Sold %d bread @$%.2f (%s%s)" % [_bs, btr.get("price", 0.0), btr.get("reason", "?"), " EMERGENCY" if emergency_sell_next else ""])
+					agent.log_event(
+						"Sold %d bread at $%.2f each (%s)%s" %
+						[
+							_bs,
+							btr.get("price", 0.0),
+							btr.get("reason", "?"),
+							" — urgent sale." if emergency_sell_next else "."
+						]
+					)
 				else:
-					agent.log_event("Bread sale FAILED: offered=%d, reason=%s" % [sellable, btr.get("reason", "unknown")])
+					agent.log_event(
+						"Could not sell bread (tried to sell %d loaves; %s)." %
+						[sellable, btr.get("reason", "unknown")]
+					)
 			emergency_sell_next = false
 			var current_wheat: int = inv.get_qty("wheat")
 			if current_wheat < WHEAT_LOW_WATERMARK:
@@ -424,7 +440,7 @@ func process_grinding(delta: float) -> void:
 				var flour_produced: int = units * FLOUR_PER_WHEAT
 				if event_bus:
 					event_bus.log("Tick %d: Baker ground %d wheat into %d flour" % [agent.current_tick, units, flour_produced])
-				agent.log_event("Ground %d wheat → %d flour" % [units, flour_produced])
+				agent.log_event("Ground %d wheat into %d flour." % [units, flour_produced])
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
 				var current_wheat: int = inv.get_qty("wheat")
@@ -541,7 +557,10 @@ func process_baking(delta: float) -> void:
 				bread_produced_today += bread_produced
 				if event_bus:
 					event_bus.log("Tick %d: Baker baked %d flour into %d bread (skill=%.2f)" % [agent.current_tick, units, bread_produced, agent.skill_baker])
-				agent.log_event("Baked %d bread (sk=%.2f ×%.2f)" % [bread_produced, agent.skill_baker, _sk_mult])
+				agent.log_event(
+					"Baked %d loaves of bread (baker skill %.2f, yield ×%.2f)." %
+					[bread_produced, agent.skill_baker, _sk_mult]
+				)
 				# Emergency: immediately go to sell after baking
 				if emergency_sell_next:
 					if event_bus:
@@ -590,7 +609,9 @@ func on_day_changed(_day: int) -> void:
 	emergency_sell_next = false
 	var _br: int = inv.get_qty("bread") if inv else 0
 	var _fl: int = inv.get_qty("flour") if inv else 0
-	agent.log_event("── $%.0f  br=%d  fl=%d" % [agent.get_cash(), _br, _fl])
+	agent.log_event(
+		"End of day: has $%.0f, %d bread, %d flour in stock." % [agent.get_cash(), _br, _fl]
+	)
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:
 		if cur_money <= day_money_start:

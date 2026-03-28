@@ -268,5 +268,3 @@ func _track_starvation_events(day: int) -> void:
 	# Trim to window
 	while starvation_events.size() > 0 and starvation_events[0] < day - STARVATION_WINDOW_DAYS:
 		starvation_events.pop_front()
-
-

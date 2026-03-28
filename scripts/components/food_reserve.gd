@@ -73,14 +73,22 @@ func check_survival_mode() -> bool:
 			if is_survival_mode:
 				var reason: String = ""
 				if current_food < min_reserve_units and hunger_critical:
-					reason = "food reserve low (%d/%d) AND hunger critical (%d/%d)" % [current_food, min_reserve_units, hunger.hunger_days, hunger.hunger_max_days]
+					reason = (
+						"only %d bread saved for emergencies (wants %d) and hunger is critical (%d of %d days)"
+						% [current_food, min_reserve_units, hunger.hunger_days, hunger.hunger_max_days]
+					)
 				elif current_food < min_reserve_units:
-					reason = "food reserve low (%d/%d)" % [current_food, min_reserve_units]
+					reason = "only %d bread saved for emergencies (wants %d)" % [current_food, min_reserve_units]
 				else:
-					reason = "hunger critical (%d/%d)" % [hunger.hunger_days, hunger.hunger_max_days]
-				event_bus.log("Tick %d: %s SURVIVAL MODE ON (%s)" % [current_tick, agent_name, reason])
+					reason = "hunger is critical (%d of %d days fed)" % [hunger.hunger_days, hunger.hunger_max_days]
+				event_bus.log(
+					"Tick %d: %s is scrambling for food — %s." % [current_tick, agent_name, reason]
+				)
 			else:
-				event_bus.log("Tick %d: %s SURVIVAL MODE OFF (reserve restored: %d/%d, hunger: %d/%d)" % [current_tick, agent_name, current_food, min_reserve_units, hunger.hunger_days, hunger.hunger_max_days])
+				event_bus.log(
+					"Tick %d: %s is no longer in survival mode (bread reserve %d of %d, hunger %d of %d)." %
+					[current_tick, agent_name, current_food, min_reserve_units, hunger.hunger_days, hunger.hunger_max_days]
+				)
 	
 	last_survival_check_tick = current_tick
 	return is_survival_mode

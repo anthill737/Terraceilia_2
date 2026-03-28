@@ -555,8 +555,10 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if event_bus:
 		event_bus.log(decision_line)
 	if h.has_method("log_event"):
-		h.log_event("Switched: %s->%s reason=utility delta=%.2f ratio=%.2f cash=$%.0f" % [
-			h.current_role, best_role, delta, ratio, cash])
+		h.log_event(
+			"Decided to switch from %s to %s — looked like a better deal (gain %.2f, ratio %.2f); had $%.0f on hand." %
+			[h.current_role, best_role, delta, ratio, cash]
+		)
 	if h.get("last_career_decision") != null:
 		h.last_career_decision = "day=%d utility %s->%s Uc=%.2f Ub=%.2f delta=%.2f ratio=%.2f" % [
 			day, h.current_role, best_role, u_current, best_u, delta, ratio]

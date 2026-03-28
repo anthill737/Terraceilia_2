@@ -707,7 +707,7 @@ func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, ex
 
 	var content_lbl := Label.new()
 	content_lbl.text = "..."
-	content_lbl.add_theme_font_size_override("font_size", 18)
+	content_lbl.add_theme_font_size_override("font_size", 19)
 	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
 	vbox.add_child(content_lbl)
 
@@ -1121,18 +1121,15 @@ func get_ui_labels() -> void:
 		pop_inspector_title = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorTitle")
 		pop_inspector_role  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorRole")
 		pop_inspector_hint  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/HintLabel")
-		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll/PopInspectorBody")
-		pop_history_label   = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll/LifeHistory")
+		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/PopInspectorBody")
+		pop_history_label   = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/LifeHistory")
 		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
 		if close_btn:
 			close_btn.pressed.connect(_on_inspector_close)
 
-		var stats_scroll: ScrollContainer = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll") as ScrollContainer
-		var hist_scroll: ScrollContainer = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll") as ScrollContainer
-		if stats_scroll and not stats_scroll.resized.is_connected(_on_inspector_scroll_resized):
-			stats_scroll.resized.connect(_on_inspector_scroll_resized)
-		if hist_scroll and not hist_scroll.resized.is_connected(_on_inspector_scroll_resized):
-			hist_scroll.resized.connect(_on_inspector_scroll_resized)
+		var stat_col: Control = pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as Control
+		if stat_col and not stat_col.resized.is_connected(_on_inspector_scroll_resized):
+			stat_col.resized.connect(_on_inspector_scroll_resized)
 
 		# Dark semi-transparent panel background
 		var panel_style := StyleBoxFlat.new()
@@ -1170,15 +1167,15 @@ func _update_eco_bar() -> void:
 		var _f: int = get_tree().get_nodes_in_group("farmers").size()
 		var _b: int = get_tree().get_nodes_in_group("bakers").size()
 		var _h: int = get_tree().get_nodes_in_group("households").size()
-		eco_village_label.text = "Pop: %d  H:%d F:%d B:%d\nFields: %d/%d" % [
-			_h + _f + _b, _h, _f, _b,
-			all_field_nodes.size(), MAX_FIELDS
-		]
+		eco_village_label.text = (
+			"Population %d (households %d, farmers %d, bakers %d)\nFields %d of %d"
+			% [_h + _f + _b, _h, _f, _b, all_field_nodes.size(), MAX_FIELDS]
+		)
 
 	# MARKET
 	if eco_market_label and market:
 		eco_market_label.text = (
-			"Wheat %d/%d · $%.2f\nBread %d/%d · $%.2f" % [
+			"Wheat stock %d of %d at $%.2f\nBread stock %d of %d at $%.2f" % [
 				market.wheat, market.wheat_capacity, market.wheat_price,
 				market.bread, market.bread_capacity, market.bread_price
 			]
@@ -1189,7 +1186,7 @@ func _update_eco_bar() -> void:
 		var w: float = prosperity_meter.prosperity_inputs.get("wealth_health",       0.0)
 		var f: float = prosperity_meter.prosperity_inputs.get("food_security",       0.0)
 		var s: float = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
-		eco_prosperity_label.text = "★ %.2f\nW:%.2f F:%.2f S:%.2f" % [
+		eco_prosperity_label.text = "Score %.2f\nWealth %.2f · Food security %.2f · Starvation pressure %.2f" % [
 			prosperity_meter.prosperity_score, w, f, s
 		]
 
@@ -1200,13 +1197,16 @@ func _update_eco_bar() -> void:
 			var fi: Inventory         = farmer.get_node("Inventory")         as Inventory
 			var fw: Wallet            = farmer.get_node("Wallet")            as Wallet
 			var fc: InventoryCapacity = farmer.get_node("InventoryCapacity") as InventoryCapacity
-			eco_farmer_label.text = "$%.0f  S:%d W:%d Br:%d  ♥%d/%d\n%s  Inv:%d/%d" % [
-				fw.money,
-				fi.get_qty("seeds"), fi.get_qty("wheat"), fi.get_qty("bread"),
-				fh.hunger_days, fh.hunger_max_days,
-				farmer.get_status_text(),
-				fc.current_total(), fc.max_items
-			]
+			eco_farmer_label.text = (
+				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d of %d\n%s · Inventory %d of %d items"
+				% [
+					fw.money,
+					fi.get_qty("seeds"), fi.get_qty("wheat"), fi.get_qty("bread"),
+					fh.hunger_days, fh.hunger_max_days,
+					farmer.get_status_text(),
+					fc.current_total(), fc.max_items
+				]
+			)
 		else:
 			eco_farmer_label.text = "(none)"
 
@@ -1217,13 +1217,16 @@ func _update_eco_bar() -> void:
 			var bi: Inventory         = baker.get_node("Inventory")         as Inventory
 			var bw: Wallet            = baker.get_node("Wallet")            as Wallet
 			var bc: InventoryCapacity = baker.get_node("InventoryCapacity") as InventoryCapacity
-			eco_baker_label.text = "$%.0f  W:%d Fl:%d Br:%d  ♥%d/%d\n%s  Inv:%d/%d" % [
-				bw.money,
-				bi.get_qty("wheat"), bi.get_qty("flour"), bi.get_qty("bread"),
-				bh.hunger_days, bh.hunger_max_days,
-				baker.get_status_text(),
-				bc.current_total(), bc.max_items
-			]
+			eco_baker_label.text = (
+				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d of %d\n%s · Inventory %d of %d items"
+				% [
+					bw.money,
+					bi.get_qty("wheat"), bi.get_qty("flour"), bi.get_qty("bread"),
+					bh.hunger_days, bh.hunger_max_days,
+					baker.get_status_text(),
+					bc.current_total(), bc.max_items
+				]
+			)
 		else:
 			eco_baker_label.text = "(none)"
 
@@ -1332,24 +1335,24 @@ func update_inspector() -> void:
 	# Line 3: current state (dim)
 	var line3: String = "[color=#aaaaaa]%s[/color]" % state
 
-	# Line 4: role-specific extras (compact inline)
+	# Role-specific inventory (one short line each — reads like a journal)
 	var extras: Array[String] = []
 	if d.has("seeds"):
-		extras.append("Seeds:%d" % d.get("seeds"))
+		extras.append("Carrying %d seeds." % d.get("seeds"))
 	if d.has("wheat"):
-		extras.append("Wheat:%d" % d.get("wheat"))
+		extras.append("Carrying %d wheat." % d.get("wheat"))
 	if d.has("flour"):
-		extras.append("Flour:%d" % d.get("flour"))
+		extras.append("Carrying %d flour." % d.get("flour"))
 	if d.has("fields"):
-		extras.append("Fields:%d" % d.get("fields"))
+		extras.append("Working %d field(s)." % d.get("fields"))
 	if d.has("bread_consumed") and d.get("bread_consumed", 0) > 0:
-		extras.append("Consumed:%d" % d.get("bread_consumed"))
+		extras.append("Ate %d bread today." % d.get("bread_consumed"))
 	if d.get("neg_cashflow_days", 0) > 0:
-		extras.append("[color=#ff8844]NegCash:%dd[/color]" % d.get("neg_cashflow_days"))
+		extras.append("[color=#ff8844]Losing money for %d day(s) in a row.[/color]" % d.get("neg_cashflow_days"))
 	if d.get("failed_food_days", 0) > 0:
-		extras.append("[color=#ff8844]FailFood:%dd[/color]" % d.get("failed_food_days"))
+		extras.append("[color=#ff8844]Could not buy food for %d day(s) in a row.[/color]" % d.get("failed_food_days"))
 	if d.has("training_days"):
-		extras.append("[color=#88ccff]Training:%dd[/color]" % d.get("training_days"))
+		extras.append("[color=#88ccff]Training for a new job — %d day(s) left.[/color]" % d.get("training_days"))
 
 	var lines: Array[String] = []
 	lines.append(INSPECTOR_SEC % "Vitals")
@@ -1359,8 +1362,9 @@ func update_inspector() -> void:
 	lines.append(line3)
 	if extras.size() > 0:
 		lines.append("")
-		lines.append(INSPECTOR_SEC % "Inventory & pressure")
-		lines.append("[color=#b8c0d0]" + "    ".join(extras) + "[/color]")
+		lines.append(INSPECTOR_SEC % "Belongings & pressure")
+		for ex: String in extras:
+			lines.append("[color=#d0d8e8]• %s[/color]" % ex)
 
 	# ── Skills display ───────────────────────────────────────────────────────
 	var sk_f: float = d.get("skill_farmer", -1.0)
@@ -1377,10 +1381,10 @@ func update_inspector() -> void:
 		var f_bar: String = "█".repeat(f_fill) + "░".repeat(5 - f_fill)
 		var b_bar: String = "█".repeat(b_fill) + "░".repeat(5 - b_fill)
 		lines.append(
-			"[color=#6688aa]Farmer: [%s] %.2f   Baker: [%s] %.2f   (%dd in role)[/color]" %
+			"[color=#6688aa]Farmer skill [%s] %.2f · Baker skill [%s] %.2f · %d days in this role[/color]" %
 			[f_bar, sk_f, b_bar, sk_b, dir])
 		lines.append(
-			"[color=#6688aa]Productivity: [color=%s]×%.2f[/color][/color]" %
+			"[color=#6688aa]Productivity today: [color=%s]×%.2f[/color][/color]" %
 			[pm_col, prod_m])
 
 	# ── Career utility display (full instrumentation) ───────────────────────
@@ -1395,11 +1399,11 @@ func update_inspector() -> void:
 		var ub_col: String = "#88ccaa" if u_b >= u_c else "#888888"
 		var uc_col: String = "#aaaacc"
 		lines.append(
-			"[color=#6688aa]U: [color=%s]Farmer=%.1f[/color]  [color=%s]Baker=%.1f[/color]  [color=%s]Current=%.1f[/color][/color]" %
+			"[color=#6688aa]Utility — [color=%s]farmer %.1f[/color] · [color=%s]baker %.1f[/color] · [color=%s]stay put %.1f[/color][/color]" %
 			[uf_col, u_f, ub_col, u_b, uc_col, u_c])
 		var rec_col: String = "#55cc88" if rec_role != d.get("role", "") else "#888888"
 		lines.append(
-			"[color=#556688]Recommended: [color=%s]%s[/color][/color]" %
+			"[color=#556688]Best-looking job right now: [color=%s]%s[/color][/color]" %
 			[rec_col, rec_role])
 
 	# ── Detailed career eval breakdown (from last_career_eval dict) ──────
@@ -1508,7 +1512,7 @@ func update_inspector() -> void:
 		if raw_ev is Array:
 			events = raw_ev
 		if events.is_empty():
-			pop_history_label.text = "[color=#9aa8bc](no events yet — day-end diary lines appear here)[/color]"
+			pop_history_label.text = "[color=#9aa8bc](Nothing written yet — day-end diary entries show up here.)[/color]"
 		else:
 			var start: int = max(0, events.size() - 200)
 			var hist_lines: Array[String] = []
@@ -1536,21 +1540,20 @@ func _deferred_sync_inspector_scroll_layout() -> void:
 	_inspector_scroll_sync_queued = false
 	if pop_inspector_panel == null or not pop_inspector_panel.visible:
 		return
-	var stats_scroll := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll") as ScrollContainer
-	var hist_scroll := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll") as ScrollContainer
+	var stat_col := pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as Control
 	var vw: float = get_viewport().get_visible_rect().size.x
-	if pop_inspector_body and stats_scroll:
-		var w: float = stats_scroll.size.x - 24.0
+	if pop_inspector_body and stat_col:
+		var w: float = stat_col.size.x - 28.0
 		if w < 80.0:
-			w = maxf(160.0, vw * 0.45)
+			w = maxf(200.0, vw * 0.48)
 		pop_inspector_body.custom_minimum_size.x = w
-		pop_inspector_body.custom_minimum_size.y = maxf(1.0, pop_inspector_body.get_content_height())
-	if pop_history_label and hist_scroll:
-		var w2: float = hist_scroll.size.x - 24.0
+		pop_inspector_body.custom_minimum_size.y = maxf(80.0, pop_inspector_body.get_content_height())
+	if pop_history_label and stat_col:
+		var w2: float = stat_col.size.x - 28.0
 		if w2 < 80.0:
-			w2 = maxf(160.0, vw * 0.45)
+			w2 = maxf(200.0, vw * 0.48)
 		pop_history_label.custom_minimum_size.x = w2
-		pop_history_label.custom_minimum_size.y = maxf(1.0, pop_history_label.get_content_height())
+		pop_history_label.custom_minimum_size.y = maxf(56.0, pop_history_label.get_content_height())
 
 
 func spawn_household_at(pos: Vector2) -> Node:
@@ -1720,7 +1723,7 @@ func _on_migrate_requested(agent: Node, reason: String) -> void:
 	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
 	
 	if agent.has_method("log_event"):
-		agent.log_event("Migrated: reason=%s" % reason)
+		agent.log_event("Left town — %s." % reason)
 	var _migrated_name: String = agent.name
 	agent.queue_free()
 	print("[MIGRATE CONFIRM] %s removed from simulation (reason: %s)" % [_migrated_name, reason])
@@ -1743,7 +1746,9 @@ func _on_role_switch_requested(household: Node, new_role: String) -> void:
 	if event_bus:
 		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
 	if household.has_method("log_event"):
-		household.log_event("Training started: → %s (%d days)" % [new_role.capitalize(), training_days])
+		household.log_event(
+			"Started training to become a %s (%d days to go)." % [new_role.capitalize(), training_days]
+		)
 
 	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
 
@@ -1786,8 +1791,10 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		print(convert_line)
 		if event_bus:
 			event_bus.log(convert_line)
-		ag.log_event("Switched: %s->%s reason=utility delta=%.2f ratio=%.2f cash=$%.0f" % [
-			old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money])
+		ag.log_event(
+			"Switched from %s to %s — hoped for a better living (utility gain %.2f, ratio %.2f); had $%.0f in pocket." %
+			[old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money]
+		)
 		if event_bus:
 			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
 				ag.name, role, pos.x, pos.y, wallet_money])

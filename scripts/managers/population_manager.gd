@@ -44,7 +44,7 @@ func assign_identity(pop: Node) -> void:
 		role_str = pop.current_role
 	else:
 		role_str = pop.get_class()
-	pop.log_event("Born: role=%s" % role_str)
+	pop.log_event("Born — starts life as a %s." % role_str)
 
 
 func transfer_identity_data(to_pop: Node, pid: int, pname: String,
@@ -61,7 +61,7 @@ func transfer_identity_data(to_pop: Node, pid: int, pname: String,
 		to_pop.skill_baker = skill_b
 	if to_pop.get("days_in_role") != null:
 		to_pop.days_in_role = 0
-	to_pop.log_event("Role changed → %s" % new_role)
+	to_pop.log_event("Changed jobs — now working as a %s." % new_role)
 
 
 func register_household(h: Node) -> void:

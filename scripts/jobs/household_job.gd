@@ -199,12 +199,18 @@ func attempt_buy_bread() -> void:
 			consecutive_failed_food_days = 0
 			if event_bus:
 				event_bus.log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [agent.current_tick, agent.name, qty_bought, desired, inv.get_qty("bread")])
-			agent.log_event("Bread buy: got=%d/%d @$%.2f (%s)" % [qty_bought, desired, tr.get("price", 0.0), tr.get("reason", "?")])
+			agent.log_event(
+				"Bought %d of %d loaves at $%.2f each (%s)." %
+				[qty_bought, desired, tr.get("price", 0.0), tr.get("reason", "?")]
+			)
 		else:
 			consecutive_failed_food_days += 1
 			if event_bus:
 				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [agent.current_tick, agent.name, desired, consecutive_failed_food_days])
-			agent.log_event("Bread buy FAILED: wanted=%d, mkt=%d, reason=%s" % [desired, tr.get("market_bread", -1), tr.get("reason", "unknown")])
+			agent.log_event(
+				"Could not buy bread (wanted %d; market had %d; %s)." %
+				[desired, tr.get("market_bread", -1), tr.get("reason", "unknown")]
+			)
 
 
 func consume_bread_at_home() -> void:
@@ -310,13 +316,13 @@ func get_status_text() -> String:
 
 func on_day_changed(_day: int) -> void:
 	var _br: int = inv.get_qty("bread") if inv else 0
-	agent.log_event("── $%.0f  br=%d" % [agent.get_cash(), _br])
+	agent.log_event("End of day: has $%.0f and %d loaves of bread." % [agent.get_cash(), _br])
 	if training_days_remaining > 0:
 		training_days_remaining -= 1
 
 
 func _on_starved(agent_name_param: String) -> void:
-	agent.log_event("Died: reason=starvation")
+	agent.log_event("Died of starvation.")
 	if event_bus:
 		event_bus.log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
 	agent.agent_died.emit(agent)

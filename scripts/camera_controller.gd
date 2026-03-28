@@ -31,11 +31,13 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_target_zoom = clampf(_target_zoom + ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
-			get_viewport().set_input_as_handled()
+			if _is_mouse_over_world_view_for_wheel():
+				_target_zoom = clampf(_target_zoom + ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+				get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_target_zoom = clampf(_target_zoom - ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
-			get_viewport().set_input_as_handled()
+			if _is_mouse_over_world_view_for_wheel():
+				_target_zoom = clampf(_target_zoom - ZOOM_STEP, ZOOM_MIN, ZOOM_MAX)
+				get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = event.pressed
 			if event.pressed:
@@ -46,6 +48,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		global_position -= event.relative / zoom.x
 		_target_position = global_position
 		get_viewport().set_input_as_handled()
+
+
+func _is_mouse_over_world_view_for_wheel() -> bool:
+	"""True when the wheel should zoom the world: over the main map area, not HUD text/menus."""
+	var hc: Control = get_viewport().gui_get_hovered_control()
+	if hc == null:
+		return true
+	var n: Node = hc
+	while n != null:
+		if n.name == "WorldSpacer":
+			return true
+		n = n.get_parent()
+	return false
 
 
 func recenter(centroid: Vector2) -> void:

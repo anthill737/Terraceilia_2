@@ -80,6 +80,7 @@ offset_left = -10.0
 offset_top = -10.0
 offset_right = 10.0
 offset_bottom = 10.0
+mouse_filter = 1
 color = Color(0.2, 1, 0.2, 1)
 
 [node name="Wallet" type="Node" parent="Farmer"]
@@ -118,6 +119,7 @@ offset_left = -10.0
 offset_top = -10.0
 offset_right = 10.0
 offset_bottom = 10.0
+mouse_filter = 1
 color = Color(0.8, 0.6, 0.2, 1)
 
 [node name="Wallet" type="Node" parent="Baker"]
@@ -172,6 +174,7 @@ offset_left = -10.0
 offset_top = -12.0
 offset_right = 10.0
 offset_bottom = 8.0
+mouse_filter = 1
 color = Color(1, 0.4, 1, 1)
 
 [node name="Wallet" type="Node" parent="HouseholdAgent"]
@@ -268,7 +271,7 @@ anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -160.0
+offset_top = -300.0
 offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -281,20 +284,26 @@ theme_override_constants/separation = 12
 
 [node name="NameCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(190, 0)
+custom_minimum_size = Vector2(200, 0)
 size_flags_vertical = 1
-theme_override_constants/separation = 4
+theme_override_constants/separation = 6
 
 [node name="PopInspectorTitle" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
+theme_override_font_sizes/font_size = 22
 text = "Name"
 
 [node name="PopInspectorRole" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 17
 theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
 text = "Role"
+
+[node name="HintLabel" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.45, 0.45, 0.52, 1.0)
+theme_override_font_sizes/font_size = 12
+text = "Click a pop on the map to inspect. Scroll for details and life log."
 
 [node name="VSep1" type="VSeparator" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
@@ -303,17 +312,67 @@ layout_mode = 2
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_constants/separation = 8
 
-[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol"]
+[node name="DetailsHeader" type="Label" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.65, 0.72, 0.9, 1.0)
+text = "Details"
+
+[node name="StatsScroll" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 148)
+horizontal_scroll_mode = 2
+
+[node name="StatsVBox" type="VBoxContainer" parent="UI/PopInspector/ContentRow/StatCol/StatsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/StatsScroll/StatsVBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 0
 bbcode_enabled = true
 fit_content = true
+scroll_active = false
+theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
+theme_override_font_sizes/normal_font_size = 15
+text = ""
+
+[node name="HSepHistory" type="HSeparator" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+
+[node name="HistoryHeader" type="Label" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.65, 0.72, 0.9, 1.0)
+text = "Life log (this pop)"
+
+[node name="HistoryScroll" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 120)
+horizontal_scroll_mode = 2
+
+[node name="LifeHistory" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/HistoryScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+theme_override_font_sizes/normal_font_size = 14
+theme_override_colors/default_color = Color(0.72, 0.74, 0.78, 1)
 text = ""
 
 [node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
+size_flags_vertical = 1
 
 [node name="PopInspectorClose" type="Button" parent="UI/PopInspector/ContentRow/CloseCol"]
 layout_mode = 2

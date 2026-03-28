@@ -139,6 +139,9 @@ var pop_inspector_title: Label = null
 var pop_inspector_role: Label = null
 var pop_inspector_body: RichTextLabel = null
 var pop_history_label: RichTextLabel = null
+var pop_inspector_hint: Label = null
+## World-space radius for click-selecting a pop (sprite is ~20×20 units).
+const POP_PICK_RADIUS_WORLD: float = 16.0
 
 # Forwarded to managers (kept for backward compat)
 var _next_person_id: int:
@@ -786,10 +789,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Left-click: pop selection + placement (only reaches here if no GUI ate it)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var screen_pos: Vector2 = event.position
+		var world_pos: Vector2 = _screen_to_world(screen_pos)
+		var r2: float = POP_PICK_RADIUS_WORLD * POP_PICK_RADIUS_WORLD
 
-		# Find the closest pop within 20 screen-px of the click
+		# World-space hit (works at any zoom; ignores embedded ColorRect sprites that use MOUSE_FILTER_IGNORE)
 		var best_pop: Node = null
-		var best_dist: float = 20.0
+		var best_d2: float = INF
 		for group_name: String in ["farmers", "bakers", "households"]:
 			for pop: Node in get_tree().get_nodes_in_group(group_name):
 				if not is_instance_valid(pop):
@@ -797,10 +802,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				var pop2d := pop as Node2D
 				if pop2d == null:
 					continue
-				var pop_screen: Vector2 = _world_to_screen(pop2d.global_position)
-				var d: float = screen_pos.distance_to(pop_screen)
-				if d < best_dist:
-					best_dist = d
+				var d2: float = pop2d.global_position.distance_squared_to(world_pos)
+				if d2 <= r2 and d2 < best_d2:
+					best_d2 = d2
 					best_pop = pop
 
 		if best_pop != null:
@@ -810,7 +814,6 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		# Nothing was clicked — handle placement if active
 		if place_mode != PlaceMode.NONE:
-			var world_pos: Vector2 = _screen_to_world(screen_pos)
 			_place_entity_at(world_pos)
 			get_viewport().set_input_as_handled()
 
@@ -1116,36 +1119,16 @@ func get_ui_labels() -> void:
 	if pop_inspector_panel:
 		pop_inspector_title = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorTitle")
 		pop_inspector_role  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorRole")
-		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/PopInspectorBody")
+		pop_inspector_hint  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/HintLabel")
+		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll/StatsVBox/PopInspectorBody")
+		pop_history_label   = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll/LifeHistory")
 		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
 		if close_btn:
 			close_btn.pressed.connect(_on_inspector_close)
 
-		# ── Scrollable life-events history (added below the stat body) ──────────
-		var stat_col := pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as VBoxContainer
-		if stat_col != null and pop_inspector_body != null:
-			# Auto-size to content height — no scrollbar on the stat block
+		if pop_inspector_body != null:
 			pop_inspector_body.fit_content = true
 			pop_inspector_body.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-
-			var hsep_hist := HSeparator.new()
-			stat_col.add_child(hsep_hist)
-
-			var scroll := ScrollContainer.new()
-			scroll.name = "HistoryScroll"
-			scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			scroll.size_flags_vertical   = Control.SIZE_EXPAND_FILL
-			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-			stat_col.add_child(scroll)
-
-			pop_history_label = RichTextLabel.new()
-			pop_history_label.name = "LifeHistory"
-			pop_history_label.bbcode_enabled = true
-			pop_history_label.fit_content = true
-			pop_history_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			pop_history_label.add_theme_font_size_override("normal_font_size", 16)
-			pop_history_label.add_theme_color_override("default_color", Color(0.72, 0.72, 0.72, 1.0))
-			scroll.add_child(pop_history_label)
 
 		# Dark semi-transparent panel background
 		var panel_style := StyleBoxFlat.new()
@@ -1269,6 +1252,8 @@ func _on_inspector_close() -> void:
 	selected_pop = null
 	if pop_inspector_panel:
 		pop_inspector_panel.visible = false
+	if pop_inspector_hint:
+		pop_inspector_hint.visible = true
 
 
 func update_inspector() -> void:
@@ -1281,6 +1266,8 @@ func update_inspector() -> void:
 		pop_inspector_panel.visible = false
 		return
 	pop_inspector_panel.visible = true
+	if pop_inspector_hint:
+		pop_inspector_hint.visible = false
 	if not selected_pop.has_method("get_inspector_data"):
 		if pop_inspector_body:
 			pop_inspector_body.text = "(no inspector data available)"
@@ -1294,6 +1281,8 @@ func update_inspector() -> void:
 
 	if not pop_inspector_body:
 		return
+
+	const INSPECTOR_SEC := "[color=#8ab4e8][b]%s[/b][/color]"
 
 	var cash: float   = d.get("cash", 0.0)
 	var bread: int    = d.get("bread", 0)
@@ -1356,16 +1345,22 @@ func update_inspector() -> void:
 	if d.has("training_days"):
 		extras.append("[color=#88ccff]Training:%dd[/color]" % d.get("training_days"))
 
-	var lines: Array[String] = [line1]
+	var lines: Array[String] = []
+	lines.append(INSPECTOR_SEC % "Vitals")
+	lines.append(line1)
 	if wealth_line != "":
 		lines.append(line2)
 	lines.append(line3)
 	if extras.size() > 0:
-		lines.append("[color=#888888]" + "   ".join(extras) + "[/color]")
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Inventory & pressure")
+		lines.append("[color=#b8c0d0]" + "    ".join(extras) + "[/color]")
 
 	# ── Skills display ───────────────────────────────────────────────────────
 	var sk_f: float = d.get("skill_farmer", -1.0)
 	if sk_f >= 0.0:
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Skills & productivity")
 		var sk_b: float    = d.get("skill_baker",  0.0)
 		var dir: int       = d.get("days_in_role", 0)
 		var prod_m: float  = d.get("prod_mult",    1.0)
@@ -1385,6 +1380,8 @@ func update_inspector() -> void:
 	# ── Career utility display (full instrumentation) ───────────────────────
 	var rec_role: String = d.get("recommended_role", "")
 	if rec_role != "":
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Career utilities")
 		var u_f: float = d.get("utility_farmer", 0.0)
 		var u_b: float = d.get("utility_baker", 0.0)
 		var u_c: float = d.get("utility_current", 0.0)
@@ -1402,6 +1399,8 @@ func update_inspector() -> void:
 	# ── Detailed career eval breakdown (from last_career_eval dict) ──────
 	var lce: Dictionary = d.get("last_career_eval", {})
 	if not lce.is_empty():
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Last career evaluation")
 		var rpf: float = lce.get("role_profit_7d_avg_farmer", 0.0)
 		var rpb: float = lce.get("role_profit_7d_avg_baker", 0.0)
 		lines.append(
@@ -1447,7 +1446,8 @@ func update_inspector() -> void:
 		var food_col: String = "#55cc88" if g_bread >= g_freq else "#cc5555"
 		var fields_now: int = all_field_nodes.size()
 		var lc_col: String = "#55cc88" if fields_now < MAX_FIELDS else "#cc5555"
-		lines.append("[color=#556688]── Gates ──[/color]")
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Switch gates")
 		lines.append(
 			"[color=%s]Tenure: %d/14d[/color]  [color=%s]Cooldown: %dd[/color]  [color=%s]Savings: $%.0f/$200[/color]" %
 			[tenure_col, g_tenure, cd_col, g_cooldown, sav_col, g_cash])
@@ -1464,6 +1464,8 @@ func update_inspector() -> void:
 	# ── Cashflow diagnostics ─────────────────────────────────────────────────
 	var cf_income: float = d.get("cashflow_income", -1.0)
 	if cf_income >= 0.0:
+		lines.append("")
+		lines.append(INSPECTOR_SEC % "Cashflow")
 		var cf_expense: float = d.get("cashflow_expense", 0.0)
 		var cf_net: float     = cf_income - cf_expense
 		var cf_avg: float     = d.get("cashflow_7d_avg",  0.0)

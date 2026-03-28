@@ -21,6 +21,7 @@ offset_left = -10.0
 offset_top = -10.0
 offset_right = 10.0
 offset_bottom = 10.0
+mouse_filter = 1
 color = Color(0.7, 0.7, 0.7, 1)
 
 [node name="Wallet" type="Node" parent="."]

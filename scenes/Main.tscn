@@ -271,7 +271,7 @@ anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -480.0
+offset_top = -300.0
 offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -285,27 +285,27 @@ theme_override_constants/separation = 12
 
 [node name="NameCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(160, 0)
 size_flags_vertical = 1
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="PopInspectorTitle" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 26
+theme_override_font_sizes/font_size = 22
 text = "Name"
 
 [node name="PopInspectorRole" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 17
 theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
 text = "Role"
 
 [node name="HintLabel" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.45, 0.52, 1.0)
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 12
 autowrap_mode = 2
-text = "Click a person on the map. Use the tabs (like RimWorld) to switch between General, Skills, Career, and Log."
+text = "Click a person. Tabs: General · Skills · Career · Log — scroll inside a tab for more."
 
 [node name="VSep1" type="VSeparator" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
@@ -320,7 +320,7 @@ theme_override_constants/separation = 4
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 14
 current_tab = 0
 
 [node name="General" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
@@ -333,13 +333,13 @@ horizontal_scroll_mode = 0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(200, 120)
+custom_minimum_size = Vector2(120, 48)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
 theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
-theme_override_font_sizes/normal_font_size = 17
+theme_override_font_sizes/normal_font_size = 15
 text = ""
 
 [node name="Skills" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
@@ -352,13 +352,13 @@ horizontal_scroll_mode = 0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(200, 120)
+custom_minimum_size = Vector2(120, 48)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
 theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
-theme_override_font_sizes/normal_font_size = 17
+theme_override_font_sizes/normal_font_size = 15
 text = ""
 
 [node name="Career" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
@@ -371,13 +371,13 @@ horizontal_scroll_mode = 0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(200, 120)
+custom_minimum_size = Vector2(120, 48)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
 theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
-theme_override_font_sizes/normal_font_size = 17
+theme_override_font_sizes/normal_font_size = 15
 text = ""
 
 [node name="Log" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
@@ -390,13 +390,13 @@ horizontal_scroll_mode = 0
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(200, 120)
+custom_minimum_size = Vector2(120, 48)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
 theme_override_colors/default_color = Color(0.82, 0.86, 0.92, 1)
-theme_override_font_sizes/normal_font_size = 16
+theme_override_font_sizes/normal_font_size = 14
 text = ""
 
 [node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]

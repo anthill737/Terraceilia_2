@@ -143,6 +143,11 @@ var pop_inspector_career: RichTextLabel = null
 var pop_inspector_log: RichTextLabel = null
 var pop_inspector_hint: Label = null
 var _inspector_scroll_sync_queued: bool = false
+## Character Log tab: sticky auto-scroll (same idea as the main Event Log).
+var char_log_user_at_bottom: bool = true
+var _inspector_life_log_sig: String = ""
+var _inspector_log_scroll_wired: bool = false
+var _inspector_log_pending_restore_ratio: float = -1.0
 ## World-space radius for click-selecting a pop (sprite is ~20×20 units).
 const POP_PICK_RADIUS_WORLD: float = 16.0
 
@@ -1009,6 +1014,58 @@ func _on_log_scroll(_value: float) -> void:
 			user_at_bottom = (max_scroll - current_scroll) <= SCROLL_THRESHOLD
 
 
+func _wire_inspector_life_log_scroll() -> void:
+	if _inspector_log_scroll_wired or pop_inspector_panel == null:
+		return
+	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
+		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
+	if sc == null:
+		return
+	var vs: ScrollBar = sc.get_v_scroll_bar()
+	if vs == null:
+		return
+	if not vs.value_changed.is_connected(_on_inspector_life_log_scroll):
+		vs.value_changed.connect(_on_inspector_life_log_scroll)
+	_inspector_log_scroll_wired = true
+
+
+func _on_inspector_life_log_scroll(_value: float) -> void:
+	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
+		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
+	if sc == null:
+		return
+	var vs: ScrollBar = sc.get_v_scroll_bar()
+	if vs == null:
+		return
+	var max_scroll: float = vs.max_value - vs.page
+	if max_scroll <= 0.0:
+		char_log_user_at_bottom = true
+		return
+	char_log_user_at_bottom = (max_scroll - vs.value) <= float(SCROLL_THRESHOLD)
+
+
+func _deferred_inspector_life_log_after_text_change() -> void:
+	call_deferred("_deferred_inspector_life_log_after_text_change_b")
+
+
+func _deferred_inspector_life_log_after_text_change_b() -> void:
+	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
+		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
+	if sc == null:
+		return
+	var vs: ScrollBar = sc.get_v_scroll_bar()
+	if vs == null:
+		return
+	var denom: float = maxf(vs.max_value - vs.page, 0.0)
+	if char_log_user_at_bottom:
+		if denom > 0.0:
+			vs.value = denom
+		return
+	if _inspector_log_pending_restore_ratio >= 0.0 and denom > 0.0:
+		vs.value = clampf(_inspector_log_pending_restore_ratio * denom, 0.0, denom)
+	_inspector_log_pending_restore_ratio = -1.0
+
+
 func _on_jump_to_bottom() -> void:
 	# Re-enable auto-scroll and scroll to bottom
 	user_at_bottom = true
@@ -1162,10 +1219,13 @@ func get_ui_labels() -> void:
 
 		var insp_tabs := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs") as TabContainer
 		if insp_tabs:
-			insp_tabs.custom_minimum_size = Vector2(0, 280)
+			# Keep tab body compact; scroll inside each tab for long text.
+			insp_tabs.custom_minimum_size = Vector2(0, 168)
 			var tb: TabBar = insp_tabs.get_tab_bar()
 			if tb:
-				tb.add_theme_font_size_override("font_size", 15)
+				tb.add_theme_font_size_override("font_size", 14)
+
+		_wire_inspector_life_log_scroll()
 
 	# Connect pop_clicked for the initial scene agents
 	if is_instance_valid(farmer):
@@ -1292,6 +1352,12 @@ func log_population_snapshot() -> void:
 
 func select_pop(pop: Node) -> void:
 	"""Called when any pop emits pop_clicked. Opens the inspector panel."""
+	if not is_instance_valid(pop):
+		return
+	if pop != selected_pop:
+		_inspector_life_log_sig = ""
+		char_log_user_at_bottom = true
+		_inspector_log_pending_restore_ratio = -1.0
 	selected_pop = pop
 	update_inspector()
 
@@ -1591,7 +1657,26 @@ func update_inspector() -> void:
 		for i: int in range(start, events.size()):
 			hist_lines.append("[color=#b8c4d8]" + str(events[i]) + "[/color]")
 		log_text = "\n".join(hist_lines)
-	pop_inspector_log.text = log_text
+
+	var sig: String = "%d:%s" % [events.size(), str(events[-1]) if events.size() > 0 else ""]
+	if sig != _inspector_life_log_sig:
+		var sc_log: ScrollContainer = pop_inspector_panel.get_node_or_null(
+			"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
+		var vs_log: ScrollBar = sc_log.get_v_scroll_bar() if sc_log else null
+		if not char_log_user_at_bottom and vs_log != null:
+			var denom_before: float = vs_log.max_value - vs_log.page
+			if denom_before > 0.0:
+				_inspector_log_pending_restore_ratio = vs_log.value / denom_before
+			else:
+				_inspector_log_pending_restore_ratio = -1.0
+		else:
+			_inspector_log_pending_restore_ratio = -1.0
+		pop_inspector_log.text = log_text
+		_inspector_life_log_sig = sig
+		call_deferred("_deferred_inspector_life_log_after_text_change")
+
+	if not _inspector_log_scroll_wired:
+		_wire_inspector_life_log_scroll()
 
 	_queue_inspector_scroll_sync()
 
@@ -1625,8 +1710,8 @@ func _deferred_sync_inspector_scroll_layout() -> void:
 		var rtl: RichTextLabel = r as RichTextLabel
 		if rtl == null:
 			continue
+		# Width only — do not set height to full content height or the panel grows to fit all text.
 		rtl.custom_minimum_size.x = w
-		rtl.custom_minimum_size.y = maxf(120.0, rtl.get_content_height())
 
 
 func spawn_household_at(pos: Vector2) -> Node:

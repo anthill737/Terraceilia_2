@@ -56,6 +56,23 @@ var day_money_start: float = -1.0
 
 var hysteresis_cooldown_ticks: int = 0
 
+# ── Inter-village trade evaluation ────────────────────────────────────────────
+## How many ticks between trade evaluations (deterministic cadence).
+const TRADE_EVAL_INTERVAL: int = 10
+## Minimum profit edge over staying local before baker commits to travel.
+const MIN_PROFIT_THRESHOLD: float = 0.3
+## Travel cost per world unit of distance. Villages are ~2000 units apart.
+const TRAVEL_COST_PER_DISTANCE: float = 0.0002
+
+## True while the baker is actively traveling to or operating at a foreign village.
+var trade_route_active: bool = false
+## Target village for the current cross-village trip (null when not traveling).
+var trade_target_village: Node = null
+## Market node in the target village used as the routing destination.
+var _trade_target_market_node: Node2D = null
+## Bypass flag for _validate_target(): set true only during intentional trade travel.
+var _intentional_cross_village: bool = false
+
 
 func get_display_name() -> String:
 	return "Baker"
@@ -67,7 +84,10 @@ func get_job_inspector_data() -> Dictionary:
 	var phase_names: Array[String] = ["RESTOCK", "PRODUCE", "SELL"]
 	var phase_str: String = phase_names[phase] if phase < phase_names.size() else "?"
 	var state_str := phase_str
-	if route:
+	if trade_route_active and trade_target_village != null:
+		var vname: String = trade_target_village.get("village_name") if trade_target_village.get("village_name") else trade_target_village.name
+		state_str = "trade→%s" % vname
+	elif route:
 		if route.is_traveling:
 			state_str = "traveling→" + (route.target.name if route.target else "?")
 		elif agent.pending_target != null:
@@ -77,6 +97,9 @@ func get_job_inspector_data() -> Dictionary:
 	d["flour"] = inv.get_qty("flour") if inv else 0
 	d["neg_cashflow_days"] = consecutive_days_negative_cashflow
 	d["prod_mult"] = clamp(lerp(0.85, 1.25, agent.skill_baker), 0.85, 1.25)
+	d["trade_active"] = trade_route_active
+	d["trade_target"] = trade_target_village.get("village_name") if trade_target_village and trade_target_village.get("village_name") else ""
+	d["current_village"] = agent.current_village_ref.get("village_name") if agent.current_village_ref and agent.current_village_ref.get("village_name") else ""
 	return d
 
 
@@ -114,6 +137,7 @@ func set_tick(t: int) -> void:
 		hysteresis_cooldown_ticks -= 1
 	_check_travel_timeout()
 	_check_idle_and_pause_guard()
+	_maybe_evaluate_trade(t)
 
 
 const STARTING_CASH: float = 500.0
@@ -150,9 +174,13 @@ func deactivate() -> void:
 ## Returns true if target is village-local (safe to route to), false if cross-village (blocked).
 ## Uses the "village_id" meta stamped on bakery_spot and market nodes by village.gd.
 ## Targets without the meta pass through (backward-compatible with unstamped nodes).
+## Bypassed when _intentional_cross_village is true (trade travel).
 func _validate_target(target: Node2D) -> bool:
 	if target == null:
 		return false
+	# Allow intentional cross-village travel (trade routes set _intentional_cross_village=true).
+	if _intentional_cross_village:
+		return true
 	var target_vid: int = target.get_meta("village_id", -1)
 	var agent_vid: int = agent.home_village_id
 	if target_vid != -1 and target_vid != agent_vid:
@@ -202,6 +230,10 @@ func physics_tick(delta: float) -> void:
 func _on_arrived(t: Node2D) -> void:
 	agent.travel_ticks = 0
 	agent.idle_ticks = 0
+	# Cross-village trade arrival takes priority over normal routing.
+	if _trade_target_market_node != null and t == _trade_target_market_node:
+		_on_trade_arrival()
+		return
 	if t == market_location and market != null:
 		perform_market_transactions()
 		if _validate_target(bakery_location):
@@ -653,6 +685,9 @@ func _check_travel_timeout() -> void:
 		return
 	if route.is_traveling:
 		agent.travel_ticks += 1
+		# Cross-village trips are long — don't abort intentional trade travel.
+		if trade_route_active:
+			return
 		if agent.travel_ticks > agent.MAX_TRAVEL_TICKS:
 			var tname: String = route.target.name if route.target else "null"
 			print("[BUGFIX] Baker: travel timeout reset after %d ticks (target=%s)" % [agent.travel_ticks, tname])
@@ -674,6 +709,10 @@ func _check_idle_and_pause_guard() -> void:
 		agent.idle_ticks = 0
 		return
 	if hysteresis_cooldown_ticks > 0:
+		agent.idle_ticks = 0
+		return
+	# Suppress idle guard during active cross-village trade trips.
+	if trade_route_active:
 		agent.idle_ticks = 0
 		return
 	if route == null:
@@ -704,6 +743,11 @@ func _check_idle_and_pause_guard() -> void:
 
 
 func get_status_text() -> String:
+	if trade_route_active and trade_target_village != null:
+		var vname: String = trade_target_village.get("village_name") if trade_target_village.get("village_name") else "?"
+		if route and route.is_traveling:
+			return "Trading→ %s" % vname
+		return "At %s (trade)" % vname
 	match production_state:
 		ProductionState.GRINDING:
 			return "Grinding wheat"
@@ -718,3 +762,165 @@ func get_status_text() -> String:
 			return "Waiting at Market"
 		return "Walking to Market"
 	return route.get_status_text()
+
+
+# ── Inter-village trade evaluation ────────────────────────────────────────────
+
+## Returns the WorldManager node, or null if not found.
+func _get_world() -> Node:
+	return Engine.get_main_loop().current_scene.get_node_or_null("World")
+
+
+## Called every tick. Checks whether the baker should travel to a better bread market.
+## Guards: trade must be enabled, no active trip, eval interval respected.
+func _maybe_evaluate_trade(tick: int) -> void:
+	# Guard: trade disabled globally.
+	var world = _get_world()
+	if world == null or not world.get("trade_enabled"):
+		return
+	# Guard: already mid-trip — only re-evaluate when at destination (trade_route_active
+	# but not traveling means we arrived; re-eval allowed for return decision).
+	if trade_route_active and (route != null and route.is_traveling):
+		return
+	# Guard: respect evaluation cadence.
+	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
+		return
+	agent.last_trade_eval_tick = tick
+
+	var current_village = agent.current_village_ref
+	if current_village == null or not current_village.has_method("get_trade_snapshot"):
+		return
+
+	var local_snap: Dictionary = current_village.get_trade_snapshot()
+	var local_bid: float = local_snap.get("bread_price", 0.0)
+	var local_inv: int   = local_snap.get("bread_inventory", 0)
+	# Demand exists if market isn't already saturated (below target ~50).
+	var can_sell_locally: bool = local_inv < 50
+	var local_profit: float    = local_bid if can_sell_locally else 0.0
+
+	var best_village = null
+	var best_profit: float = local_profit + MIN_PROFIT_THRESHOLD
+
+	for village in world.get_all_villages():
+		if not (village and is_instance_valid(village)):
+			continue
+		if village == current_village:
+			continue
+		var snap: Dictionary = village.get_trade_snapshot()
+		var foreign_bid: float = snap.get("bread_price", 0.0)
+		var dist: float = agent.global_position.distance_to(village.global_position)
+		var travel_cost: float = dist * TRAVEL_COST_PER_DISTANCE
+		var expected_profit: float = foreign_bid - local_bid - travel_cost
+		var vname: String = snap.get("village_name", village.name)
+		if event_bus:
+			event_bus.log("[TRADE EVAL] agent=Baker local=%.2f best=%.2f target=%s" % [local_bid, foreign_bid, vname])
+		if expected_profit > best_profit or not can_sell_locally:
+			best_profit = expected_profit
+			best_village = village
+
+	if best_village != null:
+		_start_trade_travel(best_village, "profit")
+		return
+
+	# If currently away from home, evaluate returning.
+	var home_village = agent.home_village_ref
+	if current_village != home_village and home_village != null and home_village.has_method("get_trade_snapshot"):
+		var home_snap: Dictionary = home_village.get_trade_snapshot()
+		var home_bid: float = home_snap.get("bread_price", 0.0)
+		if home_bid > local_bid + MIN_PROFIT_THRESHOLD:
+			var hname: String = home_snap.get("village_name", home_village.name)
+			if event_bus:
+				event_bus.log("[TRADE RETURN] agent=Baker returning to %s reason=price_shift" % hname)
+			_start_trade_travel(home_village, "price_shift")
+
+
+## Initiates travel to target_village's market.
+## Sets all trade state, flags intentional cross-village, and routes via market_node.
+func _start_trade_travel(target_village: Node, reason: String) -> void:
+	if target_village == null or not is_instance_valid(target_village):
+		return
+	var target_market_node: Node2D = target_village.get("market_node") as Node2D
+	if target_market_node == null:
+		if event_bus:
+			event_bus.log("[TRADE] Baker: cannot travel to %s — market_node not found" % target_village.name)
+		return
+
+	trade_target_village = target_village
+	_trade_target_market_node = target_market_node
+	trade_route_active = true
+	_intentional_cross_village = true
+
+	var from_name: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
+	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
+	if event_bus:
+		event_bus.log("[TRADE MOVE] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
+
+	# Stop current activity and route to the target village's market.
+	production_state = ProductionState.IDLE
+	route.stop()
+	route.set_target(target_market_node)
+
+
+## Called when baker arrives at the trade destination (foreign village or home on return).
+## Handles: switching current_village_ref, rebinding components, selling bread,
+## and resuming normal operation on home return.
+func _on_trade_arrival() -> void:
+	_intentional_cross_village = false
+
+	var arrived_village = trade_target_village
+	var is_home_return: bool = (arrived_village == agent.home_village_ref)
+
+	# Update agent and job market refs to arrived village.
+	agent.current_village_ref = arrived_village
+	var arrived_market: Market = arrived_village.get("market") as Market
+	var arrived_event_bus: EventBus = arrived_village.get("event_bus") as EventBus
+	if arrived_market:
+		market = arrived_market
+		agent.market = arrived_market
+	if arrived_event_bus:
+		event_bus = arrived_event_bus
+		agent.event_bus = arrived_event_bus
+
+	# Rebind all sub-components so their market/event_bus refs stay consistent.
+	if profit and arrived_market and arrived_event_bus:
+		profit.bind(arrived_market, arrived_event_bus, get_display_name())
+	if margin_compression and arrived_market and arrived_event_bus:
+		margin_compression.bind(arrived_market, arrived_event_bus, get_display_name())
+	if inventory_throttle and arrived_market and arrived_event_bus:
+		inventory_throttle.bind(arrived_market, arrived_event_bus, get_display_name())
+	if food_reserve and arrived_market:
+		food_reserve.bind(inv, hunger, arrived_market, wallet, arrived_event_bus, get_display_name())
+
+	# Clear trip state now that we've arrived.
+	trade_target_village = null
+	_trade_target_market_node = null
+	trade_route_active = false
+
+	if is_home_return:
+		# Returned home — restore market_location ref and resume normal cycle.
+		var home_market_node: Node2D = agent.home_village_ref.get("market_node") as Node2D
+		if home_market_node:
+			market_location = home_market_node
+		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
+		if event_bus:
+			event_bus.log("[TRADE RETURN] agent=Baker arrived home at %s" % vname)
+		production_state = ProductionState.IDLE
+		phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
+		if _validate_target(market_location):
+			agent.pending_target = market_location
+		route.wait(WAIT_TIME)
+	else:
+		# Arrived at foreign village — sell all available bread.
+		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
+		var sellable: int = inv.get_qty("bread")
+		if sellable > 0 and arrived_market != null:
+			var snap_before: float = agent.get_cash()
+			var sold: int = arrived_market.buy_bread_from_agent(agent, sellable, 0.0, false)
+			var earned: float = agent.get_cash() - snap_before
+			if event_bus:
+				event_bus.log("[TRADE SALE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname, sold, earned])
+			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname, earned])
+		elif event_bus:
+			event_bus.log("[TRADE SALE] agent=Baker village=%s no bread to sell" % vname)
+		# Wait at destination — next trade eval tick will decide whether to return.
+		route.wait(WAIT_TIME)

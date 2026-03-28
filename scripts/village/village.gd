@@ -859,7 +859,7 @@ func log_population_snapshot() -> void:
 	var line := "[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [
 		households.size(), all_farmers.size(), all_bakers.size(),
 		pop_mgr.count() if pop_mgr else 0]
-	print(line)
+	print("[%s] %s" % [name, line])
 	if event_bus:
 		event_bus.log(line)
 

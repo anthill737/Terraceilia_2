@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .bridgespace/swarms/pane1774/bin/bs-mail.cjs check --inject"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .bridgespace/swarms/pane1774/bin/bs-notify.cjs idle \"Finished working\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .bridgespace/swarms/pane1774/bin/bs-notify.cjs needs-input \"Needs input\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -538,7 +538,8 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 
 	var home := Node2D.new()
 	home.name = f.name + "_Home"
-	home.global_position = pos
+	home.position = to_local(pos)
+	home.set_meta("village_id", village_id)
 	var home_marker := ColorRect.new()
 	home_marker.name = "HomeMarker"
 	home_marker.offset_left = -12.0
@@ -619,6 +620,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	var bakery_spot := Node2D.new()
 	bakery_spot.name = b.name + "_Bakery"
 	bakery_spot.position = to_local(pos)
+	bakery_spot.set_meta("village_id", village_id)
 	var bakery_marker := ColorRect.new()
 	bakery_marker.name = "BakeryMarker"
 	bakery_marker.offset_left = -12.0
@@ -682,6 +684,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 	var home := Node2D.new()
 	home.name = h.name + "_Home"
 	home.position = to_local(pos)
+	home.set_meta("village_id", village_id)
 	add_child(home)
 
 	h.set_locations(home, market_node)
@@ -879,7 +882,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			var home := Node2D.new()
 			home.name = ag.name + "_Home"
-			home.global_position = pos
+			home.position = to_local(pos)
+			home.set_meta("village_id", village_id)
 			var home_marker := ColorRect.new()
 			home_marker.name = "HomeMarker"
 			home_marker.offset_left = -12.0
@@ -911,7 +915,8 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			var bakery_spot := Node2D.new()
 			bakery_spot.name = ag.name + "_Bakery"
-			bakery_spot.global_position = pos
+			bakery_spot.position = to_local(pos)
+			bakery_spot.set_meta("village_id", village_id)
 			var bakery_marker := ColorRect.new()
 			bakery_marker.name = "BakeryMarker"
 			bakery_marker.offset_left = -12.0

@@ -147,7 +147,30 @@ func deactivate() -> void:
 			route.travel_timeout.disconnect(_on_travel_timeout)
 
 
+## Validates that a travel target belongs to this baker's village.
+## Returns true if the target is safe to route to; false if blocked.
+## Targets without a "village_id" meta are passed through (e.g. market nodes).
+func _validate_village_target(target: Node2D, context: String) -> bool:
+	if target == null:
+		return false
+	if not target.has_meta("village_id"):
+		return true  # No village tag — assume local (market nodes etc.)
+	var target_vid: int = target.get_meta("village_id")
+	if target_vid != agent.home_village_id:
+		push_error("[ERROR] CROSS-VILLAGE TARGET BLOCKED: Baker(village=%d) -> %s(village=%d) [%s]" % [agent.home_village_id, target.name, target_vid, context])
+		if event_bus:
+			event_bus.log("[ERROR] CROSS-VILLAGE TARGET BLOCKED: Baker(village=%d) -> %s(village=%d) [%s]" % [agent.home_village_id, target.name, target_vid, context])
+		return false
+	if event_bus:
+		event_bus.log("[TARGET] agent=Baker village=%d -> target=%s village=%d [%s]" % [agent.home_village_id, target.name, target_vid, context])
+	return true
+
+
 func set_locations(bakery: Node2D, market_node: Node2D) -> void:
+	# Hard village-locality check: block cross-village bakery assignment.
+	if not _validate_village_target(bakery, "set_locations"):
+		push_error("[ERROR] Baker(village=%d): set_locations rejected cross-village bakery %s" % [agent.home_village_id, bakery.name if bakery else "null"])
+		return
 	bakery_location = bakery
 	market_location = market_node
 	if event_bus and route:
@@ -187,6 +210,10 @@ func _on_arrived(t: Node2D) -> void:
 
 func _on_wait_finished() -> void:
 	if production_state == ProductionState.IDLE and agent.pending_target != null:
+		# Validate before routing — catches cross-village bakery targets set during market/timeout recovery.
+		if not _validate_village_target(agent.pending_target, "route"):
+			agent.pending_target = null
+			return
 		route.set_target(agent.pending_target)
 		agent.pending_target = null
 

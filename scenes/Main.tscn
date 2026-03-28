@@ -271,15 +271,16 @@ anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -300.0
+offset_top = -260.0
 offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
+clip_contents = true
 visible = false
 
 [node name="ContentRow" type="HBoxContainer" parent="UI/PopInspector"]
 layout_mode = 2
-size_flags_vertical = 3
+size_flags_vertical = 0
 theme_override_constants/separation = 12
 
 [node name="NameCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
@@ -311,8 +312,8 @@ layout_mode = 2
 [node name="StatCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_constants/separation = 8
+size_flags_vertical = 0
+theme_override_constants/separation = 6
 
 [node name="DetailsHeader" type="Label" parent="UI/PopInspector/ContentRow/StatCol"]
 layout_mode = 2
@@ -323,22 +324,20 @@ text = "Details"
 [node name="StatsScroll" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-custom_minimum_size = Vector2(0, 148)
+size_flags_vertical = 0
+custom_minimum_size = Vector2(0, 102)
+custom_maximum_size = Vector2(0, 102)
 horizontal_scroll_mode = 2
 
-[node name="StatsVBox" type="VBoxContainer" parent="UI/PopInspector/ContentRow/StatCol/StatsScroll"]
+[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/StatsScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-
-[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/StatsScroll/StatsVBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 0
+size_flags_vertical = 4
+custom_minimum_size = Vector2(120, 48)
 bbcode_enabled = true
-fit_content = true
+fit_content = false
 scroll_active = false
+autowrap_mode = 3
 theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
 theme_override_font_sizes/normal_font_size = 15
 text = ""
@@ -355,23 +354,27 @@ text = "Life log (this pop)"
 [node name="HistoryScroll" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-custom_minimum_size = Vector2(0, 120)
+size_flags_vertical = 0
+custom_minimum_size = Vector2(0, 70)
+custom_maximum_size = Vector2(0, 70)
 horizontal_scroll_mode = 2
 
 [node name="LifeHistory" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/HistoryScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 0
+size_flags_vertical = 4
+custom_minimum_size = Vector2(120, 32)
 bbcode_enabled = true
-fit_content = true
+fit_content = false
 scroll_active = false
-theme_override_font_sizes/normal_font_size = 14
-theme_override_colors/default_color = Color(0.72, 0.74, 0.78, 1)
+autowrap_mode = 3
+theme_override_font_sizes/normal_font_size = 13
+theme_override_colors/default_color = Color(0.82, 0.86, 0.92, 1)
 text = ""
 
 [node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
+size_flags_horizontal = 4
 size_flags_vertical = 1
 
 [node name="PopInspectorClose" type="Button" parent="UI/PopInspector/ContentRow/CloseCol"]

@@ -140,6 +140,7 @@ var pop_inspector_role: Label = null
 var pop_inspector_body: RichTextLabel = null
 var pop_history_label: RichTextLabel = null
 var pop_inspector_hint: Label = null
+var _inspector_scroll_sync_queued: bool = false
 ## World-space radius for click-selecting a pop (sprite is ~20×20 units).
 const POP_PICK_RADIUS_WORLD: float = 16.0
 
@@ -1120,15 +1121,18 @@ func get_ui_labels() -> void:
 		pop_inspector_title = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorTitle")
 		pop_inspector_role  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorRole")
 		pop_inspector_hint  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/HintLabel")
-		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll/StatsVBox/PopInspectorBody")
+		pop_inspector_body  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll/PopInspectorBody")
 		pop_history_label   = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll/LifeHistory")
 		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
 		if close_btn:
 			close_btn.pressed.connect(_on_inspector_close)
 
-		if pop_inspector_body != null:
-			pop_inspector_body.fit_content = true
-			pop_inspector_body.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		var stats_scroll: ScrollContainer = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll") as ScrollContainer
+		var hist_scroll: ScrollContainer = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll") as ScrollContainer
+		if stats_scroll and not stats_scroll.resized.is_connected(_on_inspector_scroll_resized):
+			stats_scroll.resized.connect(_on_inspector_scroll_resized)
+		if hist_scroll and not hist_scroll.resized.is_connected(_on_inspector_scroll_resized):
+			hist_scroll.resized.connect(_on_inspector_scroll_resized)
 
 		# Dark semi-transparent panel background
 		var panel_style := StyleBoxFlat.new()
@@ -1279,7 +1283,9 @@ func update_inspector() -> void:
 	if pop_inspector_role:
 		pop_inspector_role.text = d.get("role", "?")
 
-	if not pop_inspector_body:
+	if pop_inspector_body == null and pop_inspector_panel:
+		pop_inspector_body = pop_inspector_panel.find_child("PopInspectorBody", true, false) as RichTextLabel
+	if pop_inspector_body == null:
 		return
 
 	const INSPECTOR_SEC := "[color=#8ab4e8][b]%s[/b][/color]"
@@ -1493,19 +1499,58 @@ func update_inspector() -> void:
 
 	pop_inspector_body.text = "\n".join(lines)
 
-	# ── Scrollable life history ────────────────────────────────────────────────
+	# ── Scrollable life history (per-pop `life_events` on Agent) ───────────────
+	if pop_history_label == null and pop_inspector_panel:
+		pop_history_label = pop_inspector_panel.find_child("LifeHistory", true, false) as RichTextLabel
 	if pop_history_label != null:
 		var events: Array = []
-		if selected_pop.has_method("log_event"):
-			events = selected_pop.life_events
+		var raw_ev: Variant = selected_pop.get("life_events")
+		if raw_ev is Array:
+			events = raw_ev
 		if events.is_empty():
-			pop_history_label.text = "[color=#444444](no events yet)[/color]"
+			pop_history_label.text = "[color=#9aa8bc](no events yet — day-end diary lines appear here)[/color]"
 		else:
 			var start: int = max(0, events.size() - 200)
 			var hist_lines: Array[String] = []
 			for i: int in range(start, events.size()):
-				hist_lines.append("[color=#888888]" + events[i] + "[/color]")
+				hist_lines.append("[color=#b8c4d8]" + str(events[i]) + "[/color]")
 			pop_history_label.text = "\n".join(hist_lines)
+
+	_queue_inspector_scroll_sync()
+
+
+func _on_inspector_scroll_resized() -> void:
+	_queue_inspector_scroll_sync()
+
+
+func _queue_inspector_scroll_sync() -> void:
+	if _inspector_scroll_sync_queued:
+		return
+	if pop_inspector_panel == null or not pop_inspector_panel.visible:
+		return
+	_inspector_scroll_sync_queued = true
+	call_deferred("_deferred_sync_inspector_scroll_layout")
+
+
+func _deferred_sync_inspector_scroll_layout() -> void:
+	_inspector_scroll_sync_queued = false
+	if pop_inspector_panel == null or not pop_inspector_panel.visible:
+		return
+	var stats_scroll := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/StatsScroll") as ScrollContainer
+	var hist_scroll := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/HistoryScroll") as ScrollContainer
+	var vw: float = get_viewport().get_visible_rect().size.x
+	if pop_inspector_body and stats_scroll:
+		var w: float = stats_scroll.size.x - 24.0
+		if w < 80.0:
+			w = maxf(160.0, vw * 0.45)
+		pop_inspector_body.custom_minimum_size.x = w
+		pop_inspector_body.custom_minimum_size.y = maxf(1.0, pop_inspector_body.get_content_height())
+	if pop_history_label and hist_scroll:
+		var w2: float = hist_scroll.size.x - 24.0
+		if w2 < 80.0:
+			w2 = maxf(160.0, vw * 0.45)
+		pop_history_label.custom_minimum_size.x = w2
+		pop_history_label.custom_minimum_size.y = maxf(1.0, pop_history_label.get_content_height())
 
 
 func spawn_household_at(pos: Vector2) -> Node:

@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/test_economy_invariants.gd" id="1_econ"]
+
+[node name="TestEconomy" type="Node"]
+script = ExtResource("1_econ")

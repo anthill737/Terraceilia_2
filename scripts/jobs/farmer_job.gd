@@ -444,7 +444,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		var snap: Dictionary = village.get_trade_snapshot()
 		if snap.is_empty():
 			continue
-		var dist: float = local_snap['position'].distance_to(snap['position'])
+		var dist: float = local_snap['world_pos'].distance_to(snap['world_pos'])
 		var travel_cost: float = dist * TRAVEL_COST_PER_DISTANCE
 		var expected_profit: float = snap['wheat_price'] - local_price - travel_cost
 		print('[TRADE EVAL] agent=Farmer local=%.2f best=%.2f target=%s' % [local_price, snap['wheat_price'], village.village_name])
@@ -497,11 +497,13 @@ func _on_trade_arrival() -> void:
 	agent.market = arrived_village.market
 	market_node = arrived_market_node
 
-	# Rebind profit/throttle calculators to new market
+	# Rebind profit/throttle/food_reserve calculators to new market
 	if profit and market and event_bus:
 		profit.bind(market, event_bus, get_display_name())
 	if inventory_throttle and market and event_bus:
 		inventory_throttle.bind(market, event_bus, get_display_name())
+	if food_reserve and market and event_bus:
+		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
 
 	# Sell all wheat at new market
 	if inv.get_qty("wheat") > 0:

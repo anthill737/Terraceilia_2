@@ -642,7 +642,7 @@ func _build_spawn_toolbar() -> void:
 
 
 func _build_economy_bar() -> void:
-	"""Build the economy HUD strip as a proper container child of LeftColumn."""
+	"""Build the economy HUD as two horizontal rows so long text fits without clipping."""
 	var bar := PanelContainer.new()
 	bar.name = "EcoBar"
 
@@ -656,18 +656,29 @@ func _build_economy_bar() -> void:
 	bar_style.content_margin_top    = 6
 	bar_style.content_margin_bottom = 6
 	bar.add_theme_stylebox_override("panel", bar_style)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	var hbox := HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 0)
-	hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	bar.add_child(hbox)
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 4)
+	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(outer)
 
-	eco_sim_label        = _add_eco_section(hbox, "SIM",        Color(0.65, 0.75, 1.00), false)
-	eco_village_label    = _add_eco_section(hbox, "VILLAGE",    Color(0.40, 0.90, 0.50), false)
-	eco_market_label     = _add_eco_section(hbox, "MARKET",     Color(0.95, 0.65, 0.25), true)
-	eco_prosperity_label = _add_eco_section(hbox, "PROSPERITY", Color(1.00, 0.85, 0.25), false)
-	eco_farmer_label     = _add_eco_section(hbox, "FARMER",     Color(0.20, 1.00, 0.20), true)
-	eco_baker_label      = _add_eco_section(hbox, "BAKER",      Color(1.00, 0.75, 0.20), true)
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 0)
+	row1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.add_child(row1)
+
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 0)
+	row2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.add_child(row2)
+
+	eco_sim_label        = _add_eco_section(row1, "SIM",        Color(0.65, 0.75, 1.00), true)
+	eco_village_label    = _add_eco_section(row1, "VILLAGE",    Color(0.40, 0.90, 0.50), true)
+	eco_market_label     = _add_eco_section(row1, "MARKET",     Color(0.95, 0.65, 0.25), true)
+	eco_prosperity_label = _add_eco_section(row1, "PROSPERITY", Color(1.00, 0.85, 0.25), true)
+	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
+	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
 
 	# Insert into LeftColumn at index 1 (after toolbar, before WorldSpacer)
 	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
@@ -701,14 +712,17 @@ func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, ex
 
 	var title_lbl := Label.new()
 	title_lbl.text = title_text
-	title_lbl.add_theme_font_size_override("font_size", 16)
+	title_lbl.add_theme_font_size_override("font_size", 14)
 	title_lbl.add_theme_color_override("font_color", accent)
+	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vbox.add_child(title_lbl)
 
 	var content_lbl := Label.new()
 	content_lbl.text = "..."
-	content_lbl.add_theme_font_size_override("font_size", 19)
+	content_lbl.add_theme_font_size_override("font_size", 15)
 	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
+	content_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	content_lbl.custom_minimum_size = Vector2(32, 0)
 	vbox.add_child(content_lbl)
 
 	return content_lbl
@@ -1156,6 +1170,18 @@ func update_ui() -> void:
 	update_inspector()
 
 
+func _eco_cap_display(cap: int) -> String:
+	"""Short label for huge storage caps so the HUD does not stretch off-screen."""
+	if cap >= 1_000_000_000:
+		return "∞"
+	if cap >= 1_000_000:
+		var m: float = float(cap) / 1_000_000.0
+		return ("%.0fM" % m) if m < 100.0 else "∞"
+	if cap >= 10_000:
+		return "%dk" % int(round(float(cap) / 1000.0))
+	return str(cap)
+
+
 func _update_eco_bar() -> void:
 	"""Refresh all six economy-bar section labels."""
 	# SIM
@@ -1168,16 +1194,18 @@ func _update_eco_bar() -> void:
 		var _b: int = get_tree().get_nodes_in_group("bakers").size()
 		var _h: int = get_tree().get_nodes_in_group("households").size()
 		eco_village_label.text = (
-			"Population %d (households %d, farmers %d, bakers %d)\nFields %d of %d"
+			"Population %d — households %d, farmers %d, bakers %d\nFields %d of %d"
 			% [_h + _f + _b, _h, _f, _b, all_field_nodes.size(), MAX_FIELDS]
 		)
 
 	# MARKET
 	if eco_market_label and market:
+		var wc: String = _eco_cap_display(market.wheat_capacity)
+		var bc: String = _eco_cap_display(market.bread_capacity)
 		eco_market_label.text = (
-			"Wheat stock %d of %d at $%.2f\nBread stock %d of %d at $%.2f" % [
-				market.wheat, market.wheat_capacity, market.wheat_price,
-				market.bread, market.bread_capacity, market.bread_price
+			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
+				market.wheat, wc, market.wheat_price,
+				market.bread, bc, market.bread_price
 			]
 		)
 
@@ -1186,9 +1214,11 @@ func _update_eco_bar() -> void:
 		var w: float = prosperity_meter.prosperity_inputs.get("wealth_health",       0.0)
 		var f: float = prosperity_meter.prosperity_inputs.get("food_security",       0.0)
 		var s: float = prosperity_meter.prosperity_inputs.get("starvation_pressure", 0.0)
-		eco_prosperity_label.text = "Score %.2f\nWealth %.2f · Food security %.2f · Starvation pressure %.2f" % [
-			prosperity_meter.prosperity_score, w, f, s
-		]
+		eco_prosperity_label.text = (
+			"Score %.2f\nWealth %.2f · Food %.2f · Hunger pressure %.2f" % [
+				prosperity_meter.prosperity_score, w, f, s
+			]
+		)
 
 	# FARMER (baseline)
 	if eco_farmer_label:
@@ -1198,7 +1228,7 @@ func _update_eco_bar() -> void:
 			var fw: Wallet            = farmer.get_node("Wallet")            as Wallet
 			var fc: InventoryCapacity = farmer.get_node("InventoryCapacity") as InventoryCapacity
 			eco_farmer_label.text = (
-				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d of %d\n%s · Inventory %d of %d items"
+				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
 				% [
 					fw.money,
 					fi.get_qty("seeds"), fi.get_qty("wheat"), fi.get_qty("bread"),
@@ -1218,7 +1248,7 @@ func _update_eco_bar() -> void:
 			var bw: Wallet            = baker.get_node("Wallet")            as Wallet
 			var bc: InventoryCapacity = baker.get_node("InventoryCapacity") as InventoryCapacity
 			eco_baker_label.text = (
-				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d of %d\n%s · Inventory %d of %d items"
+				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
 				% [
 					bw.money,
 					bi.get_qty("wheat"), bi.get_qty("flour"), bi.get_qty("bread"),

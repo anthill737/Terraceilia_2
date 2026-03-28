@@ -192,6 +192,14 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	baker.home_village_id = village_id
 	household_agent.home_village_id = village_id
 
+	# Bind village refs for trade evaluation (FarmerJob / BakerJob read these).
+	farmer.home_village_ref = self
+	farmer.current_village_ref = self
+	baker.home_village_ref = self
+	baker.current_village_ref = self
+	household_agent.home_village_ref = self
+	household_agent.current_village_ref = self
+
 	# Wire event_bus and market onto all base agents
 	market.event_bus = bus
 	farmer.event_bus = bus
@@ -337,6 +345,22 @@ func receive_tick(tick: int) -> void:
 
 func get_market() -> Market:
 	return market
+
+
+## Returns a lightweight snapshot of this village's market for trade evaluation.
+## FarmerJob / BakerJob call this on every village to compute
+##   expected_profit = sell_price - local_price - travel_cost
+## and decide whether to travel here.
+func get_trade_snapshot() -> Dictionary:
+	return {
+		"village_id":       village_id,
+		"village_name":     village_name,
+		"wheat_price":      market.get_bid_price("wheat") if market else 0.0,
+		"bread_price":      market.get_bid_price("bread") if market else 0.0,
+		"wheat_inventory":  market.wheat if market else 0,
+		"bread_inventory":  market.bread if market else 0,
+		"position":         global_position,
+	}
 
 
 func get_population_summary() -> Dictionary:

@@ -17,6 +17,17 @@ var _person_day: int = 0
 ## so locality can always be recovered without traversing the scene tree.
 var home_village_id: int = 0
 
+# -- Inter-village trade state (managed by FarmerJob / BakerJob) ---------------
+## Direct reference to the Village this agent considers "home" for return logic.
+## Set during village initialisation alongside home_village_id.
+var home_village_ref: Node = null
+## Village the agent is currently operating in. Changes on arrival after travel.
+## Job logic MUST use current_village_ref (not home_village_ref) for all market ops.
+var current_village_ref: Node = null
+## Tick on which the agent last ran a trade evaluation. Used to enforce
+## TRADE_EVAL_INTERVAL and keep evaluation deterministic.
+var last_trade_eval_tick: int = 0
+
 # -- Role management -----------------------------------------------------------
 var current_role: String = ""
 var current_job: JobBase = null

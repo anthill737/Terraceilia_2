@@ -1,6 +1,7 @@
-[gd_scene load_steps=15 format=3 uid="uid://c6qvxkw7yf1yd"]
+[gd_scene load_steps=16 format=3 uid="uid://c6qvxkw7yf1yd"]
 
 [ext_resource type="Script" uid="uid://b3hs1u0d10nyn" path="res://scripts/main.gd" id="1_abcde"]
+[ext_resource type="Script" path="res://scripts/ui/pop_inspector_dock.gd" id="18_inspdock"]
 [ext_resource type="Script" path="res://scripts/agent.gd" id="2_agent"]
 [ext_resource type="Script" uid="uid://bii8ulb1hgvyu" path="res://scripts/field_plot.gd" id="4_field"]
 [ext_resource type="Script" path="res://scripts/components/wallet.gd" id="6_wallet"]
@@ -15,6 +16,8 @@
 [ext_resource type="Script" path="res://scripts/components/food_reserve.gd" id="15_food_reserve"]
 [ext_resource type="Script" path="res://scripts/components/margin_compression.gd" id="16_margin_compression"]
 [ext_resource type="Script" path="res://scripts/components/inventory_throttle.gd" id="17_inventory_throttle"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_insp"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_abcde")
@@ -265,75 +268,89 @@ scroll_following = false
 layout_mode = 2
 text = "Export Log"
 
-[node name="PopInspector" type="PanelContainer" parent="UI"]
-layout_mode = 3
+[node name="PopInspectorDock" type="PanelContainer" parent="UI"]
+script = ExtResource("18_inspdock")
+layout_mode = 1
+anchors_preset = 0
 anchor_left = 0.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -300.0
-offset_bottom = 0.0
-grow_horizontal = 2
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 560.0
+offset_bottom = 392.0
+grow_horizontal = 0
 grow_vertical = 0
-clip_contents = false
+clip_contents = true
 visible = false
 
-[node name="ContentRow" type="HBoxContainer" parent="UI/PopInspector"]
+[node name="DockStack" type="VBoxContainer" parent="UI/PopInspectorDock"]
 layout_mode = 2
-size_flags_vertical = 0
-theme_override_constants/separation = 12
+theme_override_constants/separation = 0
 
-[node name="NameCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+[node name="RecordBlock" type="VBoxContainer" parent="UI/PopInspectorDock/DockStack"]
 layout_mode = 2
-custom_minimum_size = Vector2(160, 0)
-size_flags_vertical = 1
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 292)
 theme_override_constants/separation = 4
 
-[node name="PopInspectorTitle" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+[node name="FloatHeader" type="HBoxContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 22
-text = "Name"
+theme_override_constants/separation = 8
 
-[node name="PopInspectorRole" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+[node name="FloatDragHandle" type="Control" parent="UI/PopInspectorDock/DockStack/RecordBlock/FloatHeader"]
+custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
-theme_override_font_sizes/font_size = 17
-theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
-text = "Role"
+size_flags_horizontal = 3
 
-[node name="HintLabel" type="Label" parent="UI/PopInspector/ContentRow/NameCol"]
+[node name="FloatDragTitle" type="Label" parent="UI/PopInspectorDock/DockStack/RecordBlock/FloatHeader/FloatDragHandle"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.65, 0.7, 0.82, 1.0)
+theme_override_font_sizes/font_size = 13
+text = "Character record"
+
+[node name="PopInspectorFloatClose" type="Button" parent="UI/PopInspectorDock/DockStack/RecordBlock/FloatHeader"]
+custom_minimum_size = Vector2(36, 30)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.45, 0.45, 0.52, 1.0)
-theme_override_font_sizes/font_size = 12
-autowrap_mode = 2
-text = "Click a person. Tabs: General · Skills · Career · Log — scroll inside a tab for more."
+text = "✕"
 
-[node name="VSep1" type="VSeparator" parent="UI/PopInspector/ContentRow"]
-layout_mode = 2
-
-[node name="StatCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+[node name="StatCol" type="VBoxContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 4
 
-[node name="InspectorTabs" type="TabContainer" parent="UI/PopInspector/ContentRow/StatCol"]
+[node name="InspectorTabs" type="TabContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_font_sizes/font_size = 14
+tabs_visible = false
 current_tab = 0
+custom_minimum_size = Vector2(0, 220)
 
-[node name="General" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+[node name="General" type="ScrollContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="GeneralBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/General"]
+[node name="GeneralBody" type="RichTextLabel" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs/General"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(120, 48)
+custom_minimum_size = Vector2(100, 32)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
@@ -342,17 +359,17 @@ theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
 theme_override_font_sizes/normal_font_size = 15
 text = ""
 
-[node name="Skills" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+[node name="Skills" type="ScrollContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="SkillsBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Skills"]
+[node name="SkillsBody" type="RichTextLabel" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs/Skills"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(120, 48)
+custom_minimum_size = Vector2(100, 32)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
@@ -361,17 +378,17 @@ theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
 theme_override_font_sizes/normal_font_size = 15
 text = ""
 
-[node name="Career" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+[node name="Career" type="ScrollContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="CareerBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Career"]
+[node name="CareerBody" type="RichTextLabel" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs/Career"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(120, 48)
+custom_minimum_size = Vector2(100, 32)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
@@ -380,17 +397,17 @@ theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
 theme_override_font_sizes/normal_font_size = 15
 text = ""
 
-[node name="Log" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+[node name="Log" type="ScrollContainer" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="LogBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Log"]
+[node name="LogBody" type="RichTextLabel" parent="UI/PopInspectorDock/DockStack/RecordBlock/StatCol/InspectorTabs/Log"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-custom_minimum_size = Vector2(120, 48)
+custom_minimum_size = Vector2(100, 32)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
@@ -399,11 +416,79 @@ theme_override_colors/default_color = Color(0.82, 0.86, 0.92, 1)
 theme_override_font_sizes/normal_font_size = 14
 text = ""
 
-[node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
+[node name="DockDivider" type="HSeparator" parent="UI/PopInspectorDock/DockStack"]
 layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 1
 
-[node name="PopInspectorClose" type="Button" parent="UI/PopInspector/ContentRow/CloseCol"]
+[node name="BarRow" type="HBoxContainer" parent="UI/PopInspectorDock/DockStack"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 80)
+theme_override_constants/separation = 10
+
+[node name="NameBlock" type="VBoxContainer" parent="UI/PopInspectorDock/DockStack/BarRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 0)
+size_flags_vertical = 1
+theme_override_constants/separation = 2
+
+[node name="PopInspectorTitle" type="Label" parent="UI/PopInspectorDock/DockStack/BarRow/NameBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Name"
+
+[node name="PopInspectorRole" type="Label" parent="UI/PopInspectorDock/DockStack/BarRow/NameBlock"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.55, 0.85, 0.55, 1.0)
+text = "Role"
+
+[node name="PopStatusTeaser" type="Label" parent="UI/PopInspectorDock/DockStack/BarRow/NameBlock"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.52, 0.58, 1.0)
+theme_override_font_sizes/font_size = 12
+text_overrun_behavior = 3
+text = ""
+
+[node name="BarSep" type="VSeparator" parent="UI/PopInspectorDock/DockStack/BarRow"]
+layout_mode = 2
+
+[node name="TabButtons" type="HBoxContainer" parent="UI/PopInspectorDock/DockStack/BarRow"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TabGeneral" type="Button" parent="UI/PopInspectorDock/DockStack/BarRow/TabButtons"]
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("ButtonGroup_insp")
+theme_override_font_sizes/font_size = 13
+text = "General"
+
+[node name="TabSkills" type="Button" parent="UI/PopInspectorDock/DockStack/BarRow/TabButtons"]
+layout_mode = 2
+toggle_mode = true
+button_group = SubResource("ButtonGroup_insp")
+theme_override_font_sizes/font_size = 13
+text = "Skills"
+
+[node name="TabCareer" type="Button" parent="UI/PopInspectorDock/DockStack/BarRow/TabButtons"]
+layout_mode = 2
+toggle_mode = true
+button_group = SubResource("ButtonGroup_insp")
+theme_override_font_sizes/font_size = 13
+text = "Career"
+
+[node name="TabLog" type="Button" parent="UI/PopInspectorDock/DockStack/BarRow/TabButtons"]
+layout_mode = 2
+toggle_mode = true
+button_group = SubResource("ButtonGroup_insp")
+theme_override_font_sizes/font_size = 13
+text = "Log"
+
+[node name="BarSpacer" type="Control" parent="UI/PopInspectorDock/DockStack/BarRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PopInspectorBarClose" type="Button" parent="UI/PopInspectorDock/DockStack/BarRow"]
+custom_minimum_size = Vector2(36, 32)
 layout_mode = 2
 text = "✕"

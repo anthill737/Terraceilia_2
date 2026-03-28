@@ -132,22 +132,9 @@ var _sim_fail_banner: PanelContainer = null
 # Camera
 var _camera: Camera2D = null
 
-# Pop Inspector
+# Pop Inspector — UI lives in `PopInspectorDock` (scripts/ui/pop_inspector_dock.gd)
 var selected_pop: Node = null
-var pop_inspector_panel: Control = null
-var pop_inspector_title: Label = null
-var pop_inspector_role: Label = null
-var pop_inspector_general: RichTextLabel = null
-var pop_inspector_skills: RichTextLabel = null
-var pop_inspector_career: RichTextLabel = null
-var pop_inspector_log: RichTextLabel = null
-var pop_inspector_hint: Label = null
-var _inspector_scroll_sync_queued: bool = false
-## Character Log tab: sticky auto-scroll (same idea as the main Event Log).
-var char_log_user_at_bottom: bool = true
-var _inspector_life_log_sig: String = ""
-var _inspector_log_scroll_wired: bool = false
-var _inspector_log_pending_restore_ratio: float = -1.0
+var pop_inspector: PopInspectorDock = null
 ## World-space radius for click-selecting a pop (sprite is ~20×20 units).
 const POP_PICK_RADIUS_WORLD: float = 16.0
 
@@ -802,7 +789,6 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-
 func _unhandled_input(event: InputEvent) -> void:
 	# Runs AFTER GUI buttons/panels have had a chance to consume clicks.
 	# HUDRoot/Layout/LeftColumn/WorldSpacer use MOUSE_FILTER_IGNORE so world
@@ -1014,58 +1000,6 @@ func _on_log_scroll(_value: float) -> void:
 			user_at_bottom = (max_scroll - current_scroll) <= SCROLL_THRESHOLD
 
 
-func _wire_inspector_life_log_scroll() -> void:
-	if _inspector_log_scroll_wired or pop_inspector_panel == null:
-		return
-	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
-		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
-	if sc == null:
-		return
-	var vs: ScrollBar = sc.get_v_scroll_bar()
-	if vs == null:
-		return
-	if not vs.value_changed.is_connected(_on_inspector_life_log_scroll):
-		vs.value_changed.connect(_on_inspector_life_log_scroll)
-	_inspector_log_scroll_wired = true
-
-
-func _on_inspector_life_log_scroll(_value: float) -> void:
-	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
-		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
-	if sc == null:
-		return
-	var vs: ScrollBar = sc.get_v_scroll_bar()
-	if vs == null:
-		return
-	var max_scroll: float = vs.max_value - vs.page
-	if max_scroll <= 0.0:
-		char_log_user_at_bottom = true
-		return
-	char_log_user_at_bottom = (max_scroll - vs.value) <= float(SCROLL_THRESHOLD)
-
-
-func _deferred_inspector_life_log_after_text_change() -> void:
-	call_deferred("_deferred_inspector_life_log_after_text_change_b")
-
-
-func _deferred_inspector_life_log_after_text_change_b() -> void:
-	var sc: ScrollContainer = pop_inspector_panel.get_node_or_null(
-		"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
-	if sc == null:
-		return
-	var vs: ScrollBar = sc.get_v_scroll_bar()
-	if vs == null:
-		return
-	var denom: float = maxf(vs.max_value - vs.page, 0.0)
-	if char_log_user_at_bottom:
-		if denom > 0.0:
-			vs.value = denom
-		return
-	if _inspector_log_pending_restore_ratio >= 0.0 and denom > 0.0:
-		vs.value = clampf(_inspector_log_pending_restore_ratio * denom, 0.0, denom)
-	_inspector_log_pending_restore_ratio = -1.0
-
-
 func _on_jump_to_bottom() -> void:
 	# Re-enable auto-scroll and scroll to bottom
 	user_at_bottom = true
@@ -1188,44 +1122,11 @@ func get_ui_labels() -> void:
 		if vscroll:
 			vscroll.value_changed.connect(_on_log_scroll)
 
-	# Selected-pop panel — anchored to the bottom of the screen
-	pop_inspector_panel = get_node_or_null("UI/PopInspector")
-	if pop_inspector_panel:
-		pop_inspector_title = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorTitle")
-		pop_inspector_role  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/PopInspectorRole")
-		pop_inspector_hint  = pop_inspector_panel.get_node_or_null("ContentRow/NameCol/HintLabel")
-		pop_inspector_general = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs/General/GeneralBody")
-		pop_inspector_skills  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs/Skills/SkillsBody")
-		pop_inspector_career  = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs/Career/CareerBody")
-		pop_inspector_log     = pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs/Log/LogBody")
-		var close_btn = pop_inspector_panel.get_node_or_null("ContentRow/CloseCol/PopInspectorClose")
-		if close_btn:
-			close_btn.pressed.connect(_on_inspector_close)
-
-		var stat_col: Control = pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as Control
-		if stat_col and not stat_col.resized.is_connected(_on_inspector_scroll_resized):
-			stat_col.resized.connect(_on_inspector_scroll_resized)
-
-		# Dark semi-transparent panel background
-		var panel_style := StyleBoxFlat.new()
-		panel_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
-		panel_style.border_color = Color(0.28, 0.28, 0.42, 0.75)
-		panel_style.set_border_width_all(1)
-		panel_style.content_margin_left   = 14
-		panel_style.content_margin_right  = 14
-		panel_style.content_margin_top    = 10
-		panel_style.content_margin_bottom = 10
-		pop_inspector_panel.add_theme_stylebox_override("panel", panel_style)
-
-		var insp_tabs := pop_inspector_panel.get_node_or_null("ContentRow/StatCol/InspectorTabs") as TabContainer
-		if insp_tabs:
-			# Keep tab body compact; scroll inside each tab for long text.
-			insp_tabs.custom_minimum_size = Vector2(0, 168)
-			var tb: TabBar = insp_tabs.get_tab_bar()
-			if tb:
-				tb.add_theme_font_size_override("font_size", 14)
-
-		_wire_inspector_life_log_scroll()
+	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
+	if pop_inspector:
+		pop_inspector.configure(econ_stats, MAX_FIELDS, Callable(self, "_inspector_field_count_for_dock"))
+		if not pop_inspector.dismiss_requested.is_connected(_on_pop_inspector_dismiss):
+			pop_inspector.dismiss_requested.connect(_on_pop_inspector_dismiss)
 
 	# Connect pop_clicked for the initial scene agents
 	if is_instance_valid(farmer):
@@ -1347,371 +1248,31 @@ func log_population_snapshot() -> void:
 
 
 # ============================================================================
-# POP INSPECTOR — click-to-inspect any agent
+# POP INSPECTOR — UI in PopInspectorDock (scripts/ui/pop_inspector_dock.gd)
 # ============================================================================
+
+func _inspector_field_count_for_dock() -> int:
+	return all_field_nodes.size()
+
+
+func _on_pop_inspector_dismiss() -> void:
+	selected_pop = null
+
 
 func select_pop(pop: Node) -> void:
 	"""Called when any pop emits pop_clicked. Opens the inspector panel."""
 	if not is_instance_valid(pop):
 		return
-	if pop != selected_pop:
-		_inspector_life_log_sig = ""
-		char_log_user_at_bottom = true
-		_inspector_log_pending_restore_ratio = -1.0
 	selected_pop = pop
 	update_inspector()
 
 
-func _on_inspector_close() -> void:
-	selected_pop = null
-	if pop_inspector_panel:
-		pop_inspector_panel.visible = false
-	if pop_inspector_hint:
-		pop_inspector_hint.visible = true
-
-
-func _resolve_inspector_tab_labels() -> void:
-	if pop_inspector_panel == null:
-		return
-	if pop_inspector_general == null:
-		pop_inspector_general = pop_inspector_panel.get_node_or_null(
-			"ContentRow/StatCol/InspectorTabs/General/GeneralBody") as RichTextLabel
-	if pop_inspector_skills == null:
-		pop_inspector_skills = pop_inspector_panel.get_node_or_null(
-			"ContentRow/StatCol/InspectorTabs/Skills/SkillsBody") as RichTextLabel
-	if pop_inspector_career == null:
-		pop_inspector_career = pop_inspector_panel.get_node_or_null(
-			"ContentRow/StatCol/InspectorTabs/Career/CareerBody") as RichTextLabel
-	if pop_inspector_log == null:
-		pop_inspector_log = pop_inspector_panel.get_node_or_null(
-			"ContentRow/StatCol/InspectorTabs/Log/LogBody") as RichTextLabel
-
-
-func _set_inspector_tab_texts(gen: String, sk: String, car: String, log_t: String) -> void:
-	_resolve_inspector_tab_labels()
-	if pop_inspector_general:
-		pop_inspector_general.text = gen
-	if pop_inspector_skills:
-		pop_inspector_skills.text = sk
-	if pop_inspector_career:
-		pop_inspector_career.text = car
-	if pop_inspector_log:
-		pop_inspector_log.text = log_t
-
-
 func update_inspector() -> void:
-	"""Refresh the inspector panel. Called every UI update tick."""
-	if pop_inspector_panel == null:
+	if pop_inspector == null:
 		return
-	# Clear selection if the selected pop was freed (migration/conversion/starvation)
 	if selected_pop == null or not is_instance_valid(selected_pop):
 		selected_pop = null
-		pop_inspector_panel.visible = false
-		return
-	pop_inspector_panel.visible = true
-	if pop_inspector_hint:
-		pop_inspector_hint.visible = false
-	if not selected_pop.has_method("get_inspector_data"):
-		_set_inspector_tab_texts(
-			"(no inspector data available)",
-			"",
-			"",
-			""
-		)
-		return
-	var d: Dictionary = selected_pop.get_inspector_data()
-
-	if pop_inspector_title:
-		pop_inspector_title.text = d.get("person_name", d.get("name", "?"))
-	if pop_inspector_role:
-		pop_inspector_role.text = d.get("role", "?")
-
-	_resolve_inspector_tab_labels()
-	if pop_inspector_general == null:
-		return
-
-	const INSPECTOR_SEC := "[color=#8ab4e8][b]%s[/b][/color]"
-
-	var cash: float   = d.get("cash", 0.0)
-	var bread: int    = d.get("bread", 0)
-	var hunger_str: String = d.get("hunger", "?")
-	var starving: bool = d.get("starving", false)
-	var surv: bool    = d.get("survival", false)
-	var state: String = d.get("state", "?")
-
-	var starve_tag: String = "  [color=red]☠ STARVING[/color]" if starving else ""
-	var surv_tag: String   = "  [color=orange][SURVIVAL][/color]" if surv else ""
-
-	# Wealth tier — its own dedicated line with icon + colour
-	var wealth: String = d.get("wealth_tier", "")
-	var wealth_col: String
-	var wealth_icon: String
-	match wealth:
-		"Poor":
-			wealth_col  = "#aaaaaa"
-			wealth_icon = "▪"
-		"Working":
-			wealth_col  = "#e8b800"
-			wealth_icon = "◆"
-		"Wealthy":
-			wealth_col  = "#33dd33"
-			wealth_icon = "★"
-		_:
-			wealth_col  = "#888888"
-			wealth_icon = "·"
-	var wealth_line: String = "[color=%s][b]%s %s[/b][/color]%s" % [
-		wealth_col, wealth_icon, wealth, surv_tag
-	] if wealth != "" else ""
-
-	# Line 1: core vitals
-	var line1: String = "[b]$%.0f[/b]    Bread: [b]%d[/b]    Hunger: [b]%s[/b]%s" % [
-		cash, bread, hunger_str, starve_tag
-	]
-
-	# Line 2: wealth tier (prominent)  +  survival flag
-	var line2: String = wealth_line
-
-	# Line 3: current state (dim)
-	var line3: String = "[color=#aaaaaa]%s[/color]" % state
-
-	# Role-specific inventory (one short line each — reads like a journal)
-	var extras: Array[String] = []
-	if d.has("seeds"):
-		extras.append("Carrying %d seeds." % d.get("seeds"))
-	if d.has("wheat"):
-		extras.append("Carrying %d wheat." % d.get("wheat"))
-	if d.has("flour"):
-		extras.append("Carrying %d flour." % d.get("flour"))
-	if d.has("fields"):
-		extras.append("Working %d field(s)." % d.get("fields"))
-	if d.has("bread_consumed") and d.get("bread_consumed", 0) > 0:
-		extras.append("Ate %d bread today." % d.get("bread_consumed"))
-	if d.get("neg_cashflow_days", 0) > 0:
-		extras.append("[color=#ff8844]Losing money for %d day(s) in a row.[/color]" % d.get("neg_cashflow_days"))
-	if d.get("failed_food_days", 0) > 0:
-		extras.append("[color=#ff8844]Could not buy food for %d day(s) in a row.[/color]" % d.get("failed_food_days"))
-	if d.has("training_days"):
-		extras.append("[color=#88ccff]Training for a new job — %d day(s) left.[/color]" % d.get("training_days"))
-
-	var general_lines: Array[String] = []
-	general_lines.append(INSPECTOR_SEC % "Vitals")
-	general_lines.append(line1)
-	if wealth_line != "":
-		general_lines.append(line2)
-	general_lines.append(line3)
-	if extras.size() > 0:
-		general_lines.append("")
-		general_lines.append(INSPECTOR_SEC % "Belongings & pressure")
-		for ex: String in extras:
-			general_lines.append("[color=#d0d8e8]• %s[/color]" % ex)
-
-	# ── Skills tab (RimWorld-style: separate from General) ───────────────────
-	var skills_lines: Array[String] = []
-	var sk_f: float = d.get("skill_farmer", -1.0)
-	if sk_f >= 0.0:
-		skills_lines.append(INSPECTOR_SEC % "Skills & productivity")
-		var sk_b: float    = d.get("skill_baker",  0.0)
-		var dir: int       = d.get("days_in_role", 0)
-		var prod_m: float  = d.get("prod_mult",    1.0)
-		var pm_col: String = "#88cc88" if prod_m >= 1.0 else "#cc8888"
-		var f_fill: int  = roundi(sk_f * 5.0)
-		var b_fill: int  = roundi(sk_b * 5.0)
-		var f_bar: String = "█".repeat(f_fill) + "░".repeat(5 - f_fill)
-		var b_bar: String = "█".repeat(b_fill) + "░".repeat(5 - b_fill)
-		skills_lines.append(
-			"[color=#6688aa]Farmer skill [%s] %.2f · Baker skill [%s] %.2f · %d days in this role[/color]" %
-			[f_bar, sk_f, b_bar, sk_b, dir])
-		skills_lines.append(
-			"[color=#6688aa]Productivity today: [color=%s]×%.2f[/color][/color]" %
-			[pm_col, prod_m])
-	else:
-		skills_lines.append(
-			"[color=#9aa8bc](No skill breakdown for this person — data appears once roles are tracked.)[/color]")
-
-	# ── Career tab (utilities, eval, gates, cashflow) ────────────────────────
-	var career_lines: Array[String] = []
-	var rec_role: String = d.get("recommended_role", "")
-	if rec_role != "":
-		career_lines.append(INSPECTOR_SEC % "Career utilities")
-		var u_f: float = d.get("utility_farmer", 0.0)
-		var u_b: float = d.get("utility_baker", 0.0)
-		var u_c: float = d.get("utility_current", 0.0)
-		var uf_col: String = "#88ccaa" if u_f >= u_c else "#888888"
-		var ub_col: String = "#88ccaa" if u_b >= u_c else "#888888"
-		var uc_col: String = "#aaaacc"
-		career_lines.append(
-			"[color=#6688aa]Utility — [color=%s]farmer %.1f[/color] · [color=%s]baker %.1f[/color] · [color=%s]stay put %.1f[/color][/color]" %
-			[uf_col, u_f, ub_col, u_b, uc_col, u_c])
-		var rec_col: String = "#55cc88" if rec_role != d.get("role", "") else "#888888"
-		career_lines.append(
-			"[color=#556688]Best-looking job right now: [color=%s]%s[/color][/color]" %
-			[rec_col, rec_role])
-		career_lines.append("")
-
-	var lce: Dictionary = d.get("last_career_eval", {})
-	if not lce.is_empty():
-		career_lines.append(INSPECTOR_SEC % "Last career evaluation")
-		var rpf: float = lce.get("role_profit_7d_avg_farmer", 0.0)
-		var rpb: float = lce.get("role_profit_7d_avg_baker", 0.0)
-		career_lines.append(
-			"[color=#556688]Role 7d avg: Farmer=$%.2f  Baker=$%.2f[/color]" % [rpf, rpb])
-		var ei_f: float = lce.get("income_farmer", 0.0) * lce.get("sf_farmer", 1.0)
-		var ei_b: float = lce.get("income_baker", 0.0) * lce.get("sf_baker", 1.0)
-		career_lines.append(
-			"[color=#556688]Expected income: F=$%.2f  B=$%.2f  (pop avg=$%.2f)[/color]" % [
-				ei_f, ei_b, lce.get("pop_cashflow_7d_avg", 0.0)])
-		career_lines.append(
-			"[color=#556688]Skill factors: F=×%.2f  B=×%.2f  Risk=%.2f[/color]" % [
-				lce.get("sf_farmer", 1.0), lce.get("sf_baker", 1.0), lce.get("risk", 0.0)])
-		career_lines.append(
-			"[color=#556688]Switch cost: F=%.1f  B=%.1f[/color]" % [
-				lce.get("switch_cost_farmer", 0.0), lce.get("switch_cost_baker", 0.0)])
-		var du_f: float = lce.get("diag_U_farmer", 0.0)
-		var du_b: float = lce.get("diag_U_baker", 0.0)
-		career_lines.append(
-			"[color=#556688]Diag U (simple): F=%.2f  B=%.2f[/color]" % [du_f, du_b])
-		var scar_b: float = lce.get("scarcity_bread", 0.0)
-		var scar_w: float = lce.get("scarcity_wheat", 0.0)
-		var scar_col: String = "#cc5555" if scar_b > 0.0 or scar_w > 0.0 else "#556688"
-		career_lines.append(
-			"[color=%s]Scarcity: bread=%.2f wheat=%.2f[/color]" % [scar_col, scar_b, scar_w])
-		var sbf: float = lce.get("scarcity_bonus_farmer", 0.0)
-		var sbb: float = lce.get("scarcity_bonus_baker", 0.0)
-		if sbf > 0.0 or sbb > 0.0:
-			career_lines.append(
-				"[color=#aa7744]Scarcity bonus: F=+%.2f  B=+%.2f[/color]" % [sbf, sbb])
-		career_lines.append("")
-
-	var eval_day_val: int = d.get("last_eval_day", -1)
-	if eval_day_val >= 0:
-		var g_tenure: int = d.get("gate_tenure", 0)
-		var g_cooldown: int = d.get("gate_cooldown", 0)
-		var g_cash: float = d.get("gate_savings_cash", 0.0)
-		var g_bread: int = d.get("gate_food_bread", 0)
-		var g_ftarget: int = d.get("gate_food_target", 3)
-		var g_freq: int = ceili(g_ftarget * (2.0 / 3.0))
-		var tenure_col: String = "#55cc88" if g_tenure >= 14 else "#cc5555"
-		var cd_col: String = "#55cc88" if g_cooldown == 0 else "#cc5555"
-		var sav_col: String = "#55cc88" if g_cash >= 200.0 else "#cc5555"
-		var food_col: String = "#55cc88" if g_bread >= g_freq else "#cc5555"
-		var fields_now: int = all_field_nodes.size()
-		var lc_col: String = "#55cc88" if fields_now < MAX_FIELDS else "#cc5555"
-		career_lines.append(INSPECTOR_SEC % "Switch gates")
-		career_lines.append(
-			"[color=%s]Tenure: %d/14d[/color]  [color=%s]Cooldown: %dd[/color]  [color=%s]Savings: $%.0f/$200[/color]" %
-			[tenure_col, g_tenure, cd_col, g_cooldown, sav_col, g_cash])
-		career_lines.append(
-			"[color=%s]Food: %d/%d[/color]  [color=%s]Land: %d/%d[/color]  [color=#556688]Eval day: %d[/color]" %
-			[food_col, g_bread, g_freq, lc_col, fields_now, MAX_FIELDS, eval_day_val])
-		career_lines.append("")
-
-	var lcd: String = d.get("last_career_decision", "")
-	if lcd != "":
-		var lcd_col: String = "#ccaa55" if "blocked" in lcd else "#55cc88"
-		career_lines.append("[color=%s]Last decision: %s[/color]" % [lcd_col, lcd])
-		career_lines.append("")
-
-	var cf_income: float = d.get("cashflow_income", -1.0)
-	if cf_income >= 0.0:
-		career_lines.append(INSPECTOR_SEC % "Cashflow")
-		var cf_expense: float = d.get("cashflow_expense", 0.0)
-		var cf_net: float     = cf_income - cf_expense
-		var cf_avg: float     = d.get("cashflow_7d_avg",  0.0)
-		var cf_len: int       = d.get("cashflow_7d_len",  0)
-		var pop_role: String  = d.get("role", "")
-		var r_avg: float      = global_role_rolling_7d_avg(pop_role)
-		var delta: float      = cf_avg - r_avg
-		var net_col: String   = "#55cc88" if cf_net  >= 0.0 else "#cc5555"
-		var avg_col: String   = "#55cc88" if cf_avg  >= 0.0 else "#cc5555"
-		var d_col: String     = "#55cc88" if delta   >= 0.0 else "#cc5555"
-		var has_7d: bool      = cf_len >= 2
-		var d_days: String    = "%d" % cf_len if has_7d else "n/a"
-		var avg_str: String   = "[color=%s]$%.2f/d[/color]" % [avg_col, cf_avg] if has_7d else "n/a"
-		career_lines.append(
-			"[color=#6688bb]₢ Today: +$%.2f  -$%.2f  = [color=%s]$%.2f[/color]   7d(%s): avg %s[/color]" %
-			[cf_income, cf_expense, net_col, cf_net, d_days, avg_str])
-		if has_7d:
-			career_lines.append(
-				"[color=#445577]%s role 7d avg: $%.2f/d   Δ vs role: [color=%s]%+.2f[/color][/color]" %
-				[pop_role, r_avg, d_col, delta])
-
-	while career_lines.size() > 0 and career_lines[career_lines.size() - 1] == "":
-		career_lines.remove_at(career_lines.size() - 1)
-	if career_lines.is_empty():
-		career_lines = ["[color=#9aa8bc](Career details fill in after evaluations and job checks.)[/color]"]
-
-	pop_inspector_general.text = "\n".join(general_lines)
-	pop_inspector_skills.text = "\n".join(skills_lines)
-	pop_inspector_career.text = "\n".join(career_lines)
-
-	var log_text: String = ""
-	var events: Array = []
-	var raw_ev: Variant = selected_pop.get("life_events")
-	if raw_ev is Array:
-		events = raw_ev
-	if events.is_empty():
-		log_text = "[color=#9aa8bc](Nothing written yet — day-end diary entries show up here.)[/color]"
-	else:
-		var start: int = max(0, events.size() - 200)
-		var hist_lines: Array[String] = []
-		for i: int in range(start, events.size()):
-			hist_lines.append("[color=#b8c4d8]" + str(events[i]) + "[/color]")
-		log_text = "\n".join(hist_lines)
-
-	var sig: String = "%d:%s" % [events.size(), str(events[-1]) if events.size() > 0 else ""]
-	if sig != _inspector_life_log_sig:
-		var sc_log: ScrollContainer = pop_inspector_panel.get_node_or_null(
-			"ContentRow/StatCol/InspectorTabs/Log") as ScrollContainer
-		var vs_log: ScrollBar = sc_log.get_v_scroll_bar() if sc_log else null
-		if not char_log_user_at_bottom and vs_log != null:
-			var denom_before: float = vs_log.max_value - vs_log.page
-			if denom_before > 0.0:
-				_inspector_log_pending_restore_ratio = vs_log.value / denom_before
-			else:
-				_inspector_log_pending_restore_ratio = -1.0
-		else:
-			_inspector_log_pending_restore_ratio = -1.0
-		pop_inspector_log.text = log_text
-		_inspector_life_log_sig = sig
-		call_deferred("_deferred_inspector_life_log_after_text_change")
-
-	if not _inspector_log_scroll_wired:
-		_wire_inspector_life_log_scroll()
-
-	_queue_inspector_scroll_sync()
-
-
-func _on_inspector_scroll_resized() -> void:
-	_queue_inspector_scroll_sync()
-
-
-func _queue_inspector_scroll_sync() -> void:
-	if _inspector_scroll_sync_queued:
-		return
-	if pop_inspector_panel == null or not pop_inspector_panel.visible:
-		return
-	_inspector_scroll_sync_queued = true
-	call_deferred("_deferred_sync_inspector_scroll_layout")
-
-
-func _deferred_sync_inspector_scroll_layout() -> void:
-	_inspector_scroll_sync_queued = false
-	if pop_inspector_panel == null or not pop_inspector_panel.visible:
-		return
-	var stat_col := pop_inspector_panel.get_node_or_null("ContentRow/StatCol") as Control
-	var vw: float = get_viewport().get_visible_rect().size.x
-	if stat_col == null:
-		return
-	var w: float = stat_col.size.x - 36.0
-	if w < 80.0:
-		w = maxf(200.0, vw * 0.48)
-	_resolve_inspector_tab_labels()
-	for r in [pop_inspector_general, pop_inspector_skills, pop_inspector_career, pop_inspector_log]:
-		var rtl: RichTextLabel = r as RichTextLabel
-		if rtl == null:
-			continue
-		# Width only — do not set height to full content height or the panel grows to fit all text.
-		rtl.custom_minimum_size.x = w
+	pop_inspector.refresh(selected_pop)
 
 
 func spawn_household_at(pos: Vector2) -> Node:

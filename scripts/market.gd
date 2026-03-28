@@ -1253,5 +1253,3 @@ func _adjust_bread_price(day: int) -> void:
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				old_price, bread_price, update_reason
 			])
-
-

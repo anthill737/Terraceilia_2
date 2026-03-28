@@ -300,11 +300,8 @@ func _zoom_to_world_overview() -> void:
 			var origin: Vector2 = (v as Node2D).global_position
 			min_pos = min_pos.min(origin)
 			max_pos = max_pos.max(origin + Vector2(800.0, 600.0))
-	if _camera.has_method("zoom_to_fit_rect"):
-		_camera.zoom_to_fit_rect(min_pos, max_pos)
-	else:
-		_camera.recenter((min_pos + max_pos) * 0.5)
-		_camera.set_overview_zoom()
+	# fly_to disables auto-follow so the camera holds the world overview position cleanly.
+	_camera.fly_to((min_pos + max_pos) * 0.5, _camera.ZOOM_MIN)
 
 
 func _toggle_pause() -> void:

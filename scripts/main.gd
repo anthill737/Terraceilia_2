@@ -1,9 +1,12 @@
 extends Node
 
-# ── Village reference (economy delegated to village.gd) ───────────────────────
-## Resolved in _ready() after World._ready() spawns Village1.
+# ── Village references ────────────────────────────────────────────────────────
+## Currently-selected village — HUD, placement, and camera focus target.
 var village: Village = null
-
+## WorldManager node — exposes .villages array and helper methods.
+var _world_node: Node = null
+## 0-based index into _world_node.villages for the currently-selected village.
+var _selected_village_idx: int = 0
 # ── Simulation clock (world-level — controls Engine.time_scale) ───────────────
 var clock: SimulationClock = null
 
@@ -28,11 +31,15 @@ var eco_market_label: Label     = null
 var eco_prosperity_label: Label = null
 var eco_farmer_label: Label     = null
 var eco_baker_label: Label      = null
+## World-summary line shown below the per-village rows.
+var eco_world_label: Label      = null
 var _current_speed: float = 1.0
 
 # ── Pause control ─────────────────────────────────────────────────────────────
 var _is_paused: bool = false
 var _pause_btn: Button = null
+## Village navigation buttons in the toolbar (one per village).
+var _village_nav_btns: Array[Button] = []
 
 # ── Pop Inspector ─────────────────────────────────────────────────────────────
 var selected_pop: Node = null
@@ -66,9 +73,9 @@ func _ready() -> void:
 	clock.speed_changed.connect(_on_speed_changed)
 
 	# Wire clock ticks to World → forwarded to all villages
-	var world_node := get_node_or_null("World")
-	if world_node and world_node.has_method("on_simulation_tick"):
-		clock.ticked.connect(world_node.on_simulation_tick)
+	_world_node = get_node_or_null("World")
+	if _world_node and _world_node.has_method("on_simulation_tick"):
+		clock.ticked.connect(_world_node.on_simulation_tick)
 	else:
 		push_error("Main: Could not connect clock to World.on_simulation_tick")
 
@@ -82,17 +89,18 @@ func _ready() -> void:
 	cam.make_current()
 	_camera = cam
 
-	# ── Resolve village reference (World._ready() has already run) ──
-	# World node spawns Village1 in its own _ready() via spawn_initial_villages().
-	# By the time Main._ready() runs, Village1 is in the tree.
+	# ── Resolve village references (World._ready() has already run) ──
+	# World node spawns all villages in its own _ready() via spawn_initial_villages().
 	village = get_node_or_null("World/Village1") as Village
 	if village == null:
 		push_error("Main: Could not find World/Village1 — World.gd must spawn it in _ready()")
-	else:
-		# Wire the village's event_bus to the main log panel
-		if village.event_bus != null:
-			village.event_bus.event_logged.connect(_on_event_logged)
-		# TODO: connect village.village_extinct signal when T4 adds it
+
+	# Wire every village's event_bus to the shared log panel.
+	if _world_node and _world_node.get("villages") != null:
+		for v in _world_node.villages:
+			if v and is_instance_valid(v) and v.get("event_bus") != null and v.event_bus != null:
+				if not v.event_bus.event_logged.is_connected(_on_event_logged):
+					v.event_bus.event_logged.connect(_on_event_logged)
 
 	# ── Build UI ──
 	get_ui_labels()
@@ -124,9 +132,9 @@ func _world_to_screen(world_pos: Vector2) -> Vector2:
 func _update_camera() -> void:
 	if _camera == null:
 		return
-	# Use scene groups — agents add themselves when set_role() is called.
-	# This works for single-village; multi-village will scope groups per village later.
-	var positions: Array[Vector2] = []
+	# Centroid tracks selected village only; bounds include all entities so the
+	# camera can scroll to any village without restriction.
+	var selected_positions: Array[Vector2] = []
 	var all_entities: Array = []
 	for group_name: String in ["farmers", "bakers", "households"]:
 		for pop: Node in get_tree().get_nodes_in_group(group_name):
@@ -134,16 +142,17 @@ func _update_camera() -> void:
 				continue
 			var pop2d := pop as Node2D
 			if pop2d:
-				positions.append(pop2d.global_position)
 				all_entities.append(pop)
+				if village != null and village.is_ancestor_of(pop):
+					selected_positions.append(pop2d.global_position)
 	for fn: Node in get_tree().get_nodes_in_group("fields"):
 		if is_instance_valid(fn):
 			all_entities.append(fn)
-	if not positions.is_empty():
+	if not selected_positions.is_empty():
 		var centroid := Vector2.ZERO
-		for p in positions:
+		for p in selected_positions:
 			centroid += p
-		centroid /= float(positions.size())
+		centroid /= float(selected_positions.size())
 		_camera.update_centroid(centroid)
 	if not all_entities.is_empty():
 		_camera.update_bounds(all_entities)
@@ -222,21 +231,80 @@ func _on_speed_changed(new_speed: float) -> void:
 
 
 func _recenter_camera() -> void:
+	"""Recenter on the currently-selected village (Space shortcut)."""
+	_center_on_village(village)
+
+
+## Move the camera to the nominal centre of a specific village.
+## Uses fly_to() so auto-follow is disabled — camera stays on the target village.
+func _center_on_village(v: Village) -> void:
 	if _camera == null:
 		return
-	var positions: Array[Vector2] = []
-	for group_name: String in ["farmers", "bakers", "households"]:
-		for pop: Node in get_tree().get_nodes_in_group(group_name):
-			if is_instance_valid(pop):
-				positions.append((pop as Node2D).global_position)
-	if positions.is_empty():
-		_camera.recenter(Vector2(300, 400))
+	if v == null or not is_instance_valid(v):
+		_camera.fly_to(Vector2(400, 300), _camera.zoom.x)
 		return
-	var centroid := Vector2.ZERO
-	for p in positions:
-		centroid += p
-	centroid /= float(positions.size())
-	_camera.recenter(centroid)
+	# Use WorldManager helper when available; fall back to village global_position + offset.
+	var center: Vector2
+	if _world_node and _world_node.has_method("get_village_center"):
+		center = _world_node.get_village_center(v)
+	else:
+		center = (v as Node2D).global_position + Vector2(400.0, 300.0)
+	_camera.fly_to(center, _camera.zoom.x)
+	# Switch the selected village so HUD + placement follow the camera destination.
+	_select_village(v)
+
+
+## Update button highlight so the active village button has a distinct border.
+func _refresh_village_nav_highlights(active_idx: int) -> void:
+	for i in range(_village_nav_btns.size()):
+		var btn: Button = _village_nav_btns[i]
+		if not is_instance_valid(btn):
+			continue
+		var s := StyleBoxFlat.new()
+		if i == active_idx:
+			s.bg_color     = Color(0.20, 0.35, 0.20, 0.95)
+			s.border_color = Color(0.40, 1.00, 0.40, 1.00)
+		else:
+			s.bg_color     = Color(0.20, 0.20, 0.25, 0.90)
+			s.border_color = Color(0.50, 0.50, 0.60, 0.80)
+		s.set_border_width_all(2)
+		s.set_corner_radius_all(4)
+		s.set_content_margin_all(4)
+		btn.add_theme_stylebox_override("normal", s)
+
+
+## Select a village as the active HUD + placement target.
+func _select_village(v: Village) -> void:
+	if v == null or not is_instance_valid(v):
+		return
+	village = v
+	if _world_node and _world_node.get("villages") != null:
+		var idx: int = _world_node.villages.find(v)
+		if idx >= 0:
+			_selected_village_idx = idx
+			_refresh_village_nav_highlights(idx)
+
+
+## Zoom camera out so both villages are visible simultaneously.
+func _zoom_to_world_overview() -> void:
+	if _camera == null or _world_node == null:
+		return
+	var villages_arr = _world_node.get("villages")
+	if villages_arr == null or villages_arr.is_empty():
+		return
+	# Compute bounding rect across all village areas and zoom to fit it.
+	var min_pos := Vector2(INF, INF)
+	var max_pos := Vector2(-INF, -INF)
+	for v in villages_arr:
+		if v and is_instance_valid(v):
+			var origin: Vector2 = (v as Node2D).global_position
+			min_pos = min_pos.min(origin)
+			max_pos = max_pos.max(origin + Vector2(800.0, 600.0))
+	if _camera.has_method("zoom_to_fit_rect"):
+		_camera.zoom_to_fit_rect(min_pos, max_pos)
+	else:
+		_camera.recenter((min_pos + max_pos) * 0.5)
+		_camera.set_overview_zoom()
 
 
 func _toggle_pause() -> void:
@@ -434,11 +502,13 @@ func _update_eco_bar() -> void:
 	if eco_sim_label:
 		eco_sim_label.text = "Day %d\n%.1f×" % [snap.get("day", 0), _current_speed]
 
-	# VILLAGE
+	# VILLAGE — prefix with the selected village's display name so the player always
+	# knows which village the HUD row describes.
 	if eco_village_label:
+		var vname: String = village.village_name if (village.get("village_name") as String) != "" else village.name
 		eco_village_label.text = (
-			"Population %d — households %d, farmers %d, bakers %d\nFields %d of %d"
-			% [pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
+			"[%s]  Pop %d — households %d, farmers %d, bakers %d\nFields %d of %d"
+			% [vname, pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
 			   pop.get("bakers", 0), pop.get("fields", 0), pop.get("max_fields", 10)]
 		)
 
@@ -476,6 +546,16 @@ func _update_eco_bar() -> void:
 				   fd.get("hunger_days", 0), fd.get("hunger_max", 5),
 				   fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
 			)
+
+	# WORLD summary — aggregated across all villages
+	if eco_world_label and _world_node and _world_node.has_method("get_world_summary"):
+		var ws: Dictionary = _world_node.get_world_summary()
+		eco_world_label.text = (
+			"World: %d villages · total pop %d (H %d · F %d · B %d) · fields %d"
+			% [ws.get("village_count", 0), ws.get("total_pop", 0),
+			   ws.get("total_households", 0), ws.get("total_farmers", 0),
+			   ws.get("total_bakers", 0), ws.get("total_fields", 0)]
+		)
 
 	# BAKER baseline
 	if eco_baker_label:
@@ -629,10 +709,39 @@ func _build_spawn_toolbar() -> void:
 
 	var center_btn := Button.new()
 	center_btn.text = "Center"
-	center_btn.tooltip_text = "Recenter camera on town  [Space]"
+	center_btn.tooltip_text = "Recenter camera on selected village  [Space]"
 	center_btn.custom_minimum_size = Vector2(80, 34)
 	center_btn.pressed.connect(_recenter_camera)
 	hbox.add_child(center_btn)
+
+	# ── Village navigation ──
+	hbox.add_child(VSeparator.new())
+
+	_village_nav_btns = []
+	if _world_node and _world_node.get("villages") != null:
+		for i in range(_world_node.villages.size()):
+			var v: Village = _world_node.villages[i]
+			if v == null:
+				continue
+			var vbtn := Button.new()
+			var vdisplay: String = v.name
+			vbtn.text = vdisplay
+			vbtn.tooltip_text = "Center camera on %s" % vdisplay
+			vbtn.custom_minimum_size = Vector2(80, 34)
+			var captured_v: Village = v
+			vbtn.pressed.connect(func(): _center_on_village(captured_v))
+			hbox.add_child(vbtn)
+			_village_nav_btns.append(vbtn)
+
+	var zoom_world_btn := Button.new()
+	zoom_world_btn.text = "World"
+	zoom_world_btn.tooltip_text = "Zoom out to see all villages"
+	zoom_world_btn.custom_minimum_size = Vector2(70, 34)
+	zoom_world_btn.pressed.connect(_zoom_to_world_overview)
+	hbox.add_child(zoom_world_btn)
+
+	# Highlight the initially-selected village button.
+	_refresh_village_nav_highlights(0)
 
 	place_mode_label = Label.new()
 	place_mode_label.text = ""
@@ -699,6 +808,13 @@ func _build_economy_bar() -> void:
 	eco_prosperity_label = _add_eco_section(row1, "PROSPERITY", Color(1.00, 0.85, 0.25), true)
 	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
 	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
+
+	# Row 3 — world-level summary (totals across all villages)
+	var row3 := HBoxContainer.new()
+	row3.add_theme_constant_override("separation", 0)
+	row3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.add_child(row3)
+	eco_world_label = _add_eco_section(row3, "WORLD", Color(0.55, 0.80, 1.00), true)
 
 	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
 	left_column.add_child(bar)

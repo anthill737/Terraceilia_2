@@ -32,21 +32,21 @@ func spawn_initial_villages() -> void:
 		push_error("WorldManager: could not load Village.tscn — ensure T3 is complete")
 		return
 
-	# Village1 — seed 12345, positioned at world origin
-	var v1 = village_scene.instantiate()
-	v1.name = "Village1"
-	v1.position = Vector2(0.0, 0.0)
-	add_child(v1)
-	v1.initialize(12345, {})
-	villages.append(v1)
+	_add_village(village_scene, 0, "Village 1", 12345)
+	_add_village(village_scene, 1, "Village 2", 66666)
 
-	# Village2 — seed 67890, offset by VILLAGE_SPACING so it never overlaps Village1
-	var v2 = village_scene.instantiate()
-	v2.name = "Village2"
-	v2.position = Vector2(VILLAGE_SPACING, 0.0)
-	add_child(v2)
-	v2.initialize(67890, {})
-	villages.append(v2)
+
+func _add_village(scene: PackedScene, idx: int, display_name: String, seed: int) -> void:
+	var v = scene.instantiate()
+	v.name         = "Village%d" % (idx + 1)
+	v.position     = Vector2(idx * VILLAGE_SPACING, 0.0)
+	v.village_id   = idx + 1
+	v.village_name = display_name
+	add_child(v)
+	v.initialize(seed, {})
+	if v.event_bus:
+		v.event_bus.village_label = "[%s]" % display_name
+	villages.append(v)
 
 
 ## Called by main.gd when SimulationClock emits ticked(tick).
@@ -142,3 +142,16 @@ func get_world_population() -> int:
 		if v and is_instance_valid(v) and v.has_method("get_population_summary"):
 			total += v.get_population_summary().get("total", 0)
 	return total
+
+
+## Returns the Village at index idx, or null if out of range.
+func get_village(idx: int) -> Village:
+	if idx >= 0 and idx < villages.size():
+		var v = villages[idx]
+		if v and is_instance_valid(v):
+			return v as Village
+	return null
+
+
+func get_village_count() -> int:
+	return villages.size()

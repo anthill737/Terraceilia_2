@@ -360,11 +360,11 @@ func get_trade_snapshot() -> Dictionary:
 		"village_name":      village_name,
 		"wheat_price":       market.get_bid_price("wheat"),
 		"bread_price":       market.get_bid_price("bread"),
-		"wheat_inventory":   market.wheat,
-		"bread_inventory":   market.bread,
-		"position":          global_position,
-		"wheat_buy_blocked": not market.can_producer_sell("wheat"),
-		"bread_buy_blocked": not market.can_producer_sell("bread"),
+		"wheat_qty":         market.wheat,
+		"bread_qty":         market.bread,
+		"world_pos":         global_position,
+		"wheat_buy_blocked": market.wheat_market_buy_blocked,
+		"bread_buy_blocked": market.bread_market_buy_blocked,
 	}
 
 

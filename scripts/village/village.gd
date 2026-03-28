@@ -28,12 +28,18 @@ var pop_mgr = null       # PopulationManager
 var field_mgr = null     # FieldManager
 var econ_stats = null    # EconomyStatsManager
 
-# ── Convenience arrays (populated by managers) ────────────────────────────────
-var all_farmers: Array = []
-var all_bakers: Array = []
-var households: Array = []
-var all_fields: Array = []
-var all_field_nodes: Array = []
+# ── Population + field arrays — property getters delegate to managers ──────────
+# This ensures pop_mgr, labor_market, and econ_stats all share the same arrays.
+var all_farmers: Array:
+	get: return pop_mgr.all_farmers if pop_mgr else []
+var all_bakers: Array:
+	get: return pop_mgr.all_bakers if pop_mgr else []
+var households: Array:
+	get: return pop_mgr.households if pop_mgr else []
+var all_fields: Array:
+	get: return field_mgr.all_fields if field_mgr else []
+var all_field_nodes: Array:
+	get: return field_mgr.all_field_nodes if field_mgr else []
 
 # ── Career system state ────────────────────────────────────────────────────────
 var pending_conversions: Array = []
@@ -256,6 +262,16 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	event_bus.log("%s Tick 0: START" % log_prefix)
 
 
+## Canonical tick entry-point.  World connects SimulationClock.ticked → tick_sim.
+func tick_sim(tick: int) -> void:
+	receive_tick(tick)
+
+
+## Legacy alias kept for backward compatibility with world.gd drafts.
+func tick(_delta: float) -> void:
+	pass
+
+
 func receive_tick(tick: int) -> void:
 	"""Called by the world's SimulationClock for each simulation tick."""
 	if sim_failed:
@@ -318,13 +334,11 @@ func get_population_summary() -> Dictionary:
 
 
 func get_econ_snapshot() -> Dictionary:
-	if market == null:
-		return {}
 	return {
-		"wheat_price": market.get_bid_price("wheat") if market.has_method("get_bid_price") else 0.0,
-		"bread_price": market.get_bid_price("bread") if market.has_method("get_bid_price") else 0.0,
-		"wheat": market.wheat if market.get("wheat") != null else 0,
-		"bread": market.bread if market.get("bread") != null else 0,
+		"wheat_price": market.get_bid_price("wheat") if market else 0.0,
+		"bread_price": market.get_bid_price("bread") if market else 0.0,
+		"prosperity":  prosperity_meter.prosperity_score if prosperity_meter else 0.0,
+		"day":         calendar.day_index if calendar else 0,
 	}
 
 

@@ -271,7 +271,7 @@ anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = -440.0
+offset_top = -480.0
 offset_bottom = 0.0
 grow_horizontal = 2
 grow_vertical = 0
@@ -305,7 +305,7 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.45, 0.45, 0.52, 1.0)
 theme_override_font_sizes/font_size = 14
 autowrap_mode = 2
-text = "Click a person on the map. Vitals and story appear to the right — no need to scroll inside this panel."
+text = "Click a person on the map. Use the tabs (like RimWorld) to switch between General, Skills, Career, and Log."
 
 [node name="VSep1" type="VSeparator" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
@@ -313,48 +313,90 @@ layout_mode = 2
 [node name="StatCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 0
-theme_override_constants/separation = 6
+size_flags_vertical = 3
+theme_override_constants/separation = 4
 
-[node name="DetailsHeader" type="Label" parent="UI/PopInspector/ContentRow/StatCol"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 17
-theme_override_colors/font_color = Color(0.65, 0.72, 0.9, 1.0)
-text = "Details"
-
-[node name="PopInspectorBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol"]
+[node name="InspectorTabs" type="TabContainer" parent="UI/PopInspector/ContentRow/StatCol"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 0
-custom_minimum_size = Vector2(200, 80)
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 15
+current_tab = 0
+
+[node name="General" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="GeneralBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/General"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(200, 120)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
 theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
-theme_override_font_sizes/normal_font_size = 18
+theme_override_font_sizes/normal_font_size = 17
 text = ""
 
-[node name="HSepHistory" type="HSeparator" parent="UI/PopInspector/ContentRow/StatCol"]
-layout_mode = 2
-
-[node name="HistoryHeader" type="Label" parent="UI/PopInspector/ContentRow/StatCol"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 17
-theme_override_colors/font_color = Color(0.65, 0.72, 0.9, 1.0)
-text = "Life log (this person)"
-
-[node name="LifeHistory" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol"]
+[node name="Skills" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 0
-custom_minimum_size = Vector2(200, 56)
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="SkillsBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Skills"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(200, 120)
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
 autowrap_mode = 3
+theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
 theme_override_font_sizes/normal_font_size = 17
+text = ""
+
+[node name="Career" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="CareerBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Career"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(200, 120)
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 3
+theme_override_colors/default_color = Color(0.88, 0.9, 0.95, 1)
+theme_override_font_sizes/normal_font_size = 17
+text = ""
+
+[node name="Log" type="ScrollContainer" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="LogBody" type="RichTextLabel" parent="UI/PopInspector/ContentRow/StatCol/InspectorTabs/Log"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(200, 120)
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 3
 theme_override_colors/default_color = Color(0.82, 0.86, 0.92, 1)
+theme_override_font_sizes/normal_font_size = 16
 text = ""
 
 [node name="CloseCol" type="VBoxContainer" parent="UI/PopInspector/ContentRow"]

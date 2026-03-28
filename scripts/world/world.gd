@@ -24,7 +24,9 @@ func spawn_initial_villages() -> void:
 	villages.append(v1)
 
 
-func _process(delta: float) -> void:
+## Called by main.gd when SimulationClock emits ticked(tick).
+## Forwards the integer tick to every village's receive_tick() method.
+func on_simulation_tick(tick: int) -> void:
 	for v in villages:
 		if v and is_instance_valid(v):
-			v.tick(delta)
+			v.receive_tick(tick)

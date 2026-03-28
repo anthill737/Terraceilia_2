@@ -1,0 +1,202 @@
+[gd_scene load_steps=14 format=3]
+
+[ext_resource type="Script" path="res://scripts/village/village.gd" id="1_village"]
+[ext_resource type="Script" path="res://scripts/agent.gd" id="2_agent"]
+[ext_resource type="Script" uid="uid://bii8ulb1hgvyu" path="res://scripts/field_plot.gd" id="3_field"]
+[ext_resource type="Script" path="res://scripts/components/wallet.gd" id="4_wallet"]
+[ext_resource type="Script" path="res://scripts/components/inventory.gd" id="5_inventory"]
+[ext_resource type="Script" path="res://scripts/components/hunger_need.gd" id="6_hunger_need"]
+[ext_resource type="Script" path="res://scripts/components/food_stockpile.gd" id="7_food_stockpile"]
+[ext_resource type="Script" path="res://scripts/components/route_runner.gd" id="8_route_runner"]
+[ext_resource type="Script" path="res://scripts/components/inventory_capacity.gd" id="9_inventory_capacity"]
+[ext_resource type="Script" path="res://scripts/components/production_batch.gd" id="10_production_batch"]
+[ext_resource type="Script" path="res://scripts/components/production_profitability.gd" id="11_production_profitability"]
+[ext_resource type="Script" path="res://scripts/components/food_reserve.gd" id="12_food_reserve"]
+[ext_resource type="Script" path="res://scripts/components/margin_compression.gd" id="13_margin_compression"]
+[ext_resource type="Script" path="res://scripts/components/inventory_throttle.gd" id="14_inventory_throttle"]
+
+[node name="Village" type="Node2D"]
+script = ExtResource("1_village")
+
+[node name="MarketNode" type="Node2D" parent="."]
+position = Vector2(338, 305)
+
+[node name="MarketMarker" type="ColorRect" parent="MarketNode"]
+offset_left = -15.0
+offset_top = -14.0
+offset_right = 15.0
+offset_bottom = 16.0
+color = Color(1, 0.2, 0.2, 1)
+
+[node name="Bakery" type="Node2D" parent="."]
+position = Vector2(350, 450)
+
+[node name="BakeryMarker" type="ColorRect" parent="Bakery"]
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(1, 0.8, 0.2, 1)
+
+[node name="House" type="Node2D" parent="."]
+position = Vector2(120, 520)
+
+[node name="HouseMarker" type="ColorRect" parent="House"]
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(0.2, 0.5, 1, 1)
+
+[node name="HouseholdHome" type="Node2D" parent="."]
+position = Vector2(177, 287)
+
+[node name="HouseholdHomeMarker" type="ColorRect" parent="HouseholdHome"]
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(0.8, 0.2, 0.8, 1)
+
+[node name="Field1" type="Node2D" parent="."]
+position = Vector2(220, 520)
+script = ExtResource("3_field")
+
+[node name="Field1Marker" type="ColorRect" parent="Field1"]
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(0.4, 0.3, 0.1, 1)
+
+[node name="Field2" type="Node2D" parent="."]
+position = Vector2(320, 520)
+script = ExtResource("3_field")
+
+[node name="Field2Marker" type="ColorRect" parent="Field2"]
+offset_left = -15.0
+offset_top = -15.0
+offset_right = 15.0
+offset_bottom = 15.0
+color = Color(0.4, 0.3, 0.1, 1)
+
+[node name="AgentContainer" type="Node2D" parent="."]
+
+[node name="FieldContainer" type="Node2D" parent="."]
+
+[node name="Farmer" type="CharacterBody2D" parent="."]
+position = Vector2(120, 520)
+script = ExtResource("2_agent")
+
+[node name="AgentSprite" type="ColorRect" parent="Farmer"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+mouse_filter = 1
+color = Color(0.2, 1, 0.2, 1)
+
+[node name="Wallet" type="Node" parent="Farmer"]
+script = ExtResource("4_wallet")
+
+[node name="Inventory" type="Node" parent="Farmer"]
+script = ExtResource("5_inventory")
+
+[node name="HungerNeed" type="Node" parent="Farmer"]
+script = ExtResource("6_hunger_need")
+
+[node name="FoodStockpile" type="Node" parent="Farmer"]
+script = ExtResource("7_food_stockpile")
+
+[node name="RouteRunner" type="Node" parent="Farmer"]
+script = ExtResource("8_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="Farmer"]
+script = ExtResource("9_inventory_capacity")
+
+[node name="ProductionProfitability" type="Node" parent="Farmer"]
+script = ExtResource("11_production_profitability")
+
+[node name="InventoryThrottle" type="Node" parent="Farmer"]
+script = ExtResource("14_inventory_throttle")
+
+[node name="FoodReserve" type="Node" parent="Farmer"]
+script = ExtResource("12_food_reserve")
+
+[node name="Baker" type="CharacterBody2D" parent="."]
+position = Vector2(350, 450)
+script = ExtResource("2_agent")
+
+[node name="AgentSprite" type="ColorRect" parent="Baker"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+mouse_filter = 1
+color = Color(0.8, 0.6, 0.2, 1)
+
+[node name="Wallet" type="Node" parent="Baker"]
+script = ExtResource("4_wallet")
+
+[node name="Inventory" type="Node" parent="Baker"]
+script = ExtResource("5_inventory")
+
+[node name="HungerNeed" type="Node" parent="Baker"]
+script = ExtResource("6_hunger_need")
+
+[node name="FoodStockpile" type="Node" parent="Baker"]
+script = ExtResource("7_food_stockpile")
+
+[node name="RouteRunner" type="Node" parent="Baker"]
+script = ExtResource("8_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="Baker"]
+script = ExtResource("9_inventory_capacity")
+
+[node name="ProductionBatch" type="Node" parent="Baker"]
+script = ExtResource("10_production_batch")
+
+[node name="ProductionProfitability" type="Node" parent="Baker"]
+script = ExtResource("11_production_profitability")
+
+[node name="MarginCompression" type="Node" parent="Baker"]
+script = ExtResource("13_margin_compression")
+
+[node name="InventoryThrottle" type="Node" parent="Baker"]
+script = ExtResource("14_inventory_throttle")
+
+[node name="FoodReserve" type="Node" parent="Baker"]
+script = ExtResource("12_food_reserve")
+
+[node name="HouseholdAgent" type="CharacterBody2D" parent="."]
+position = Vector2(177, 288)
+script = ExtResource("2_agent")
+
+[node name="AgentSprite" type="ColorRect" parent="HouseholdAgent"]
+offset_left = -10.0
+offset_top = -12.0
+offset_right = 10.0
+offset_bottom = 8.0
+mouse_filter = 1
+color = Color(1, 0.4, 1, 1)
+
+[node name="Wallet" type="Node" parent="HouseholdAgent"]
+script = ExtResource("4_wallet")
+
+[node name="Inventory" type="Node" parent="HouseholdAgent"]
+script = ExtResource("5_inventory")
+
+[node name="HungerNeed" type="Node" parent="HouseholdAgent"]
+script = ExtResource("6_hunger_need")
+
+[node name="FoodStockpile" type="Node" parent="HouseholdAgent"]
+script = ExtResource("7_food_stockpile")
+
+[node name="RouteRunner" type="Node" parent="HouseholdAgent"]
+script = ExtResource("8_route_runner")
+
+[node name="InventoryCapacity" type="Node" parent="HouseholdAgent"]
+script = ExtResource("9_inventory_capacity")
+
+[node name="FoodReserve" type="Node" parent="HouseholdAgent"]
+script = ExtResource("12_food_reserve")

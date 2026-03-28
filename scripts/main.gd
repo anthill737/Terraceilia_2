@@ -780,6 +780,8 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Runs AFTER GUI buttons/panels have had a chance to consume clicks.
+	# HUDRoot/Layout/LeftColumn/WorldSpacer use MOUSE_FILTER_IGNORE so world
+	# clicks reach here; sidebar panels and toolbar still use STOP and eat first.
 
 	# Left-click: pop selection + placement (only reaches here if no GUI ate it)
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:

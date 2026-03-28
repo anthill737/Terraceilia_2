@@ -309,14 +309,9 @@ func get_status_text() -> String:
 # ==============================================================================
 #  Click / selection
 # ==============================================================================
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			if get_local_mouse_position().length() <= 15.0:
-				pop_clicked.emit(self)
-				get_viewport().set_input_as_handled()
-
+# Pop selection is handled in main.gd::_unhandled_input (screen→world hit test)
+# so clicks pass through the HUD world column (MOUSE_FILTER_IGNORE). The
+# pop_clicked signal remains for compatibility if anything connects to it.
 
 # ==============================================================================
 #  Forwarding properties — expose job-specific data to external systems

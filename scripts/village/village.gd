@@ -625,6 +625,8 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	b.name = "Baker_%d" % pop_mgr.next_baker_id
 	pop_mgr.next_baker_id += 1
 	b.home_village_id = village_id
+	b.home_village_ref = self
+	b.current_village_ref = self
 	b.position = to_local(pos)
 	add_child(b)
 

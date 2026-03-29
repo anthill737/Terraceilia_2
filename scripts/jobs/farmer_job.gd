@@ -64,6 +64,9 @@ var trade_commit_until_tick: int = 0
 var trade_sale_completed: bool = true
 ## Tick of the last cross-village move. Used for [TRADE DEBUG] ping-pong detection.
 var _last_trade_move_tick: int = -1
+## Number of completed cross-village arrivals (incremented only in _on_trade_arrival).
+## Canonical migration-complete signal: non-zero means at least one trip finished.
+var trade_arrival_count: int = 0
 
 
 func get_display_name() -> String:
@@ -568,6 +571,14 @@ func _on_trade_arrival() -> void:
 
 	# Switch village context: all further market ops use the new village
 	agent.current_village_ref = arrived_village
+	# Canonical migration-complete: increment counter and log BEFORE any sale or commit work.
+	trade_arrival_count += 1
+	if event_bus:
+		event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+			arrived_village.village_name, trade_arrival_count])
+	else:
+		print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+			arrived_village.village_name, trade_arrival_count])
 	market = arrived_village.market
 	agent.market = arrived_village.market
 	market_node = arrived_market_node

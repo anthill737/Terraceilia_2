@@ -20,12 +20,13 @@ const FRAMES_PER_TICK: int = 6
 ## How many ticks to run each scenario.
 ## Villages are repositioned to 250 px apart (see _reposition_v2_close).
 ## At SPEED=100 and 240fps physics, 250 px requires ~100 ticks (FRAMES_PER_TICK=6).
-## Add eval interval (10) + arrival margin → 150 ticks is sufficient; use 250.
-const TRADE_OFF_TICKS: int = 25       # Only needs > TRADE_EVAL_INTERVAL (10)
-const TRADE_ON_TICKS: int = 250       # eval (10) + travel (~100) + margin
-const RETURN_MIGRATE_TICKS: int = 250 # Same: allow full migration
-const RETURN_FLIP_TICKS: int = 250    # After price flip: allow full return travel
-const DETERM_TICKS: int = 250         # Enough to capture post-arrival state
+## TRADE_EVAL_INTERVAL=30 ticks — minimum needed = eval(30) + travel(100) = 130.
+## Use 300 to include the commitment window start and confirm arrival state is stable.
+const TRADE_OFF_TICKS: int = 35       # Only needs > TRADE_EVAL_INTERVAL (30)
+const TRADE_ON_TICKS: int = 300       # eval (30) + travel (~100) + arrival margin
+const RETURN_MIGRATE_TICKS: int = 300 # Same: allow full migration
+const RETURN_FLIP_TICKS: int = 300    # After price flip: allow full return travel
+const DETERM_TICKS: int = 300         # Enough to capture post-arrival state
 
 ## How much higher the "attractive" village prices are vs the home village.
 ## 3× is well above any travel cost the spec mandates, ensuring migration triggers.
@@ -272,6 +273,10 @@ func _reset_cashflow_counters() -> void:
 
 ## Make Village 2 clearly the better market. Prices are 3× Village 1 to ensure
 ## the profit gap exceeds any travel cost the implementation may use.
+## IMPORTANT: market.get_bid_price() applies an inventory-based multiplier (0.70–1.10×)
+## that can suppress V2's effective bid below the migration threshold even if
+## wheat_price/bread_price are set high.  Clear V2's inventory (empty = buy-premium) and
+## set V1's inventory at target (neutral bid) so the effective bid matches the price intent.
 func _set_v2_prices_high() -> void:
 	if _world == null:
 		return
@@ -288,16 +293,24 @@ func _set_v2_prices_high() -> void:
 	v1.market.bread_price = BASE_BREAD_PRICE
 	v1.market.wheat_market_buy_blocked = false
 	v1.market.bread_market_buy_blocked = false
+	# Set V1 inventory at target so bid multiplier ≈ 1.0 (neutral).
+	v1.market.wheat = v1.market.wheat_target
+	v1.market.bread = v1.market.bread_target
 	v2.market.wheat_price = BASE_WHEAT_PRICE * PRICE_MULTIPLIER
 	v2.market.bread_price = BASE_BREAD_PRICE * PRICE_MULTIPLIER
 	v2.market.wheat_market_buy_blocked = false
 	v2.market.bread_market_buy_blocked = false
-	print("[TRADE TEST] Prices set: V1 wheat=%.1f bread=%.1f | V2 wheat=%.1f bread=%.1f" % [
+	# Clear V2 inventory so bid multiplier ≈ 1.10 (scarcity premium) — ensures
+	# effective bid is at least wheat_price × 1.10, well above migration threshold.
+	v2.market.wheat = 0
+	v2.market.bread = 0
+	print("[TRADE TEST] Prices set: V1 wheat=%.1f bread=%.1f | V2 wheat=%.1f bread=%.1f (V2 inv cleared for neutral bid)" % [
 		BASE_WHEAT_PRICE, BASE_BREAD_PRICE,
 		BASE_WHEAT_PRICE * PRICE_MULTIPLIER, BASE_BREAD_PRICE * PRICE_MULTIPLIER])
 
 
 ## Flip prices so Village 1 is now the better market, triggering return logic.
+## Also resets inventories so effective bid follows the price intent (see _set_v2_prices_high).
 func _set_v1_prices_high() -> void:
 	if _world == null:
 		return
@@ -312,10 +325,14 @@ func _set_v1_prices_high() -> void:
 	v1.market.bread_price = BASE_BREAD_PRICE * PRICE_MULTIPLIER
 	v1.market.wheat_market_buy_blocked = false
 	v1.market.bread_market_buy_blocked = false
+	v1.market.wheat = 0  # empty V1 → scarcity premium bid
+	v1.market.bread = 0
 	v2.market.wheat_price = BASE_WHEAT_PRICE
 	v2.market.bread_price = BASE_BREAD_PRICE
 	v2.market.wheat_market_buy_blocked = false
 	v2.market.bread_market_buy_blocked = false
+	v2.market.wheat = v2.market.wheat_target  # V2 at target → neutral bid
+	v2.market.bread = v2.market.bread_target
 	print("[TRADE TEST] Prices flipped: V1 wheat=%.1f bread=%.1f (high) | V2 wheat=%.1f bread=%.1f (low)" % [
 		BASE_WHEAT_PRICE * PRICE_MULTIPLIER, BASE_BREAD_PRICE * PRICE_MULTIPLIER,
 		BASE_WHEAT_PRICE, BASE_BREAD_PRICE])
@@ -393,9 +410,17 @@ func _collect_agents() -> Array:
 	return out
 
 
-## Returns true if any agent's current_village_ref differs from home_village_ref.
+## Returns true if any agent has completed at least one cross-village arrival.
+## Primary signal: trade_arrival_count > 0 (set only in _on_trade_arrival, after
+## current_village_ref is updated — the canonical migration-complete event).
+## Fallback: current_village_ref != home_village_ref (agent is currently away).
 func _any_agent_migrated() -> bool:
 	for a in _collect_agents():
+		var job = a.get("current_job")
+		# Primary canonical signal: incremented only at physical arrival completion.
+		if job != null and job.get("trade_arrival_count") != null and job.trade_arrival_count > 0:
+			return true
+		# Fallback: agent is currently at a foreign village.
 		var cur = a.get("current_village_ref")
 		var home = a.get("home_village_ref")
 		if cur != null and home != null and cur != home:
@@ -439,23 +464,46 @@ func _check_no_migration() -> void:
 
 
 ## Test 2: assert at least one agent left their home village.
+## canonical migration state = current_village_ref != home_village_ref
+## This is only set in _on_trade_arrival(), so it can only be true after physical arrival.
 func _check_migration_occurred() -> void:
 	if _any_agent_migrated():
 		print("[TRADE TEST] PASS: Test 2 — at least one agent migrated to the better market")
 		return
 
-	# Did any agent at least initiate travel?
-	var trade_initiated: bool = false
+	# Diagnose failure: distinguish (a) still traveling, (b) departed but timed out,
+	# and (c) evaluation never triggered.
+	# Note: after travel_timeout, trade_route_active=false AND trade_sale_completed=true
+	# so only _last_trade_move_tick > 0 proves departure actually fired.
+	var mid_travel_count: int = 0
+	var departed_count: int = 0  # departed at some point (_last_trade_move_tick > 0)
 	for a in _collect_agents():
 		var job = a.get("current_job")
-		if job != null and job.get("trade_route_active") != null and job.trade_route_active:
-			trade_initiated = true
-			break
+		if job == null:
+			continue
+		if job.get("trade_route_active") == true:
+			mid_travel_count += 1
+		var last_move = job.get("_last_trade_move_tick")
+		if last_move != null and (last_move as int) > 0:
+			departed_count += 1
+		# Print per-agent state to aid debugging.
+		var cur = a.get("current_village_ref")
+		var home = a.get("home_village_ref")
+		var role_str: String = job.get_class() if job.has_method("get_class") else "?"
+		print("[TRADE TEST]   agent=%s role=%s current=%s home=%s route_active=%s last_move_tick=%s" % [
+			a.name, role_str,
+			cur.get("village_name") if cur != null and cur.get("village_name") != null else "null",
+			home.get("village_name") if home != null and home.get("village_name") != null else "null",
+			str(job.get("trade_route_active")), str(last_move)])
 
-	if trade_initiated:
-		_fail("Test 2: trade travel was initiated but agent did not arrive in %d ticks (check SPEED/distance)" % TRADE_ON_TICKS)
+	if mid_travel_count > 0:
+		_fail("Test 2: %d agent(s) mid-travel but did not arrive in %d ticks (check SPEED/distance/MAX_TRAVEL_TICKS)" % [
+			mid_travel_count, TRADE_ON_TICKS])
+	elif departed_count > 0:
+		_fail("Test 2: %d agent(s) departed ([TRADE DEPART] logged) but [TRADE MIGRATION COMPLETE] never fired in %d ticks — likely RouteRunner travel_timeout or collision block" % [
+			departed_count, TRADE_ON_TICKS])
 	else:
-		_fail("Test 2: no trade evaluation or migration in %d ticks despite V2 prices %.0f× higher (T2/T3 eval loop running?)" % [
+		_fail("Test 2: no trade evaluation or migration in %d ticks despite V2 prices %.0f× higher (T2/T3 eval loop running? home_village_ref/current_village_ref set?)" % [
 			TRADE_ON_TICKS, PRICE_MULTIPLIER])
 
 

@@ -25,7 +25,7 @@ const MIN_PROFIT_THRESHOLD: float = 0.3
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks an agent must remain in the arrived village before re-evaluating trade.
 ## Prevents immediate ping-pong after arrival.
-const TRADE_MIN_STAY_TICKS: int = 30
+const TRADE_MIN_STAY_TICKS: int = 200
 
 const WHEAT_RECIPE: Dictionary = {
 	"output_good": "wheat",
@@ -60,6 +60,8 @@ var trade_commit_until_tick: int = 0
 ## True once the sale attempt at the current destination has completed.
 ## Reset to false when a new trip begins; set to true after _on_trade_arrival() sells.
 var trade_sale_completed: bool = true
+## Tick of the last cross-village move. Used for [TRADE DEBUG] ping-pong detection.
+var _last_trade_move_tick: int = -1
 
 
 func get_display_name() -> String:
@@ -364,6 +366,9 @@ func _check_travel_timeout() -> void:
 		return
 	if route.is_traveling:
 		agent.travel_ticks += 1
+		# Cross-village trade trips are long — don't abort intentional trade travel.
+		if trade_route_active:
+			return
 		if agent.travel_ticks > agent.MAX_TRAVEL_TICKS:
 			var tname: String = route.target.name if route.target else "null"
 			print("[BUGFIX] Farmer: travel timeout reset after %d ticks (target=%s)" % [agent.travel_ticks, tname])
@@ -526,6 +531,9 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 	_trade_target_market_node = target_mkt_node
 	trade_route_active = true
 	trade_sale_completed = false
+	print('[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d' % [
+		agent.name, _last_trade_move_tick, agent.current_tick])
+	_last_trade_move_tick = agent.current_tick
 	print('[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s' % [
 		agent.current_village_ref.village_name, target_village.village_name, reason])
 	agent.pending_target = null

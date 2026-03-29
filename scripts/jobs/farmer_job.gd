@@ -23,11 +23,27 @@ const WAIT_TIME: float = 1.0
 ## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
 ## Reduces log noise; agents remain reactive without churning every 10 ticks.
 const TRADE_EVAL_INTERVAL: int = 30
-const MIN_PROFIT_THRESHOLD: float = 0.3
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks an agent must remain in the arrived village before re-evaluating trade.
 ## 200 ticks = 2 in-game days. Prevents ping-pong across a full production cycle.
 const TRADE_MIN_STAY_TICKS: int = 200
+
+# ── Trade decision thresholds ─────────────────────────────────────────────────
+## Minimum wheat held to justify an export trip. Below this, travel overhead > gain.
+const MIN_EXPORT_BATCH_WHEAT: int = 8
+## Required per-unit price edge (foreign_bid − local_bid, net of travel) for outbound trip.
+## Ensures the price difference is material, not a rounding artifact.
+const MIN_TRADE_EDGE: float = 0.40
+## Extra edge required when home market is NOT a bad outlet.
+## If home market is still reasonable, we demand a stronger reason to leave.
+const TRADE_EDGE_HOME_NOT_BLOCKED: float = 0.30
+## Minimum expected total trip gain (per_unit_edge × cargo_qty).
+## Prevents trips with valid per-unit edge but tiny cargo from burning travel time.
+const MIN_EXPORT_BATCH_VALUE: float = 4.0
+## Wheat fill ratio (wheat_qty / wheat_target) at or above which the home market
+## is considered a "bad outlet" — demand is weakening, time to look elsewhere.
+## 1.0 = exactly at target inventory; market bid has fallen to ~92% of reference price.
+const HOME_BAD_OUTLET_FILL_RATIO: float = 1.00
 
 const WHEAT_RECIPE: Dictionary = {
 	"output_good": "wheat",
@@ -52,6 +68,7 @@ var hysteresis_cooldown_ticks: int = 0
 var _initialized: bool = false
 var warned_no_field_today: bool = false
 
+
 # Inter-village trade state
 var trade_route_active: bool = false
 var trade_target_village: Node = null
@@ -65,9 +82,8 @@ var trade_sale_completed: bool = true
 ## Tick of the last cross-village move. Used for [TRADE DEBUG] ping-pong detection.
 var _last_trade_move_tick: int = -1
 ## Number of completed cross-village arrivals (incremented only in _on_trade_arrival).
-## Canonical migration-complete signal: non-zero means at least one trip finished.
+## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
-
 
 func get_display_name() -> String:
 	return "Farmer"
@@ -212,7 +228,7 @@ func _on_arrived(t: Node2D) -> void:
 		# Do NOT advance route_targets here — the farmer should stay at the arrived
 		# village until the commitment window expires and the eval loop decides
 		# the next move.  The idle guard will recover if nothing triggers a route.
-		route.wait(WAIT_TIME)
+		# Note: _on_trade_arrival() already calls route.wait(WAIT_TIME) in both branches.
 		return
 	handle_arrival(t)
 	agent.pending_target = get_next_target()
@@ -482,6 +498,77 @@ func _mark_trade_sale_completed(village_name: String, qty: int) -> void:
 		event_bus.log("[TRADE SALE COMPLETE] agent=Farmer village=%s qty=%d" % [village_name, qty])
 
 
+# ── Trade decision helpers ────────────────────────────────────────────────────
+
+## How much wheat the farmer can export right now.
+## All harvested wheat is exportable — operating reserve is seeds, not wheat.
+func get_exportable_surplus_qty() -> int:
+	if inv == null:
+		return 0
+	return inv.get_qty("wheat")
+
+
+## True when farmer holds enough wheat to justify the overhead of a trade trip.
+func has_exportable_surplus() -> bool:
+	return get_exportable_surplus_qty() >= MIN_EXPORT_BATCH_WHEAT
+
+
+## True when the current village market is a poor outlet for wheat.
+## Poor = buy-blocked by hysteresis OR wheat stock at/above target (demand weakening).
+func is_home_market_bad_outlet() -> bool:
+	if market == null:
+		return false
+	if market.is_market_buy_blocked("wheat"):
+		return true
+	if market.wheat_target > 0:
+		return float(market.wheat) / float(market.wheat_target) >= HOME_BAD_OUTLET_FILL_RATIO
+	return false
+
+
+## Per-unit price edge (target_price − local_price) net of travel cost per unit.
+## Returns -INF when the opportunity is structurally invalid (blocked or bad snapshot).
+func score_trade_opportunity(target_village: Node, local_snap: Dictionary) -> float:
+	var target_snap: Dictionary = target_village.get_trade_snapshot()
+	if target_snap.is_empty():
+		return -INF
+	if target_snap.get("wheat_buy_blocked", false):
+		return -INF
+	var surplus: int        = get_exportable_surplus_qty()
+	var local_price: float  = local_snap.get("wheat_price", 0.0)
+	var target_price: float = target_snap.get("wheat_price", 0.0)
+	var dist: float         = local_snap["world_pos"].distance_to(target_snap["world_pos"])
+	var travel_cost: float  = dist * TRAVEL_COST_PER_DISTANCE
+	var edge_per_unit: float = target_price - local_price
+	if edge_per_unit <= 0.0:
+		return -INF
+	return float(surplus) * edge_per_unit - travel_cost
+
+
+## True when all conditions are met for an outbound export trip.
+## Rules:
+##   - edge must exceed MIN_TRADE_EDGE per unit
+##   - if home market is NOT a bad outlet: edge must also exceed TRADE_EDGE_HOME_NOT_BLOCKED
+##   - total batch value must exceed MIN_EXPORT_BATCH_VALUE
+func should_depart_for_trade(target_village: Node, local_snap: Dictionary) -> bool:
+	if not has_exportable_surplus():
+		return false
+	var target_snap: Dictionary = target_village.get_trade_snapshot()
+	if target_snap.is_empty() or target_snap.get("wheat_buy_blocked", false):
+		return false
+	var local_price: float  = local_snap.get("wheat_price", 0.0)
+	var target_price: float = target_snap.get("wheat_price", 0.0)
+	var edge_per_unit: float = target_price - local_price
+	var required_edge: float = MIN_TRADE_EDGE
+	if not is_home_market_bad_outlet():
+		required_edge += TRADE_EDGE_HOME_NOT_BLOCKED
+	if edge_per_unit < required_edge:
+		return false
+	var batch_value: float = score_trade_opportunity(target_village, local_snap)
+	if batch_value < MIN_EXPORT_BATCH_VALUE:
+		return false
+	return true
+
+
 func _maybe_evaluate_trade(tick: int) -> void:
 	var world = _get_world()
 	if world == null or not world.trade_enabled:
@@ -500,40 +587,89 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	var local_snap: Dictionary = agent.current_village_ref.get_trade_snapshot()
 	if local_snap.is_empty():
 		return
-	var local_price: float = local_snap['wheat_price']
-	# If local market won't accept wheat at all, treat local profit as worthless
-	var local_profit: float = local_price if (market == null or not market.is_market_buy_blocked('wheat')) else -INF
+	var local_price: float  = local_snap.get("wheat_price", 0.0)
+	var surplus_qty: int    = get_exportable_surplus_qty()
+	var home_bad: bool      = is_home_market_bad_outlet()
 
-	var best_village: Node = null
-	var best_profit: float = local_profit + MIN_PROFIT_THRESHOLD
+	var local_sellable: bool = market != null and not market.is_market_buy_blocked("wheat")
+	if event_bus:
+		event_bus.log("[TRADE EVAL] agent=Farmer local_price=%.2f local_sellable=%s surplus=%d home_bad=%s" % [
+			local_price, local_sellable, surplus_qty, home_bad])
 
-	for village in world.get_all_villages():
-		if not is_instance_valid(village) or village == agent.current_village_ref:
-			continue
-		var snap: Dictionary = village.get_trade_snapshot()
-		if snap.is_empty():
-			continue
-		var dist: float = local_snap['world_pos'].distance_to(snap['world_pos'])
-		var travel_cost: float = dist * TRAVEL_COST_PER_DISTANCE
-		var expected_profit: float = snap['wheat_price'] - local_price - travel_cost
-		print('[TRADE EVAL] agent=Farmer local=%.2f best=%.2f target=%s' % [local_price, snap['wheat_price'], village.village_name])
-		if expected_profit > best_profit:
-			best_profit = expected_profit
-			best_village = village
+	var is_at_home: bool = (agent.current_village_ref == agent.home_village_ref)
 
-	if best_village != null:
-		_start_travel_to(best_village, 'profit')
-	elif agent.current_village_ref != agent.home_village_ref:
-		# Check if home is now more profitable — trigger return
+	if is_at_home:
+		# ── Outbound evaluation ───────────────────────────────────────────────
+		if not has_exportable_surplus():
+			if event_bus:
+				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=no_exportable_surplus qty=%d min=%d" % [
+					surplus_qty, MIN_EXPORT_BATCH_WHEAT])
+			return
+
+		var best_village: Node  = null
+		var best_edge: float    = -INF
+
+		for village in world.get_all_villages():
+			if not is_instance_valid(village) or village == agent.current_village_ref:
+				continue
+			var snap: Dictionary = village.get_trade_snapshot()
+			if snap.is_empty():
+				print("[TRADE EVAL OUTBOUND] target snap empty for village=%s" % village.name)
+				continue
+			var vname: String   = snap.get("village_name", village.name)
+			var edge: float     = score_trade_opportunity(village, local_snap)
+			if event_bus:
+				event_bus.log("[TRADE EVAL] agent=Farmer target=%s price=%.2f edge=%.2f" % [
+					vname, snap.get("wheat_price", 0.0), edge])
+			if should_depart_for_trade(village, local_snap) and edge > best_edge:
+				best_edge    = edge
+				best_village = village
+
+		if best_village != null:
+			if event_bus:
+				event_bus.log("[TRADE OPPORTUNITY] agent=Farmer from=%s to=%s qty=%d edge=%.2f" % [
+					agent.current_village_ref.village_name, best_village.village_name, surplus_qty, best_edge])
+			_start_travel_to(best_village, "profit", surplus_qty, best_edge)
+		else:
+			if event_bus:
+				var reason: String = "home_market_not_bad" if not home_bad else "no_opportunity_meets_threshold"
+				var required: float = MIN_TRADE_EDGE + (0.0 if home_bad else TRADE_EDGE_HOME_NOT_BLOCKED)
+				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=%s surplus=%d home_bad=%s required_edge=%.2f" % [
+					reason, surplus_qty, home_bad, required])
+	else:
+		# ── Return evaluation (currently at a foreign village) ────────────────
 		var home_snap: Dictionary = agent.home_village_ref.get_trade_snapshot()
-		if not home_snap.is_empty():
-			var home_profit: float = home_snap['wheat_price']
-			if home_profit > local_profit + MIN_PROFIT_THRESHOLD:
-				print('[TRADE RETURN] agent=Farmer returning to %s reason=price_shift' % agent.home_village_ref.village_name)
-				_start_travel_to(agent.home_village_ref, 'price_shift')
+		if home_snap.is_empty():
+			return
+		var home_price: float  = home_snap.get("wheat_price", 0.0)
+		var dist: float        = local_snap["world_pos"].distance_to(home_snap["world_pos"])
+		var return_cost: float = dist * TRAVEL_COST_PER_DISTANCE
+		# Total return value: price uplift per unit × held surplus − flat travel overhead.
+		var return_edge: float = (home_price - local_price) * float(surplus_qty) - return_cost
+		if event_bus:
+			event_bus.log("[TRADE EVAL] agent=Farmer return home_price=%.2f local_price=%.2f return_edge=%.2f surplus=%d" % [
+				home_price, local_price, return_edge, surplus_qty])
+		if surplus_qty < MIN_EXPORT_BATCH_WHEAT:
+			# Nothing left to sell here — return home unless home market is hard-blocked.
+			if not home_snap.get("wheat_buy_blocked", false):
+				_start_travel_to(agent.home_village_ref, "return_empty")
+			else:
+				if event_bus:
+					event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_buy_blocked cannot_return")
+		# return_edge is total batch value (edge × qty − travel). Allow return when foreign
+		# is not materially better — threshold: -25% of MIN_EXPORT_BATCH_VALUE = -1.0.
+		# Prevents permanent stranding when prices equalize at the foreign village.
+		elif return_edge >= -(MIN_EXPORT_BATCH_VALUE * 0.25):
+			if event_bus:
+				event_bus.log("[TRADE OPPORTUNITY] agent=Farmer returning home return_edge=%.2f" % return_edge)
+			_start_travel_to(agent.home_village_ref, "return")
+		else:
+			if event_bus:
+				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=foreign_materially_better home_price=%.2f local_price=%.2f return_edge=%.2f required>=%.2f" % [
+					home_price, local_price, return_edge, -(MIN_EXPORT_BATCH_VALUE * 0.25)])
 
 
-func _start_travel_to(target_village: Node, reason: String) -> void:
+func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, expected_edge: float = 0.0) -> void:
 	if trade_route_active and trade_target_village == target_village:
 		return  # Already heading there
 	if agent.current_village_ref == null:
@@ -550,12 +686,23 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
-	if event_bus:
-		event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
-			agent.current_village_ref.village_name, target_village.village_name, reason])
+	var from_name: String = agent.current_village_ref.village_name
+	var to_name: String = target_village.village_name
+	var is_return: bool = (target_village == agent.home_village_ref)
+	if is_return:
+		if event_bus:
+			event_bus.log("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
+		else:
+			print("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
+		trade_return_departed.emit(agent.current_village_ref, target_village)
 	else:
-		print("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
-			agent.current_village_ref.village_name, target_village.village_name, reason])
+		if event_bus:
+			event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
+				from_name, to_name, cargo_qty, expected_edge])
+		else:
+			print("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
+				from_name, to_name, cargo_qty, expected_edge])
+		trade_departed.emit(agent.current_village_ref, target_village)
 	# Stop any active wait/travel so set_target takes effect immediately,
 	# matching baker_job's _start_trade_travel() which also calls route.stop() first.
 	route.stop()
@@ -566,27 +713,20 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 func _on_trade_arrival() -> void:
 	var arrived_village: Node = trade_target_village
 	var arrived_market_node: Node2D = _trade_target_market_node
+	var is_home_return: bool = (arrived_village == agent.home_village_ref)
 
-	# Clear trade state before switching context
+	# Clear trip state
 	trade_route_active = false
 	trade_target_village = null
 	_trade_target_market_node = null
 
-	# Switch village context: all further market ops use the new village
+	# Canonical village context switch — ONLY here, never at eval or departure
 	agent.current_village_ref = arrived_village
-	# Canonical migration-complete: increment counter and log BEFORE any sale or commit work.
-	trade_arrival_count += 1
-	if event_bus:
-		event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
-			arrived_village.village_name, trade_arrival_count])
-	else:
-		print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
-			arrived_village.village_name, trade_arrival_count])
 	market = arrived_village.market
 	agent.market = arrived_village.market
 	market_node = arrived_market_node
 
-	# Rebind profit/throttle/food_reserve calculators to new market
+	# Rebind calculators to new market
 	if profit and market and event_bus:
 		profit.bind(market, event_bus, get_display_name())
 	if inventory_throttle and market and event_bus:
@@ -594,23 +734,37 @@ func _on_trade_arrival() -> void:
 	if food_reserve and market and event_bus:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
 
-	# Sell all wheat at new market (sale attempt always completes — full, partial, or zero)
-	var sold_qty: int = 0
-	if inv.get_qty("wheat") > 0:
-		var min_price: float = 0.0
-		if profit:
-			min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
-		var _cf_snap: float = agent.get_cash()
-		sold_qty = market.buy_wheat_from_farmer(agent, min_price)
-		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
-		var trade_profit: float = max(0.0, agent.get_cash() - _cf_snap)
-		print('[TRADE SALE] agent=Farmer village=%s qty=%d profit=+%.1f' % [
-			arrived_village.village_name, sold_qty, trade_profit])
-	# Mark cycle complete and open commitment window regardless of sale outcome
-	_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
-	_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
-	# Canonical migration-complete signal: current_village_ref already updated above.
-	if event_bus:
-		event_bus.log("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)
+	if is_home_return:
+		# ── Home return arrival ──────────────────────────────────────────────
+		if event_bus:
+			event_bus.log("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
+		else:
+			print("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
+		trade_return_arrived.emit(arrived_village)
+		trade_sale_completed = true
+		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
+		route.wait(WAIT_TIME)
 	else:
-		print("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)
+		# ── Foreign village arrival (migration complete) ──────────────────────
+		trade_arrival_count += 1
+		if event_bus:
+			event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+				arrived_village.village_name, trade_arrival_count])
+		else:
+			print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+				arrived_village.village_name, trade_arrival_count])
+		trade_arrived.emit(arrived_village)
+
+		# Sell wheat at foreign market
+		var sold_qty: int = 0
+		if inv.get_qty("wheat") > 0:
+			var min_price: float = 0.0
+			if profit:
+				min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
+			var _cf_snap: float = agent.get_cash()
+			sold_qty = market.buy_wheat_from_farmer(agent, min_price)
+			agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
+		# Canonical TRADE SALE COMPLETE log — fired by _mark_trade_sale_completed regardless of qty
+		_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
+		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
+		route.wait(WAIT_TIME)

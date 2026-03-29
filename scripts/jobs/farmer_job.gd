@@ -345,6 +345,12 @@ func on_day_changed(_day: int) -> void:
 
 func _on_travel_timeout(_t: Node2D) -> void:
 	agent.travel_ticks = 0
+	if trade_route_active:
+		trade_route_active = false
+		trade_target_village = null
+		_trade_target_market_node = null
+		trade_sale_completed = true
+		print("[BUGFIX] Farmer: trade travel timed out — trade state reset")
 	print("[BUGFIX] Farmer: travel timeout, restarting route")
 	if event_bus:
 		event_bus.log("[TRAVEL] Tick %d: Farmer travel timeout recovery - restarting route" % agent.current_tick)

@@ -264,6 +264,14 @@ func _on_wait_finished() -> void:
 func _on_travel_timeout(_t: Node2D) -> void:
 	agent.travel_ticks = 0
 	agent.idle_ticks = 0
+	if trade_route_active:
+		trade_route_active = false
+		trade_target_village = null
+		_trade_target_market_node = null
+		_intentional_cross_village = false
+		trade_sale_completed = true
+		if event_bus:
+			event_bus.log("[TRAVEL] Baker: trade travel timed out — trade state reset")
 	print("[BUGFIX] Baker: travel timeout, forcing RESTOCK")
 	if event_bus:
 		event_bus.log("[TRAVEL] Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % agent.current_tick)

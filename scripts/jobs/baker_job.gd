@@ -60,25 +60,28 @@ var hysteresis_cooldown_ticks: int = 0
 ## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
 ## Reduces log noise and churn; baker remains reactive without over-evaluating.
 const TRADE_EVAL_INTERVAL: int = 30
-## Travel cost per world unit of distance. Villages are ~2000 units apart.
+## Travel cost per world unit of distance (fixed trip overhead, not per-unit).
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks the baker must stay at a village after arrival before re-evaluating trade.
 ## Set to 200 — ~2 in-game days at 100 ticks/day; ~20% of inter-village travel time.
 const TRADE_MIN_STAY_TICKS: int = 200
-## Minimum bread qty (above personal reserve) to justify an export trip.
-## Below this the batch is too trivial to travel for.
-const MIN_EXPORT_BATCH_SIZE: int = 8
-## Minimum expected batch sale value (qty × local_price) to consider travel.
-## Prevents a tiny high-priced batch from triggering a trip.
-const MIN_EXPORT_BATCH_VALUE: float = 4.0
-## Bread price below this floor means the home market is a bad outlet (saturated).
-## Nominal bread ~1.0; 0.60 means the market is clearly over-supplied.
-const HOME_MARKET_BAD_PRICE_FLOOR: float = 0.60
-## Minimum total expected gain — (price_diff × surplus) − travel_cost — before departing.
-## Prevents chasing tiny per-unit spreads on small cargo. Must beat this as a batch.
-const MIN_TRADE_EDGE: float = 2.0
-## Bread kept back from export: personal food buffer + production continuity reserve.
-const BREAD_EXPORT_KEEP: int = 5
+## Minimum bread surplus (above home reserve) needed to justify an export trip.
+## Below this the batch is too trivial to cover travel time.
+const MIN_EXPORT_SURPLUS_BREAD: int = 15
+## Bread kept back from export: personal food buffer + local production continuity.
+## trade: exportable = total_bread - BREAD_HOME_RESERVE.
+const BREAD_HOME_RESERVE: int = 10
+## Required per-unit price edge (foreign_bid − local_bid, net of travel) for outbound trip.
+const MIN_TRADE_EDGE: float = 0.80
+## Extra edge required when home market is NOT a bad outlet.
+## If home market is still reasonable, we demand a stronger reason to leave.
+const TRADE_EDGE_HOME_NOT_BLOCKED: float = 0.60
+## Minimum expected total trip gain (per_unit_edge × cargo_qty − travel_cost).
+## Prevents trips with valid per-unit edge but tiny cargo from burning travel time.
+const MIN_EXPORT_BATCH_VALUE: float = 8.0
+## Bread fill ratio (bread_qty / bread_target) at or above which the home market
+## is considered a "bad outlet" — demand is weakening, bread is piling up.
+const HOME_BAD_OUTLET_FILL_RATIO: float = 1.00
 
 ## True while the baker is actively traveling to or operating at a foreign village.
 var trade_route_active: bool = false
@@ -814,69 +817,75 @@ func _get_world() -> Node:
 	return Engine.get_main_loop().current_scene.get_node_or_null("World")
 
 
-## Returns how many bread units are exportable (above personal food + production reserve).
+# ── Trade decision helpers ────────────────────────────────────────────────────
+
+## How much bread the baker can export right now (above personal + local reserve).
 func get_exportable_surplus_qty() -> int:
-	var bread: int = inv.get_qty("bread") if inv else 0
-	return maxi(0, bread - BREAD_EXPORT_KEEP)
+	if inv == null:
+		return 0
+	return max(0, inv.get_qty("bread") - BREAD_HOME_RESERVE)
 
 
-## True when the baker holds a meaningful export batch: enough units and enough value.
+## True when baker holds enough bread surplus to justify the overhead of a trade trip.
 func has_exportable_surplus() -> bool:
-	var surplus: int = get_exportable_surplus_qty()
-	if surplus < MIN_EXPORT_BATCH_SIZE:
-		return false
-	if agent.current_village_ref == null:
-		return false
-	var snap: Dictionary = agent.current_village_ref.get_trade_snapshot()
-	var local_price: float = snap.get("bread_price", 0.0)
-	return float(surplus) * local_price >= MIN_EXPORT_BATCH_VALUE
+	return get_exportable_surplus_qty() >= MIN_EXPORT_SURPLUS_BREAD
 
 
-## True when the local market is a bad outlet for bread:
-## hard-blocked from buying, or offering a price below the acceptable floor.
+## True when the current village market is a poor outlet for bread.
+## Poor = buy-blocked by hysteresis OR bread stock at/above target (demand weakening).
 func is_home_market_bad_outlet() -> bool:
-	if agent.current_village_ref == null:
+	if market == null:
 		return false
-	var snap: Dictionary = agent.current_village_ref.get_trade_snapshot()
-	if snap.get("bread_buy_blocked", false):
+	if market.is_market_buy_blocked("bread"):
 		return true
-	return snap.get("bread_price", 0.0) < HOME_MARKET_BAD_PRICE_FLOOR
+	if market.bread_target > 0:
+		return float(market.bread) / float(market.bread_target) >= HOME_BAD_OUTLET_FILL_RATIO
+	return false
 
 
-## Returns the total expected gain of selling exportable surplus at target_village
-## vs staying local, after deducting travel cost.
-## Positive = the trip nets that many coins over the local option.
-## Returns -INF if no surplus or invalid target.
-func score_trade_opportunity(target_village: Node) -> float:
-	if target_village == null or not is_instance_valid(target_village):
+## Expected total trip gain from selling surplus bread at target_village vs current market.
+## Returns -INF when opportunity is invalid. Positive means profitable trip.
+func score_trade_opportunity(target_village: Node, local_snap: Dictionary, cargo_qty: int) -> float:
+	if not is_instance_valid(target_village):
 		return -INF
-	var surplus: int = get_exportable_surplus_qty()
-	if surplus <= 0:
+	var target_snap: Dictionary = target_village.get_trade_snapshot()
+	if target_snap.is_empty():
 		return -INF
-	var local_snap: Dictionary = agent.current_village_ref.get_trade_snapshot() if agent.current_village_ref else {}
-	var foreign_snap: Dictionary = target_village.get_trade_snapshot()
-	if foreign_snap.is_empty():
+	if target_snap.get("bread_buy_blocked", false):
 		return -INF
-	if foreign_snap.get("bread_buy_blocked", false):
-		return -INF
-	if local_snap.is_empty():
-		return -INF
-	var local_price: float = local_snap.get("bread_price", 0.0)
-	var foreign_price: float = foreign_snap.get("bread_price", 0.0)
-	var dist: float = local_snap["world_pos"].distance_to(foreign_snap["world_pos"])
+	var local_bid: float   = local_snap.get("bread_price", 0.0)
+	var target_bid: float  = target_snap.get("bread_price", 0.0)
+	var local_pos: Vector2 = local_snap.get("world_pos", Vector2.ZERO)
+	var target_pos: Vector2 = target_snap.get("world_pos", Vector2.ZERO)
+	var dist: float        = local_pos.distance_to(target_pos)
 	var travel_cost: float = dist * TRAVEL_COST_PER_DISTANCE
-	# Total expected gain: price uplift per unit × batch size − travel overhead
-	return (foreign_price - local_price) * float(surplus) - travel_cost
+	var edge_per_unit: float = target_bid - local_bid
+	if edge_per_unit <= 0.0:
+		return -INF
+	return float(cargo_qty) * edge_per_unit - travel_cost
 
 
-## True when departing to target_village is justified: surplus exists and the total
-## expected gain clears the threshold (lower bar when home market is genuinely bad).
-func should_depart_for_trade(target_village: Node) -> bool:
-	if not has_exportable_surplus():
+## True when all conditions for an outbound export trip are satisfied.
+## Rules:
+##   - edge must exceed MIN_TRADE_EDGE per unit
+##   - if home market is NOT a bad outlet: edge must also exceed TRADE_EDGE_HOME_NOT_BLOCKED
+##   - total batch value must exceed MIN_EXPORT_BATCH_VALUE
+func should_depart_for_trade(target_village: Node, local_snap: Dictionary, cargo_qty: int) -> bool:
+	var batch_value: float = score_trade_opportunity(target_village, local_snap, cargo_qty)
+	if batch_value <= 0.0:
 		return false
-	var edge: float = score_trade_opportunity(target_village)
-	var threshold: float = MIN_TRADE_EDGE if not is_home_market_bad_outlet() else (MIN_TRADE_EDGE * 0.5)
-	return edge >= threshold
+	var local_bid: float     = local_snap.get("bread_price", 0.0)
+	var target_snap: Dictionary = target_village.get_trade_snapshot()
+	var target_bid: float    = target_snap.get("bread_price", 0.0)
+	var edge_per_unit: float = target_bid - local_bid
+	var required_edge: float = MIN_TRADE_EDGE
+	if not is_home_market_bad_outlet():
+		required_edge += TRADE_EDGE_HOME_NOT_BLOCKED
+	if edge_per_unit < required_edge:
+		return false
+	if batch_value < MIN_EXPORT_BATCH_VALUE:
+		return false
+	return true
 
 
 ## Called every tick. Checks whether the baker should travel to a better bread market.
@@ -910,72 +919,83 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		return
 
 	var local_snap: Dictionary = current_village.get_trade_snapshot()
-	var local_bid: float = local_snap.get("bread_price", 0.0)
-	var surplus: int = get_exportable_surplus_qty()
+	if local_snap.is_empty():
+		return
+
+	var local_bid: float  = local_snap.get("bread_price", 0.0)
+	var surplus_qty: int  = get_exportable_surplus_qty()
+	var home_bad: bool    = is_home_market_bad_outlet()
+	var is_at_home: bool  = (current_village == agent.home_village_ref)
 
 	if event_bus:
-		event_bus.log("[TRADE EVAL] agent=Baker local_price=%.2f local_sellable=%s surplus=%d" % [
-			local_bid, str(not local_snap.get("bread_buy_blocked", false)), surplus])
+		event_bus.log("[TRADE EVAL] agent=Baker local_bid=%.2f local_bread=%d surplus=%d home_bad=%s" % [
+			local_bid, inv.get_qty("bread") if inv else 0, surplus_qty, home_bad])
 
-	# ── Outbound trade: only when a meaningful export batch exists ───────────
-	if not has_exportable_surplus():
-		if event_bus:
-			event_bus.log("[TRADE BLOCKED] agent=Baker reason=no_exportable_surplus surplus=%d" % surplus)
-	else:
-		var home_bad: bool = is_home_market_bad_outlet()
-		# Require stronger edge when home market is still viable.
-		var edge_threshold: float = MIN_TRADE_EDGE if not home_bad else (MIN_TRADE_EDGE * 0.5)
+	if is_at_home:
+		# ── Outbound evaluation ───────────────────────────────────────────────
+		if not has_exportable_surplus():
+			if event_bus:
+				event_bus.log("[TRADE BLOCKED] agent=Baker reason=no_exportable_surplus surplus=%d min=%d" % [
+					surplus_qty, MIN_EXPORT_SURPLUS_BREAD])
+			return
 
-		var best_village = null
-		var best_edge: float = edge_threshold
+		var best_village: Node = null
+		var best_score: float  = -INF
+		var best_rejected_edge: float = -INF
 
 		for village in world.get_all_villages():
 			if not (village and is_instance_valid(village)):
 				continue
 			if village == current_village:
 				continue
-			var edge: float = score_trade_opportunity(village)
-			var vname: String = village.get("village_name") if village.get("village_name") else village.name
-			if edge > edge_threshold:
-				if event_bus:
-					event_bus.log("[TRADE OPPORTUNITY] agent=Baker from=%s to=%s qty=%d edge=%.2f threshold=%.2f" % [
-						local_snap.get("village_name", "?"), vname, surplus, edge, edge_threshold])
+			var snap: Dictionary = village.get_trade_snapshot()
+			if snap.is_empty():
+				continue
+			var vname: String = snap.get("village_name", village.name)
+			var edge_raw: float = snap.get("bread_price", 0.0) - local_bid
+			var score: float = score_trade_opportunity(village, local_snap, surplus_qty)
+			if event_bus:
+				event_bus.log("[TRADE EVAL] agent=Baker target=%s bid=%.2f edge=%.2f score=%.2f" % [
+					vname, snap.get("bread_price", 0.0), edge_raw, score])
+			if should_depart_for_trade(village, local_snap, surplus_qty):
+				if score > best_score:
+					best_score = score
+					best_village = village
 			else:
-				if event_bus:
-					event_bus.log("[TRADE BLOCKED] agent=Baker reason=insufficient_edge to=%s edge=%.2f threshold=%.2f" % [
-						vname, edge, edge_threshold])
-			if edge > best_edge:
-				best_edge = edge
-				best_village = village
+				if edge_raw > best_rejected_edge:
+					best_rejected_edge = edge_raw
 
 		if best_village != null:
-			_start_trade_travel(best_village, "profit")
-			return
-		elif home_bad:
+			var vname: String = best_village.get("village_name") if best_village.get("village_name") else best_village.name
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=no_sufficient_edge surplus=%d best_edge=%.2f" % [surplus, best_edge])
+				event_bus.log("[TRADE OPPORTUNITY] agent=Baker from=%s to=%s qty=%d score=%.2f" % [
+					current_village.get("village_name") if current_village.get("village_name") else current_village.name,
+					vname, surplus_qty, best_score])
+			_start_trade_travel(best_village, "profit", surplus_qty, best_score)
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=home_market_good_enough local_price=%.2f" % local_bid)
-
-	# ── Return home: when away and conditions favour going home ──────────────
-	var home_village = agent.home_village_ref
-	if current_village == home_village or home_village == null:
-		return
-	if not home_village.has_method("get_trade_snapshot"):
-		return
-
-	var home_snap: Dictionary = home_village.get_trade_snapshot()
-	var home_bid: float = home_snap.get("bread_price", 0.0)
-
-	# If surplus remains, use the full edge model for the return trip.
-	if surplus > 0:
-		var home_edge: float = score_trade_opportunity(home_village)
-		if home_edge >= MIN_TRADE_EDGE * 0.5:
-			_start_trade_travel(home_village, "return")
+				var reason: String = "home_market_not_bad" if not home_bad else "no_opportunity_meets_threshold"
+				var required: float = MIN_TRADE_EDGE + (0.0 if home_bad else TRADE_EDGE_HOME_NOT_BLOCKED)
+				event_bus.log("[TRADE BLOCKED] agent=Baker reason=%s surplus=%d home_bad=%s required_edge=%.2f best_rejected_edge=%.2f" % [
+					reason, surplus_qty, home_bad, required, best_rejected_edge])
 	else:
-		# Sold everything — no cargo left, return home unconditionally.
-		_start_trade_travel(home_village, "return")
+		# ── Return evaluation (currently at a foreign village) ────────────────
+		var home_village = agent.home_village_ref
+		if home_village == null or not home_village.has_method("get_trade_snapshot"):
+			return
+		var home_snap: Dictionary = home_village.get_trade_snapshot()
+		if home_snap.is_empty():
+			return
+		var home_bid: float   = home_snap.get("bread_price", 0.0)
+		var local_pos: Vector2 = local_snap.get("world_pos", Vector2.ZERO)
+		var home_pos: Vector2  = home_snap.get("world_pos", Vector2.ZERO)
+		var return_cost: float = local_pos.distance_to(home_pos) * TRAVEL_COST_PER_DISTANCE
+		var return_edge: float = home_bid - local_bid - return_cost
+		if event_bus:
+			event_bus.log("[TRADE EVAL] agent=Baker return home_bid=%.2f local_bid=%.2f return_edge=%.2f" % [
+				home_bid, local_bid, return_edge])
+		if return_edge >= MIN_TRADE_EDGE:
+			_start_trade_travel(home_village, "return")
 
 
 ## Initiates travel to target_village's market.

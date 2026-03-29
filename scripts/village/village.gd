@@ -603,6 +603,12 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	f.event_bus = event_bus
 	f.econ_stats = econ_stats
 	f.set_role("Farmer")
+	# Connect trade signals so this village is notified when the farmer arrives at or
+	# returns to any village. Signals are defined on JobBase and owned by the job node;
+	# Godot auto-disconnects when the job is freed (e.g., on role change or removal).
+	if f.current_job:
+		f.current_job.trade_arrived.connect(_on_agent_trade_arrived)
+		f.current_job.trade_return_arrived.connect(_on_agent_trade_return_arrived)
 
 	var f_hunger: HungerNeed = f.get_node("HungerNeed") as HungerNeed
 	var f_inv: Inventory = f.get_node("Inventory") as Inventory
@@ -686,6 +692,12 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	b.event_bus = event_bus
 	b.econ_stats = econ_stats
 	b.set_role("Baker")
+	# Connect trade signals so this village is notified when the baker arrives at or
+	# returns to any village. Signals are defined on JobBase and owned by the job node;
+	# Godot auto-disconnects when the job is freed (e.g., on role change or removal).
+	if b.current_job:
+		b.current_job.trade_arrived.connect(_on_agent_trade_arrived)
+		b.current_job.trade_return_arrived.connect(_on_agent_trade_return_arrived)
 
 	var b_hunger: HungerNeed = b.get_node("HungerNeed") as HungerNeed
 	var b_inv: Inventory = b.get_node("Inventory") as Inventory
@@ -1107,6 +1119,31 @@ func _get_next_baker_position() -> Vector2:
 	@warning_ignore("integer_division")
 	var row := (offset / 200) * 60
 	return Vector2(base_x + col, base_y + row)
+
+
+# ============================================================================
+# TRADE SIGNAL HANDLERS
+# ============================================================================
+
+## Called when any agent spawned by this village emits trade_arrived.
+## Fires after the agent's current_village_ref and all context refs are updated,
+## so runtime truth is already consistent when this handler runs.
+## If the agent arrived HERE, we have an opportunity to update village-level
+## agent-presence tracking (currently logged for observability only).
+func _on_agent_trade_arrived(arrived_village: Node) -> void:
+	if arrived_village == self:
+		if event_bus:
+			event_bus.log("[TRADE ARRIVE] village=%s: agent arrived (village notified via signal)" % village_name)
+
+
+## Called when any agent spawned by this village emits trade_return_arrived.
+## Fires after current_village_ref is switched back to home, so the agent is
+## already registered as home before this handler runs.
+## Currently a no-op aside from logging — home tracking is via current_village_ref.
+func _on_agent_trade_return_arrived(home_village: Node) -> void:
+	if home_village == self:
+		if event_bus:
+			event_bus.log("[TRADE RETURN ARRIVE] village=%s: agent returned home (village notified via signal)" % village_name)
 
 
 # ============================================================================

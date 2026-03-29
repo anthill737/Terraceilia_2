@@ -86,9 +86,8 @@ var trade_sale_completed: bool = true
 ## Used for [TRADE DEBUG] log to detect ping-ponging.
 var _last_trade_move_tick: int = -1
 ## Number of completed cross-village arrivals (incremented only in _on_trade_arrival).
-## Canonical migration-complete signal: non-zero means at least one trip finished.
+## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
-
 
 func get_display_name() -> String:
 	return "Baker"
@@ -869,10 +868,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		var home_snap: Dictionary = home_village.get_trade_snapshot()
 		var home_bid: float = home_snap.get("bread_price", 0.0)
 		if home_bid > local_bid + MIN_PROFIT_THRESHOLD:
-			var hname: String = home_snap.get("village_name", home_village.name)
-			if event_bus:
-				event_bus.log("[TRADE RETURN] agent=Baker returning to %s reason=price_shift" % hname)
-			_start_trade_travel(home_village, "price_shift")
+			_start_trade_travel(home_village, "return")
 
 
 ## Initiates travel to target_village's market.
@@ -893,11 +889,21 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	trade_sale_completed = false  # block re-evaluation until sale attempt resolves
 
 	var from_name: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
-	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
+	var to_name: String = target_village.get("village_name") if target_village.get("village_name") else target_village.name
+	var is_return: bool = (target_village == agent.home_village_ref)
 	if event_bus:
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [agent.name, _last_trade_move_tick, agent.current_tick])
-		event_bus.log("[TRADE DEPART] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
 	_last_trade_move_tick = agent.current_tick
+	var depart_tag: String = "[TRADE RETURN DEPART]" if is_return else "[TRADE DEPART]"
+	if event_bus:
+		event_bus.log("%s agent=Baker from=%s to=%s reason=%s" % [depart_tag, from_name, to_name, reason])
+	else:
+		print("%s agent=Baker from=%s to=%s reason=%s" % [depart_tag, from_name, to_name, reason])
+	# Emit departure signal. current_village_ref is still ORIGIN here.
+	if is_return:
+		trade_return_departed.emit(agent.current_village_ref, target_village)
+	else:
+		trade_departed.emit(agent.current_village_ref, target_village)
 
 	# Stop current activity and route to the target village's market.
 	production_state = ProductionState.IDLE
@@ -924,15 +930,9 @@ func _on_trade_arrival() -> void:
 	var arrived_village = trade_target_village
 	var is_home_return: bool = (arrived_village == agent.home_village_ref)
 
-	# Update agent and job market refs to arrived village.
+	# Switch village context: ONLY point where current_village_ref may change.
 	agent.current_village_ref = arrived_village
-	# Canonical migration-complete: increment counter immediately after village switch.
-	trade_arrival_count += 1
 	var vname_arrive: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
-	if event_bus:
-		event_bus.log("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
-	else:
-		print("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
 	var arrived_market: Market = arrived_village.get("market") as Market
 	var arrived_event_bus: EventBus = arrived_village.get("event_bus") as EventBus
 	if arrived_market:
@@ -958,14 +958,16 @@ func _on_trade_arrival() -> void:
 	trade_route_active = false
 
 	if is_home_return:
+		# ── Home return arrival ──────────────────────────────────────────────
+		if event_bus:
+			event_bus.log("[TRADE RETURN ARRIVE] agent=Baker village=%s" % vname_arrive)
+		else:
+			print("[TRADE RETURN ARRIVE] agent=Baker village=%s" % vname_arrive)
+		trade_return_arrived.emit(arrived_village)
 		# Returned home — restore market_location ref and resume normal cycle.
 		var home_market_node: Node2D = agent.home_village_ref.get("market_node") as Node2D
 		if home_market_node:
 			market_location = home_market_node
-		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
-		if event_bus:
-			event_bus.log("[TRADE RETURN] agent=Baker arrived home at %s" % vname)
-			event_bus.log("[TRADE MIGRATION COMPLETE] agent=Baker village=%s (home return)" % vname)
 		# Mark cycle complete and start commitment window so we don't immediately leave again.
 		trade_sale_completed = true
 		_begin_trade_commit_window()
@@ -975,8 +977,14 @@ func _on_trade_arrival() -> void:
 			agent.pending_target = market_location
 		route.wait(WAIT_TIME)
 	else:
+		# ── Foreign village arrival (migration complete) ──────────────────────
+		trade_arrival_count += 1
+		if event_bus:
+			event_bus.log("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
+		else:
+			print("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
+		trade_arrived.emit(arrived_village)
 		# Arrived at foreign village — attempt to sell all available bread.
-		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
 		var sellable: int = inv.get_qty("bread")
 		var sold: int = 0
 		if sellable > 0 and arrived_market != null:
@@ -984,16 +992,12 @@ func _on_trade_arrival() -> void:
 			sold = arrived_market.buy_bread_from_agent(agent, sellable, 0.0, false)
 			var earned: float = agent.get_cash() - snap_before
 			if event_bus:
-				event_bus.log("[TRADE SALE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname, sold, earned])
-			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname, earned])
+				event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname_arrive, sold, earned])
+			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname_arrive, earned])
 		elif event_bus:
-			event_bus.log("[TRADE SALE] agent=Baker village=%s no bread to sell" % vname)
+			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+0.0" % [vname_arrive, 0])
 		# Sale attempt is now resolved (success, partial, or blocked) — mark complete.
 		trade_sale_completed = true
-		if event_bus:
-			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d" % [vname, sold])
-			# Canonical migration-complete signal: current_village_ref already updated above.
-			event_bus.log("[TRADE MIGRATION COMPLETE] agent=Baker village=%s" % vname)
 		# Start commitment window so baker stays long enough for the market to react.
 		_begin_trade_commit_window()
 		# Explicitly clear route state before waiting (ensures is_traveling=false).

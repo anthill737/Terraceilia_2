@@ -18,6 +18,18 @@ var food_reserve: FoodReserve = null
 var market: Market = null
 var event_bus: EventBus = null
 
+## Emitted when the agent commits to an outbound cross-village trip.
+## Fires at departure — current_village_ref is still the ORIGIN village.
+signal trade_departed(from_village: Node, to_village: Node)
+## Emitted ONLY when the agent physically arrives at a FOREIGN village.
+## This is the canonical migration-complete signal.
+## Fires after current_village_ref, market, and all context refs are updated.
+signal trade_arrived(village: Node)
+## Emitted when the agent departs a foreign village to return home.
+signal trade_return_departed(from_village: Node, to_village: Node)
+## Emitted when the agent arrives back at their home village after a trade trip.
+signal trade_return_arrived(village: Node)
+
 
 func setup(a: Agent) -> void:
 	agent = a

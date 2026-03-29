@@ -65,9 +65,8 @@ var trade_sale_completed: bool = true
 ## Tick of the last cross-village move. Used for [TRADE DEBUG] ping-pong detection.
 var _last_trade_move_tick: int = -1
 ## Number of completed cross-village arrivals (incremented only in _on_trade_arrival).
-## Canonical migration-complete signal: non-zero means at least one trip finished.
+## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
-
 
 func get_display_name() -> String:
 	return "Farmer"
@@ -212,7 +211,7 @@ func _on_arrived(t: Node2D) -> void:
 		# Do NOT advance route_targets here — the farmer should stay at the arrived
 		# village until the commitment window expires and the eval loop decides
 		# the next move.  The idle guard will recover if nothing triggers a route.
-		route.wait(WAIT_TIME)
+		# Note: _on_trade_arrival() already calls route.wait(WAIT_TIME) in both branches.
 		return
 	handle_arrival(t)
 	agent.pending_target = get_next_target()
@@ -529,8 +528,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		if not home_snap.is_empty():
 			var home_profit: float = home_snap['wheat_price']
 			if home_profit > local_profit + MIN_PROFIT_THRESHOLD:
-				print('[TRADE RETURN] agent=Farmer returning to %s reason=price_shift' % agent.home_village_ref.village_name)
-				_start_travel_to(agent.home_village_ref, 'price_shift')
+				_start_travel_to(agent.home_village_ref, 'return')
 
 
 func _start_travel_to(target_village: Node, reason: String) -> void:
@@ -550,12 +548,21 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
-	if event_bus:
-		event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
-			agent.current_village_ref.village_name, target_village.village_name, reason])
+	var from_name: String = agent.current_village_ref.village_name
+	var to_name: String = target_village.village_name
+	var is_return: bool = (target_village == agent.home_village_ref)
+	if is_return:
+		if event_bus:
+			event_bus.log("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
+		else:
+			print("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
+		trade_return_departed.emit(agent.current_village_ref, target_village)
 	else:
-		print("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
-			agent.current_village_ref.village_name, target_village.village_name, reason])
+		if event_bus:
+			event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [from_name, to_name, reason])
+		else:
+			print("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [from_name, to_name, reason])
+		trade_departed.emit(agent.current_village_ref, target_village)
 	# Stop any active wait/travel so set_target takes effect immediately,
 	# matching baker_job's _start_trade_travel() which also calls route.stop() first.
 	route.stop()
@@ -566,27 +573,20 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 func _on_trade_arrival() -> void:
 	var arrived_village: Node = trade_target_village
 	var arrived_market_node: Node2D = _trade_target_market_node
+	var is_home_return: bool = (arrived_village == agent.home_village_ref)
 
-	# Clear trade state before switching context
+	# Clear trip state
 	trade_route_active = false
 	trade_target_village = null
 	_trade_target_market_node = null
 
-	# Switch village context: all further market ops use the new village
+	# Canonical village context switch — ONLY here, never at eval or departure
 	agent.current_village_ref = arrived_village
-	# Canonical migration-complete: increment counter and log BEFORE any sale or commit work.
-	trade_arrival_count += 1
-	if event_bus:
-		event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
-			arrived_village.village_name, trade_arrival_count])
-	else:
-		print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
-			arrived_village.village_name, trade_arrival_count])
 	market = arrived_village.market
 	agent.market = arrived_village.market
 	market_node = arrived_market_node
 
-	# Rebind profit/throttle/food_reserve calculators to new market
+	# Rebind calculators to new market
 	if profit and market and event_bus:
 		profit.bind(market, event_bus, get_display_name())
 	if inventory_throttle and market and event_bus:
@@ -594,23 +594,37 @@ func _on_trade_arrival() -> void:
 	if food_reserve and market and event_bus:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
 
-	# Sell all wheat at new market (sale attempt always completes — full, partial, or zero)
-	var sold_qty: int = 0
-	if inv.get_qty("wheat") > 0:
-		var min_price: float = 0.0
-		if profit:
-			min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
-		var _cf_snap: float = agent.get_cash()
-		sold_qty = market.buy_wheat_from_farmer(agent, min_price)
-		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
-		var trade_profit: float = max(0.0, agent.get_cash() - _cf_snap)
-		print('[TRADE SALE] agent=Farmer village=%s qty=%d profit=+%.1f' % [
-			arrived_village.village_name, sold_qty, trade_profit])
-	# Mark cycle complete and open commitment window regardless of sale outcome
-	_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
-	_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
-	# Canonical migration-complete signal: current_village_ref already updated above.
-	if event_bus:
-		event_bus.log("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)
+	if is_home_return:
+		# ── Home return arrival ──────────────────────────────────────────────
+		if event_bus:
+			event_bus.log("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
+		else:
+			print("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
+		trade_return_arrived.emit(arrived_village)
+		trade_sale_completed = true
+		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
+		route.wait(WAIT_TIME)
 	else:
-		print("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)
+		# ── Foreign village arrival (migration complete) ──────────────────────
+		trade_arrival_count += 1
+		if event_bus:
+			event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+				arrived_village.village_name, trade_arrival_count])
+		else:
+			print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+				arrived_village.village_name, trade_arrival_count])
+		trade_arrived.emit(arrived_village)
+
+		# Sell wheat at foreign market
+		var sold_qty: int = 0
+		if inv.get_qty("wheat") > 0:
+			var min_price: float = 0.0
+			if profit:
+				min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
+			var _cf_snap: float = agent.get_cash()
+			sold_qty = market.buy_wheat_from_farmer(agent, min_price)
+			agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
+		# Canonical TRADE SALE COMPLETE log — fired by _mark_trade_sale_completed regardless of qty
+		_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
+		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
+		route.wait(WAIT_TIME)

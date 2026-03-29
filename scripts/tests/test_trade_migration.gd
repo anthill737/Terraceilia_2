@@ -60,6 +60,12 @@ var _return_phase: int = 0
 var _away_at_flip: Array = []
 ## Agent state snapshot from DETERMINISM_A run: name → village_id.
 var _determ_state_a: Dictionary = {}
+## Agents whose trade_arrived signal fired during the current scenario.
+## Populated by _connect_trade_signals(); reset at start of each scenario.
+var _arrived_agents: Array = []
+## Set to true when trade_arrived signal fires on any agent's job.
+## This is the canonical migration-complete state the test observes.
+var _migration_completed: bool = false
 
 # ── Scene / simulation references ─────────────────────────────────────────────
 
@@ -94,6 +100,8 @@ func _begin_scenario(s: Scenario) -> void:
 	_frame = 0
 	_initialized = false
 	_return_phase = 0
+	_arrived_agents = []
+	_migration_completed = false
 	get_tree().paused = false
 
 	match s:
@@ -249,6 +257,22 @@ func _stabilize_agents() -> void:
 			if inv != null and inv.has_method("set_qty"):
 				inv.set_qty("bread", 100)
 	_reset_cashflow_counters()
+	_connect_trade_signals()
+
+
+## Connects trade_arrived signal from every agent's current_job.
+## Called after stabilize so current_job is guaranteed to be set.
+func _connect_trade_signals() -> void:
+	for a in _collect_agents():
+		var job = a.get("current_job")
+		if job == null or not job.has_signal("trade_arrived"):
+			continue
+		if not job.trade_arrived.is_connected(_on_any_trade_arrived):
+			job.trade_arrived.connect(_on_any_trade_arrived)
+
+
+func _on_any_trade_arrived(_village: Node) -> void:
+	_migration_completed = true
 
 
 ## Resets consecutive_days_negative_cashflow to 0 for all agents.
@@ -410,17 +434,21 @@ func _collect_agents() -> Array:
 	return out
 
 
-## Returns true if any agent has completed at least one cross-village arrival.
-## Primary signal: trade_arrival_count > 0 (set only in _on_trade_arrival, after
-## current_village_ref is updated — the canonical migration-complete event).
-## Fallback: current_village_ref != home_village_ref (agent is currently away).
+## Returns true if at least one agent has completed a cross-village arrival.
+## Primary: _migration_completed flag (set via trade_arrived signal, canonical).
+## Secondary: trade_arrival_count > 0 on any job (same moment, poll-based fallback).
+## Tertiary: current_village_ref != home_village_ref (current position check).
 func _any_agent_migrated() -> bool:
+	# Primary: signal-driven migration completion flag
+	if _migration_completed:
+		return true
+	# Secondary: polled canonical arrival counter
 	for a in _collect_agents():
 		var job = a.get("current_job")
-		# Primary canonical signal: incremented only at physical arrival completion.
 		if job != null and job.get("trade_arrival_count") != null and job.trade_arrival_count > 0:
 			return true
-		# Fallback: agent is currently at a foreign village.
+	# Tertiary: agent is currently at a foreign village
+	for a in _collect_agents():
 		var cur = a.get("current_village_ref")
 		var home = a.get("home_village_ref")
 		if cur != null and home != null and cur != home:
@@ -490,17 +518,18 @@ func _check_migration_occurred() -> void:
 		var cur = a.get("current_village_ref")
 		var home = a.get("home_village_ref")
 		var role_str: String = job.get_class() if job.has_method("get_class") else "?"
-		print("[TRADE TEST]   agent=%s role=%s current=%s home=%s route_active=%s last_move_tick=%s" % [
+		var arrival_count = job.get("trade_arrival_count")
+		print("[TRADE TEST]   agent=%s role=%s current=%s home=%s route_active=%s last_move_tick=%s arrival_count=%s" % [
 			a.name, role_str,
 			cur.get("village_name") if cur != null and cur.get("village_name") != null else "null",
 			home.get("village_name") if home != null and home.get("village_name") != null else "null",
-			str(job.get("trade_route_active")), str(last_move)])
+			str(job.get("trade_route_active")), str(last_move), str(arrival_count)])
 
 	if mid_travel_count > 0:
 		_fail("Test 2: %d agent(s) mid-travel but did not arrive in %d ticks (check SPEED/distance/MAX_TRAVEL_TICKS)" % [
 			mid_travel_count, TRADE_ON_TICKS])
 	elif departed_count > 0:
-		_fail("Test 2: %d agent(s) departed ([TRADE DEPART] logged) but [TRADE MIGRATION COMPLETE] never fired in %d ticks — likely RouteRunner travel_timeout or collision block" % [
+		_fail("Test 2: %d agent(s) departed ([TRADE DEPART] logged) but [TRADE ARRIVE] never fired in %d ticks — likely RouteRunner travel_timeout or collision block" % [
 			departed_count, TRADE_ON_TICKS])
 	else:
 		_fail("Test 2: no trade evaluation or migration in %d ticks despite V2 prices %.0f× higher (T2/T3 eval loop running? home_village_ref/current_village_ref set?)" % [

@@ -64,7 +64,8 @@ const MIN_PROFIT_THRESHOLD: float = 0.3
 ## Travel cost per world unit of distance. Villages are ~2000 units apart.
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks the baker must stay at a village after arrival before re-evaluating trade.
-const TRADE_MIN_STAY_TICKS: int = 50
+## ~1 in-game day at 100 ticks/day. Large enough to prevent ping-ponging.
+const TRADE_MIN_STAY_TICKS: int = 100
 
 ## True while the baker is actively traveling to or operating at a foreign village.
 var trade_route_active: bool = false
@@ -80,6 +81,9 @@ var trade_commit_until_tick: int = 0
 ## False while a sale attempt at the current destination is still pending.
 ## Evaluation is blocked until true. Initialized true (no pending cycle at start).
 var trade_sale_completed: bool = true
+## Tick on which the baker last initiated a cross-village trade move.
+## Used for [TRADE DEBUG] log to detect ping-ponging.
+var _last_trade_move_tick: int = -1
 
 
 func get_display_name() -> String:
@@ -880,6 +884,8 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
 	if event_bus:
 		event_bus.log("[TRADE MOVE] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
+		event_bus.log("[TRADE DEBUG] agent=Baker last_move_tick=%d current_tick=%d" % [_last_trade_move_tick, agent.current_tick])
+	_last_trade_move_tick = agent.current_tick
 
 	# Stop current activity and route to the target village's market.
 	production_state = ProductionState.IDLE
@@ -967,5 +973,7 @@ func _on_trade_arrival() -> void:
 			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d" % [vname, sold])
 		# Start commitment window so baker stays long enough for the market to react.
 		_begin_trade_commit_window()
+		# Explicitly clear route state before waiting (ensures is_traveling=false).
+		route.stop()
 		# Wait at destination — next trade eval tick will decide whether to return.
 		route.wait(WAIT_TIME)

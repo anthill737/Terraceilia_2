@@ -49,6 +49,12 @@ var sim_failed: bool = false
 var economy_config: Dictionary = {}
 var event_bus: EventBus = null
 
+# ── Trade flow counters — incremented by agent job on arrival/sale ─────────────
+var wheat_exported: int = 0   # total wheat sold by this village's agents abroad
+var wheat_imported: int = 0   # total wheat bought from agents arriving here
+var bread_exported: int = 0
+var bread_imported: int = 0
+
 # ── Spawn infrastructure ───────────────────────────────────────────────────────
 ## Scene used to instantiate all agent types (Farmer, Baker, Household).
 var AgentScene: PackedScene = null
@@ -368,6 +374,44 @@ func get_trade_snapshot() -> Dictionary:
 		"wheat_buy_blocked": market.wheat_market_buy_blocked,
 		"bread_buy_blocked": market.bread_market_buy_blocked,
 	}
+
+
+## Records goods exported by an agent belonging to this village (sold abroad).
+## Called by the agent's job script after completing a trade sale at a remote village.
+func record_trade_export(good: String, qty: int) -> void:
+	match good:
+		"wheat": wheat_exported += qty
+		"bread": bread_exported += qty
+
+
+## Records goods imported into this village (sold here by a visiting foreign agent).
+## Called by the agent's job script after completing a trade sale at this village.
+func record_trade_import(good: String, qty: int) -> void:
+	match good:
+		"wheat": wheat_imported += qty
+		"bread": bread_imported += qty
+
+
+## Returns a summary of cumulative trade flow for this village.
+## Positive net means more imported than exported (net receiver).
+func get_trade_flow_summary() -> Dictionary:
+	return {
+		"village":        village_name,
+		"wheat_exported": wheat_exported,
+		"wheat_imported": wheat_imported,
+		"bread_exported": bread_exported,
+		"bread_imported": bread_imported,
+		"net_wheat":      wheat_imported - wheat_exported,
+		"net_bread":      bread_imported - bread_exported,
+	}
+
+
+## Resets all trade flow counters to zero. Call at the start of each day.
+func reset_trade_flow_counters() -> void:
+	wheat_exported = 0
+	wheat_imported = 0
+	bread_exported = 0
+	bread_imported = 0
 
 
 func get_population_summary() -> Dictionary:

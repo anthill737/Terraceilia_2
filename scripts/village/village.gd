@@ -49,11 +49,8 @@ var sim_failed: bool = false
 var economy_config: Dictionary = {}
 var event_bus: EventBus = null
 
-# ── Trade flow counters — incremented by agent job on arrival/sale ─────────────
-var wheat_exported: int = 0   # total wheat sold by this village's agents abroad
-var wheat_imported: int = 0   # total wheat bought from agents arriving here
-var bread_exported: int = 0
-var bread_imported: int = 0
+# ── Trade service — owns flow counters + snapshot helper (Phase 6 extraction) ──
+var trade_service: VillageTradeService = null
 
 # ── Spawn infrastructure ───────────────────────────────────────────────────────
 ## Scene used to instantiate all agent types (Farmer, Baker, Household).
@@ -188,6 +185,13 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	market.name = "Market"
 	add_child(market)
 	market.process_mode = Node.PROCESS_MODE_PAUSABLE
+
+	# ── Trade service ──
+	trade_service = VillageTradeService.new()
+	trade_service.name = "VillageTradeService"
+	add_child(trade_service)
+	trade_service.process_mode = Node.PROCESS_MODE_PAUSABLE
+	trade_service.setup(self, market)
 
 	# Wire calendar signals
 	calendar.day_changed.connect(market.on_day_changed)
@@ -354,64 +358,39 @@ func get_market() -> Market:
 
 
 ## Returns a lightweight snapshot of this village's market for trade evaluation.
-## FarmerJob / BakerJob call this on every village to compute
-##   expected_profit = sell_price - local_price - travel_cost
-## and decide whether to travel here.
+## Delegates to VillageTradeService. FarmerJob / BakerJob call this on all villages.
 func get_trade_snapshot() -> Dictionary:
-	if market == null or not is_instance_valid(market):
+	if trade_service == null:
 		return {}
-	return {
-		"village_ref":       self,
-		"village_id":        village_id,
-		"village_name":      village_name,
-		"wheat_price":       market.get_bid_price("wheat"),
-		"bread_price":       market.get_bid_price("bread"),
-		"wheat_qty":         market.wheat,
-		"bread_qty":         market.bread,
-		"world_pos":         global_position,
-		"wheat_target":      market.wheat_target,
-		"bread_target":      market.bread_target,
-		"wheat_buy_blocked": market.wheat_market_buy_blocked,
-		"bread_buy_blocked": market.bread_market_buy_blocked,
-	}
+	return trade_service.get_trade_snapshot()
 
 
 ## Records goods exported by an agent belonging to this village (sold abroad).
-## Called by the agent's job script after completing a trade sale at a remote village.
+## Delegates to VillageTradeService.
 func record_trade_export(good: String, qty: int) -> void:
-	match good:
-		"wheat": wheat_exported += qty
-		"bread": bread_exported += qty
+	if trade_service:
+		trade_service.record_trade_export(good, qty)
 
 
 ## Records goods imported into this village (sold here by a visiting foreign agent).
-## Called by the agent's job script after completing a trade sale at this village.
+## Delegates to VillageTradeService.
 func record_trade_import(good: String, qty: int) -> void:
-	match good:
-		"wheat": wheat_imported += qty
-		"bread": bread_imported += qty
+	if trade_service:
+		trade_service.record_trade_import(good, qty)
 
 
 ## Returns a summary of cumulative trade flow for this village.
-## Positive net means more imported than exported (net receiver).
+## Delegates to VillageTradeService.
 func get_trade_flow_summary() -> Dictionary:
-	return {
-		"village":        village_name,
-		"wheat_exported": wheat_exported,
-		"wheat_imported": wheat_imported,
-		"bread_exported": bread_exported,
-		"bread_imported": bread_imported,
-		"net_wheat":      wheat_imported - wheat_exported,
-		"net_bread":      bread_imported - bread_exported,
-	}
+	if trade_service == null:
+		return {}
+	return trade_service.get_trade_flow_summary()
 
 
-## Resets all trade flow counters to zero. Call at the start of each day.
+## Resets all trade flow counters to zero. Delegates to VillageTradeService.
 func reset_trade_flow_counters() -> void:
-	wheat_exported = 0
-	wheat_imported = 0
-	bread_exported = 0
-	bread_imported = 0
+	if trade_service:
+		trade_service.reset_trade_flow_counters()
 
 
 func get_population_summary() -> Dictionary:

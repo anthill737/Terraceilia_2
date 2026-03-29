@@ -42,7 +42,7 @@ var all_field_nodes: Array:
 	get: return field_mgr.all_field_nodes if field_mgr else []
 
 # ── Career system state ────────────────────────────────────────────────────────
-var pending_conversions: Array = []
+var _labor_svc: LaborService = null
 var sim_failed: bool = false
 
 # ── Economy state ─────────────────────────────────────────────────────────────
@@ -283,8 +283,13 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.all_farmers = all_farmers
 	labor_market.all_bakers = all_bakers
 	labor_market.all_households = households
-	labor_market.migrate_requested.connect(_on_migrate_requested)
-	labor_market.role_switch_requested.connect(_on_role_switch_requested)
+	# ── Labor service ──
+	_labor_svc = LaborService.new()
+	_labor_svc.name = "LaborService"
+	add_child(_labor_svc)
+	_labor_svc.bind(pop_mgr, field_mgr, bus)
+	labor_market.migrate_requested.connect(_labor_svc.handle_migrate_requested)
+	labor_market.role_switch_requested.connect(_labor_svc.handle_role_switch_requested)
 
 	# Bind econ_stats to per-village arrays
 	econ_stats.bind_agents(pop_mgr.all_farmers, pop_mgr.all_bakers, pop_mgr.households)
@@ -600,71 +605,8 @@ func _on_calendar_day_changed(day: int) -> void:
 		if event_bus:
 			event_bus.log("[SIM FAIL] Population extinct on day %d" % day)
 
-	var still_pending: Array = []
-	for entry in pending_conversions:
-		var h = entry["household"]
-		var role: String = entry["role"]
-		var days_left: int = entry["days_remaining"] - 1
-		if not is_instance_valid(h):
-			continue
-		if days_left <= 0:
-			_perform_role_conversion(h, role)
-		else:
-			entry["days_remaining"] = days_left
-			still_pending.append(entry)
-	pending_conversions = still_pending
-
-
-func _on_migrate_requested(agent: Node, reason: String) -> void:
-	if not is_instance_valid(agent):
-		return
-	if event_bus:
-		event_bus.log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
-
-	var h_idx := households.find(agent)
-	if h_idx != -1:
-		households.remove_at(h_idx)
-		agent.remove_from_group("households")
-		agent.remove_from_group("agents")
-
-	var f_idx := all_farmers.find(agent)
-	if f_idx != -1:
-		all_farmers.remove_at(f_idx)
-		for fn in all_field_nodes:
-			if is_instance_valid(fn) and field_assignment_map.get(fn, null) == agent:
-				field_assignment_map[fn] = null
-		if agent.has_method("clear_fields_for_removal"):
-			agent.clear_fields_for_removal()
-
-	var b_idx := all_bakers.find(agent)
-	if b_idx != -1:
-		all_bakers.remove_at(b_idx)
-
-	pending_conversions = pending_conversions.filter(func(e): return is_instance_valid(e["household"]) and e["household"] != agent)
-
-	if agent.has_method("log_event"):
-		agent.log_event("Left town — %s." % reason)
-	var _migrated_name: String = agent.name
-	agent.queue_free()
-	if event_bus:
-		event_bus.log("[MIGRATE CONFIRM] %s removed (reason: %s)" % [_migrated_name, reason])
-
-
-func _on_role_switch_requested(household: Node, new_role: String) -> void:
-	if not is_instance_valid(household):
-		return
-
-	for entry in pending_conversions:
-		if entry["household"] == household:
-			return
-
-	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
-	if event_bus:
-		event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
-	if household.has_method("log_event"):
-		household.log_event("Started training to become a %s (%d days to go)." % [new_role.capitalize(), training_days])
-
-	pending_conversions.append({"household": household, "role": new_role, "days_remaining": training_days})
+	if _labor_svc:
+		_labor_svc.tick_day(Callable(self, "_perform_role_conversion"))
 
 
 func _perform_role_conversion(household: Node, role: String) -> void:

@@ -68,14 +68,6 @@ var hysteresis_cooldown_ticks: int = 0
 var _initialized: bool = false
 var warned_no_field_today: bool = false
 
-## Emitted when the farmer departs for a foreign village (cargo on board, origin ctx still active).
-signal trade_departed(from_village: Node, to_village: Node)
-## Emitted when the farmer departs back toward home village.
-signal trade_return_departed(from_village: Node, to_village: Node)
-## Emitted immediately after current_village_ref switches on arrival at a foreign village.
-signal trade_arrived(village: Node)
-## Emitted immediately after current_village_ref switches back to home village.
-signal trade_return_arrived(village: Node)
 
 # Inter-village trade state
 var trade_route_active: bool = false
@@ -622,6 +614,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 				continue
 			var snap: Dictionary = village.get_trade_snapshot()
 			if snap.is_empty():
+				print("[TRADE EVAL OUTBOUND] target snap empty for village=%s" % village.name)
 				continue
 			var vname: String   = snap.get("village_name", village.name)
 			var edge: float     = score_trade_opportunity(village, local_snap)

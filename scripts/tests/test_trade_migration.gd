@@ -250,6 +250,9 @@ func _stabilize_agents() -> void:
 			var inv = f.get("inv")
 			if inv != null and inv.has_method("set_qty"):
 				inv.set_qty("bread", 100)
+				# Give farmers a wheat surplus so has_exportable_surplus() passes
+				# on tick 30 eval. Without this, farmers hold 0 wheat and never trade.
+				inv.set_qty("wheat", 50)
 		for b in v.all_bakers:
 			if b == null or not is_instance_valid(b):
 				continue
@@ -315,11 +318,16 @@ func _set_v2_prices_high() -> void:
 		return
 	v1.market.wheat_price = BASE_WHEAT_PRICE
 	v1.market.bread_price = BASE_BREAD_PRICE
-	v1.market.wheat_market_buy_blocked = false
-	v1.market.bread_market_buy_blocked = false
-	# Set V1 inventory at target so bid multiplier ≈ 1.0 (neutral).
+	# Block V1 market by filling it to capacity.
+	# The new decision model requires has_exportable_surplus() AND a bad local outlet.
+	# Setting capacity = target and inventory = target means available_space = 0 so
+	# buy_wheat_from_farmer / buy_bread_from_agent both return 0 — agents hold surplus.
+	v1.market.wheat_capacity = v1.market.wheat_target
 	v1.market.wheat = v1.market.wheat_target
+	v1.market.wheat_market_buy_blocked = true   # is_home_market_bad_outlet() reads this
+	v1.market.bread_capacity = v1.market.bread_target
 	v1.market.bread = v1.market.bread_target
+	v1.market.bread_market_buy_blocked = true   # is_home_market_bad_outlet() reads this
 	v2.market.wheat_price = BASE_WHEAT_PRICE * PRICE_MULTIPLIER
 	v2.market.bread_price = BASE_BREAD_PRICE * PRICE_MULTIPLIER
 	v2.market.wheat_market_buy_blocked = false
@@ -328,7 +336,7 @@ func _set_v2_prices_high() -> void:
 	# effective bid is at least wheat_price × 1.10, well above migration threshold.
 	v2.market.wheat = 0
 	v2.market.bread = 0
-	print("[TRADE TEST] Prices set: V1 wheat=%.1f bread=%.1f | V2 wheat=%.1f bread=%.1f (V2 inv cleared for neutral bid)" % [
+	print("[TRADE TEST] Prices set: V1 wheat=%.1f bread=%.1f (BLOCKED) | V2 wheat=%.1f bread=%.1f (V2 inv cleared)" % [
 		BASE_WHEAT_PRICE, BASE_BREAD_PRICE,
 		BASE_WHEAT_PRICE * PRICE_MULTIPLIER, BASE_BREAD_PRICE * PRICE_MULTIPLIER])
 
@@ -349,6 +357,10 @@ func _set_v1_prices_high() -> void:
 	v1.market.bread_price = BASE_BREAD_PRICE * PRICE_MULTIPLIER
 	v1.market.wheat_market_buy_blocked = false
 	v1.market.bread_market_buy_blocked = false
+	# Restore V1 capacity (was capped by _set_v2_prices_high to block selling).
+	# V1 is now the good outlet — agents need to be able to sell here on return.
+	v1.market.wheat_capacity = 999999999
+	v1.market.bread_capacity = 999999999
 	v1.market.wheat = 0  # empty V1 → scarcity premium bid
 	v1.market.bread = 0
 	v2.market.wheat_price = BASE_WHEAT_PRICE
@@ -357,7 +369,7 @@ func _set_v1_prices_high() -> void:
 	v2.market.bread_market_buy_blocked = false
 	v2.market.wheat = v2.market.wheat_target  # V2 at target → neutral bid
 	v2.market.bread = v2.market.bread_target
-	print("[TRADE TEST] Prices flipped: V1 wheat=%.1f bread=%.1f (high) | V2 wheat=%.1f bread=%.1f (low)" % [
+	print("[TRADE TEST] Prices flipped: V1 wheat=%.1f bread=%.1f (high, open) | V2 wheat=%.1f bread=%.1f (low)" % [
 		BASE_WHEAT_PRICE * PRICE_MULTIPLIER, BASE_BREAD_PRICE * PRICE_MULTIPLIER,
 		BASE_WHEAT_PRICE, BASE_BREAD_PRICE])
 

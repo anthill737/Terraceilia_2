@@ -1,10 +1,11 @@
 extends Node
 
-## Headless trade-migration test suite. Validates four scenarios:
+## Headless trade-migration test suite. Validates five scenarios:
 ##   1. TRADE_OFF  — no agent crosses village boundaries when trade disabled
 ##   2. TRADE_ON   — agents migrate when a better market exists and trade is enabled
 ##   3. RETURN     — agents return home once home market becomes more profitable
 ##   4. DETERMINISM — same RNG seed produces identical movement patterns
+##   5. IDENTICAL  — equal prices + unblocked markets → little/no trade
 ##
 ## Depends on T2 (FarmerJob trade eval loop) and T3 (BakerJob trade eval loop).
 ##
@@ -27,6 +28,7 @@ const TRADE_ON_TICKS: int = 300       # eval (30) + travel (~100) + arrival marg
 const RETURN_MIGRATE_TICKS: int = 300 # Same: allow full migration
 const RETURN_FLIP_TICKS: int = 300    # After price flip: allow full return travel
 const DETERM_TICKS: int = 300         # Enough to capture post-arrival state
+const IDENTICAL_TICKS: int = 300      # Test 5: equal prices, unblocked → no trade
 
 ## How much higher the "attractive" village prices are vs the home village.
 ## 3× is well above any travel cost the spec mandates, ensuring migration triggers.
@@ -47,6 +49,7 @@ enum Scenario {
 	RETURN,         ## Test 3: migration then price flip → return expected
 	DETERMINISM_A,  ## Test 4a: first run, record agent state
 	DETERMINISM_B,  ## Test 4b: second run, compare state
+	IDENTICAL,      ## Test 5: equal prices, unblocked markets → little/no trade
 }
 
 var _scenario: Scenario = Scenario.TRADE_OFF
@@ -87,6 +90,7 @@ func _ready() -> void:
 	print("[TRADE TEST]   2: Trade ON    — profitable migration occurs")
 	print("[TRADE TEST]   3: Return      — agents come home after price flip")
 	print("[TRADE TEST]   4: Determinism — identical seeds → identical movement")
+	print("[TRADE TEST]   5: Identical   — equal prices, unblocked → little/no trade")
 	print("[TRADE TEST] ═══════════════════════════════════════════════════════")
 	# Defer so root is no longer busy setting up children before we add _main under it.
 	call_deferred("_begin_scenario", Scenario.TRADE_OFF)
@@ -122,6 +126,9 @@ func _begin_scenario(s: Scenario) -> void:
 			print("\n[TRADE TEST] ── Test 4b: Determinism run B (seed=%d) ──" % DETERM_SEED)
 			seed(DETERM_SEED)
 			_ticks_remaining = DETERM_TICKS
+		Scenario.IDENTICAL:
+			print("\n[TRADE TEST] ── Test 5: Identical Villages (no trade incentive) ──")
+			_ticks_remaining = IDENTICAL_TICKS
 
 	var scene: PackedScene = load("res://scenes/Main.tscn")
 	if scene == null:
@@ -215,6 +222,11 @@ func _setup_scenario() -> void:
 			if _world:
 				_world.trade_enabled = true
 			_set_v2_prices_high()
+
+		Scenario.IDENTICAL:
+			if _world:
+				_world.trade_enabled = true
+			_set_identical_prices()
 
 
 ## Moves Village 2 to 250 px east of Village 1 so agents can complete the trip
@@ -374,6 +386,35 @@ func _set_v1_prices_high() -> void:
 		BASE_WHEAT_PRICE, BASE_BREAD_PRICE])
 
 
+## Set identical prices on both villages — no incentive to trade.
+## Both markets are open and at half-target inventory (neutral bid multiplier).
+func _set_identical_prices() -> void:
+	if _world == null:
+		return
+	var villages: Array = _world.get_all_villages()
+	if villages.size() < 2:
+		return
+	var v1 = villages[0]
+	var v2 = villages[1]
+	if v1 == null or v1.market == null or v2 == null or v2.market == null:
+		return
+	# Set identical prices — no incentive to trade
+	v1.market.wheat_price = BASE_WHEAT_PRICE
+	v1.market.bread_price = BASE_BREAD_PRICE
+	v2.market.wheat_price = BASE_WHEAT_PRICE
+	v2.market.bread_price = BASE_BREAD_PRICE
+	# Both markets open and at normal inventory — neither is a bad outlet
+	v1.market.wheat_market_buy_blocked = false
+	v1.market.bread_market_buy_blocked = false
+	v2.market.wheat_market_buy_blocked = false
+	v2.market.bread_market_buy_blocked = false
+	v1.market.wheat = v1.market.wheat_target / 2
+	v1.market.bread = v1.market.bread_target / 2
+	v2.market.wheat = v2.market.wheat_target / 2
+	v2.market.bread = v2.market.bread_target / 2
+	print("[TRADE TEST] Identical prices set: both V1+V2 wheat=%.1f bread=%.1f (unblocked)" % [BASE_WHEAT_PRICE, BASE_BREAD_PRICE])
+
+
 # ── Scenario evaluation ───────────────────────────────────────────────────────
 
 func _evaluate_and_advance() -> void:
@@ -423,6 +464,11 @@ func _evaluate_and_advance() -> void:
 		Scenario.DETERMINISM_B:
 			var state_b: Dictionary = _snapshot_agent_villages()
 			_check_determinism(_determ_state_a, state_b)
+			_teardown()
+			call_deferred("_begin_scenario", Scenario.IDENTICAL)
+
+		Scenario.IDENTICAL:
+			_check_no_trade_identical()
 			_teardown()
 			_finish()
 
@@ -604,6 +650,27 @@ func _check_determinism(state_a: Dictionary, state_b: Dictionary) -> void:
 	else:
 		_fail("Test 4: %d/%d agent state mismatch(es) between determinism runs" % [
 			mismatches, state_a.size()])
+
+
+## Test 5: assert no agent left their home village when prices are identical and
+## both markets are unblocked (no economic incentive to trade).
+func _check_no_trade_identical() -> void:
+	var violations: int = 0
+	for a in _collect_agents():
+		var cur = a.get("current_village_ref")
+		var home = a.get("home_village_ref")
+		if cur == null or home == null:
+			continue
+		if cur != home:
+			violations += 1
+			print("[TRADE TEST]   VIOLATION: %s moved to %s (home: %s)" % [
+				a.name,
+				cur.village_name if cur.get("village_name") != null else "?",
+				home.village_name if home.get("village_name") != null else "?"])
+	if violations == 0:
+		print("[TRADE TEST] PASS: Test 5 — no agent migrated with identical prices and unblocked markets")
+	else:
+		_fail("Test 5: %d agent(s) migrated despite no price incentive (identical villages)" % violations)
 
 
 # ── Suite completion ──────────────────────────────────────────────────────────

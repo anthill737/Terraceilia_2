@@ -85,6 +85,13 @@ var _last_trade_move_tick: int = -1
 ## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
 
+# Phase 3 telemetry counters
+var trips_taken: int = 0
+var successful_trades: int = 0
+var failed_trades: int = 0
+## Tick at which the last outbound trip departed; -1 if no trip has started.
+var _trip_depart_tick: int = -1
+
 func get_display_name() -> String:
 	return "Farmer"
 
@@ -370,10 +377,16 @@ func on_day_changed(_day: int) -> void:
 func _on_travel_timeout(_t: Node2D) -> void:
 	agent.travel_ticks = 0
 	if trade_route_active:
+		var _timeout_target_name: String = trade_target_village.village_name if trade_target_village else "unknown"
+		var _timeout_from_name: String = agent.home_village_ref.village_name if agent.home_village_ref else "unknown"
 		trade_route_active = false
 		trade_target_village = null
 		_trade_target_market_node = null
 		trade_sale_completed = true
+		failed_trades += 1
+		if event_bus:
+			event_bus.log("[TRADE FLOW] agent=Farmer from=%s to=%s good=wheat qty=0 depart_tick=%d arrive_tick=%d profit=+0.0 note=timeout" % [
+				_timeout_from_name, _timeout_target_name, _trip_depart_tick, agent.current_tick])
 		# Open commit window so agent cannot immediately retry the failed trip.
 		var cv_name: String = agent.current_village_ref.village_name if agent.current_village_ref else "unknown"
 		_begin_trade_commit_window(agent.current_tick, cv_name)
@@ -696,6 +709,8 @@ func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, 
 			print("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
 		trade_return_departed.emit(agent.current_village_ref, target_village)
 	else:
+		trips_taken += 1
+		_trip_depart_tick = agent.current_tick
 		if event_bus:
 			event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
 				from_name, to_name, cargo_qty, expected_edge])
@@ -766,5 +781,22 @@ func _on_trade_arrival() -> void:
 			agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
 		# Canonical TRADE SALE COMPLETE log — fired by _mark_trade_sale_completed regardless of qty
 		_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
+		# Phase 3 telemetry: [TRADE FLOW] with per-trip metrics
+		var _flow_home_name: String = agent.home_village_ref.village_name if agent.home_village_ref else "unknown"
+		var _flow_home_snap: Dictionary = agent.home_village_ref.get_trade_snapshot() if agent.home_village_ref else {}
+		var _flow_arr_snap: Dictionary = arrived_village.get_trade_snapshot()
+		var _flow_home_bid: float = _flow_home_snap.get("wheat_price", 0.0)
+		var _flow_arr_bid: float = _flow_arr_snap.get("wheat_price", 0.0)
+		var _flow_dist: float = 0.0
+		if _flow_home_snap.has("world_pos") and _flow_arr_snap.has("world_pos"):
+			_flow_dist = (_flow_home_snap["world_pos"] as Vector2).distance_to(_flow_arr_snap["world_pos"] as Vector2)
+		var _flow_profit: float = float(sold_qty) * (_flow_arr_bid - _flow_home_bid) - TRAVEL_COST_PER_DISTANCE * _flow_dist
+		if sold_qty > 0:
+			successful_trades += 1
+		else:
+			failed_trades += 1
+		if event_bus:
+			event_bus.log("[TRADE FLOW] agent=Farmer from=%s to=%s good=wheat qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
+				_flow_home_name, arrived_village.village_name, sold_qty, _trip_depart_tick, agent.current_tick, _flow_profit])
 		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
 		route.wait(WAIT_TIME)

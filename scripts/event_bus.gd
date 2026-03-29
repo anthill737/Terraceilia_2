@@ -23,11 +23,15 @@ func log(msg: String) -> void:
 ## data must contain: agent, from_village, to_village, good, qty, profit, tick
 func log_trade_flow(data: Dictionary) -> void:
 	trade_flow.emit(data)
-	self.log("[TRADE FLOW] agent=%s from=%s to=%s good=%s qty=%d profit=%.2f" % [
+	var _msg: String = "[TRADE FLOW] agent=%s from=%s to=%s good=%s qty=%d profit=%.2f" % [
 		data.get("agent", "?"),
 		data.get("from_village", "?"),
 		data.get("to_village", "?"),
 		data.get("good", "?"),
 		data.get("qty", 0),
 		data.get("profit", 0.0),
-	])
+	]
+	if village_label.is_empty():
+		event_logged.emit(_msg)
+	else:
+		event_logged.emit(village_label + " " + _msg)

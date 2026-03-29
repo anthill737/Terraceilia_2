@@ -1000,7 +1000,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 
 ## Initiates travel to target_village's market.
 ## Sets all trade state, flags intentional cross-village, and routes via market_node.
-func _start_trade_travel(target_village: Node, reason: String) -> void:
+func _start_trade_travel(target_village: Node, reason: String, cargo_qty: int = 0, expected_score: float = 0.0) -> void:
 	if target_village == null or not is_instance_valid(target_village):
 		return
 	var target_market_node: Node2D = target_village.get("market_node") as Node2D
@@ -1021,20 +1021,19 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	if event_bus:
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
-	var depart_tag: String = "[TRADE RETURN DEPART]" if is_return else "[TRADE DEPART]"
-	var cargo_qty: int = get_exportable_surplus_qty()
-	# score_trade_opportunity returns -INF when surplus=0 (return-empty trips); show 0 instead.
-	var expected_edge: float = score_trade_opportunity(target_village) if cargo_qty > 0 else 0.0
-	if event_bus:
-		event_bus.log("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_edge=%.2f reason=%s" % [
-			depart_tag, from_name, to_name, cargo_qty, expected_edge, reason])
-	else:
-		print("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_edge=%.2f reason=%s" % [
-			depart_tag, from_name, to_name, cargo_qty, expected_edge, reason])
-	# Emit departure signal. current_village_ref is still ORIGIN here.
 	if is_return:
+		if event_bus:
+			event_bus.log("[TRADE RETURN DEPART] agent=Baker from=%s to=%s" % [from_name, to_name])
+		else:
+			print("[TRADE RETURN DEPART] agent=Baker from=%s to=%s" % [from_name, to_name])
 		trade_return_departed.emit(agent.current_village_ref, target_village)
 	else:
+		if event_bus:
+			event_bus.log("[TRADE DEPART] agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f" % [
+				from_name, to_name, cargo_qty, expected_score])
+		else:
+			print("[TRADE DEPART] agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f" % [
+				from_name, to_name, cargo_qty, expected_score])
 		trade_departed.emit(agent.current_village_ref, target_village)
 
 	# Stop current activity and route to the target village's market.

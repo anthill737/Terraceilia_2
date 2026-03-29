@@ -660,8 +660,15 @@ func _maybe_evaluate_trade(tick: int) -> void:
 			# Nothing left to sell here — return home unless home market is hard-blocked.
 			if not home_snap.get("wheat_buy_blocked", false):
 				_start_travel_to(agent.home_village_ref, "return_empty")
+			else:
+				if event_bus:
+					event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_buy_blocked cannot_return")
 		elif return_edge >= MIN_TRADE_EDGE:
 			_start_travel_to(agent.home_village_ref, "return")
+		else:
+			if event_bus:
+				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_not_better_yet home_price=%.2f local_price=%.2f return_edge=%.2f" % [
+					home_price, local_price, return_edge])
 
 
 func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, expected_edge: float = 0.0) -> void:

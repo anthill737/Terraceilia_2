@@ -5,8 +5,6 @@ extends Node
 var village: Village = null
 ## WorldManager node — exposes .villages array and helper methods.
 var _world_node: Node = null
-## 0-based index into _world_node.villages for the currently-selected village.
-var _selected_village_idx: int = 0
 # ── Simulation clock (world-level — controls Engine.time_scale) ───────────────
 var clock: SimulationClock = null
 
@@ -32,11 +30,12 @@ var _current_speed: float = 1.0
 var _is_paused: bool = false
 var _pause_btn: Button = null
 
+# ── Village navigation ────────────────────────────────────────────────────────
+var _village_nav_ctrl: VillageNavController = null
+
 # ── Trade toggle + telemetry panel ────────────────────────────────────────────
 var _trade_btn: Button = null
 var _trade_panel: TradePanel = null
-## Village navigation buttons in the toolbar (one per village).
-var _village_nav_btns: Array[Button] = []
 
 # ── Pop Inspector ─────────────────────────────────────────────────────────────
 var _inspector_ctrl: InspectorController = null
@@ -92,6 +91,13 @@ func _ready() -> void:
 	_inspector_ctrl = InspectorController.new()
 	_inspector_ctrl.name = "InspectorController"
 	add_child(_inspector_ctrl)
+
+	# ── Village nav controller ──
+	_village_nav_ctrl = VillageNavController.new()
+	_village_nav_ctrl.name = "VillageNavController"
+	add_child(_village_nav_ctrl)
+	_village_nav_ctrl.setup(_world_node)
+	_village_nav_ctrl.village_selected.connect(_on_village_nav_selected)
 
 	# ── Build UI ──
 	get_ui_labels()
@@ -230,55 +236,28 @@ func _recenter_camera() -> void:
 	_center_on_village(village)
 
 
-## Move the camera to the nominal centre of a specific village.
-## Uses fly_to() so auto-follow is disabled — camera stays on the target village.
+## Delegate village selection to VillageNavController, which updates state
+## and emits village_selected → _on_village_nav_selected moves the camera.
 func _center_on_village(v: Village) -> void:
+	_village_nav_ctrl.select_village(v)
+
+
+## Handle village_selected signal from VillageNavController:
+## update main.gd village var, inspector, and camera position.
+func _on_village_nav_selected(v: Node) -> void:
+	village = v as Village
+	_inspector_ctrl.set_village(v)
 	if _camera == null:
 		return
 	if v == null or not is_instance_valid(v):
 		_camera.fly_to(Vector2(400, 300), _camera.zoom.x)
 		return
-	# Use WorldManager helper when available; fall back to village global_position + offset.
 	var center: Vector2
 	if _world_node and _world_node.has_method("get_village_center"):
 		center = _world_node.get_village_center(v)
 	else:
 		center = (v as Node2D).global_position + Vector2(400.0, 300.0)
 	_camera.fly_to(center, _camera.zoom.x)
-	# Switch the selected village so HUD + placement follow the camera destination.
-	_select_village(v)
-
-
-## Update button highlight so the active village button has a distinct border.
-func _refresh_village_nav_highlights(active_idx: int) -> void:
-	for i in range(_village_nav_btns.size()):
-		var btn: Button = _village_nav_btns[i]
-		if not is_instance_valid(btn):
-			continue
-		var s := StyleBoxFlat.new()
-		if i == active_idx:
-			s.bg_color     = Color(0.20, 0.35, 0.20, 0.95)
-			s.border_color = Color(0.40, 1.00, 0.40, 1.00)
-		else:
-			s.bg_color     = Color(0.20, 0.20, 0.25, 0.90)
-			s.border_color = Color(0.50, 0.50, 0.60, 0.80)
-		s.set_border_width_all(2)
-		s.set_corner_radius_all(4)
-		s.set_content_margin_all(4)
-		btn.add_theme_stylebox_override("normal", s)
-
-
-## Select a village as the active HUD + placement target.
-func _select_village(v: Village) -> void:
-	if v == null or not is_instance_valid(v):
-		return
-	village = v
-	_inspector_ctrl.set_village(v)
-	if _world_node and _world_node.get("villages") != null:
-		var idx: int = _world_node.villages.find(v)
-		if idx >= 0:
-			_selected_village_idx = idx
-			_refresh_village_nav_highlights(idx)
 
 
 ## Zoom camera out so both villages are visible simultaneously.
@@ -503,32 +482,7 @@ func _build_spawn_toolbar() -> void:
 
 	# ── Village navigation ──
 	hbox.add_child(VSeparator.new())
-
-	_village_nav_btns.clear()
-	if _world_node and _world_node.get("villages") != null:
-		for i in range(_world_node.villages.size()):
-			var v: Village = _world_node.villages[i]
-			if v == null:
-				continue
-			var vbtn := Button.new()
-			var vdisplay: String = v.village_name if v.get("village_name") and v.village_name != "" else v.name
-			vbtn.text = vdisplay
-			vbtn.tooltip_text = "Center camera on %s" % vdisplay
-			vbtn.custom_minimum_size = Vector2(80, 34)
-			var captured_v: Village = v
-			vbtn.pressed.connect(func(): _center_on_village(captured_v))
-			hbox.add_child(vbtn)
-			_village_nav_btns.append(vbtn)
-
-	var zoom_world_btn := Button.new()
-	zoom_world_btn.text = "World"
-	zoom_world_btn.tooltip_text = "Zoom out to see all villages"
-	zoom_world_btn.custom_minimum_size = Vector2(70, 34)
-	zoom_world_btn.pressed.connect(_zoom_to_world_overview)
-	hbox.add_child(zoom_world_btn)
-
-	# Highlight the initially-selected village button.
-	_refresh_village_nav_highlights(0)
+	_village_nav_ctrl.build_nav_buttons(hbox, _zoom_to_world_overview)
 
 	# ── Trade toggle button ──
 	hbox.add_child(VSeparator.new())

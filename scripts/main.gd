@@ -24,15 +24,8 @@ var spawn_info_label: Label = null
 var sim_failed: bool = false
 var _sim_fail_banner: PanelContainer = null
 
-# ── Economy HUD bar labels ────────────────────────────────────────────────────
-var eco_sim_label: Label        = null
-var eco_village_label: Label    = null
-var eco_market_label: Label     = null
-var eco_prosperity_label: Label = null
-var eco_farmer_label: Label     = null
-var eco_baker_label: Label      = null
-## World-summary line shown below the per-village rows.
-var eco_world_label: Label      = null
+# ── HUD controller ────────────────────────────────────────────────────────────
+var _hud_ctrl: HudController = null
 var _current_speed: float = 1.0
 
 # ── Pause control ─────────────────────────────────────────────────────────────
@@ -46,9 +39,7 @@ var _trade_panel: TradePanel = null
 var _village_nav_btns: Array[Button] = []
 
 # ── Pop Inspector ─────────────────────────────────────────────────────────────
-var selected_pop: Node = null
-var pop_inspector: PopInspectorDock = null
-const POP_PICK_RADIUS_WORLD: float = 16.0
+var _inspector_ctrl: InspectorController = null
 
 # ── Event log ─────────────────────────────────────────────────────────────────
 var _log_panel_ctrl: LogPanelController = null
@@ -97,6 +88,11 @@ func _ready() -> void:
 	_log_panel_ctrl.name = "LogPanelController"
 	add_child(_log_panel_ctrl)
 
+	# ── Inspector controller ──
+	_inspector_ctrl = InspectorController.new()
+	_inspector_ctrl.name = "InspectorController"
+	add_child(_inspector_ctrl)
+
 	# ── Build UI ──
 	get_ui_labels()
 
@@ -106,9 +102,14 @@ func _ready() -> void:
 			if v and is_instance_valid(v) and v.get("event_bus") != null:
 				_log_panel_ctrl.connect_village_bus(v.event_bus)
 
+	_hud_ctrl = HudController.new()
+	_hud_ctrl.name = "HudController"
+	add_child(_hud_ctrl)
+
 	update_ui()
 	_build_spawn_toolbar()
-	_build_economy_bar()
+	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
+	_hud_ctrl.setup(left_column, _world_node)
 	_build_trade_panel()
 
 	if village != null:
@@ -186,7 +187,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var screen_pos: Vector2 = event.position
 		var world_pos: Vector2 = _screen_to_world(screen_pos)
-		var r2: float = POP_PICK_RADIUS_WORLD * POP_PICK_RADIUS_WORLD
+		var r2: float = InspectorController.POP_PICK_RADIUS_WORLD * InspectorController.POP_PICK_RADIUS_WORLD
 
 		var best_pop: Node = null
 		var best_d2: float = INF
@@ -203,7 +204,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					best_pop = pop
 
 		if best_pop != null:
-			select_pop(best_pop)
+			_inspector_ctrl.handle_pop_clicked(best_pop)
 			get_viewport().set_input_as_handled()
 			return
 
@@ -218,6 +219,8 @@ func _on_world_click(_event: InputEvent) -> void:
 
 func _on_speed_changed(new_speed: float) -> void:
 	_current_speed = new_speed
+	if _hud_ctrl != null:
+		_hud_ctrl.set_speed(new_speed)
 	if sim_speed_label and not _is_paused:
 		sim_speed_label.text = "Speed: %.1fx" % new_speed
 
@@ -270,6 +273,7 @@ func _select_village(v: Village) -> void:
 	if v == null or not is_instance_valid(v):
 		return
 	village = v
+	_inspector_ctrl.set_village(v)
 	if _world_node and _world_node.get("villages") != null:
 		var idx: int = _world_node.villages.find(v)
 		if idx >= 0:
@@ -371,138 +375,14 @@ func get_ui_labels() -> void:
 	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
 	_log_panel_ctrl.setup(log_vbox)
 
-	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
-	if pop_inspector:
-		# Pass village.econ_stats and field-count getter; both may be null until T4 fills initialize()
-		var econ_stats = village.econ_stats if (village != null and village.get("econ_stats") != null) else null
-		var max_f: int = village.field_mgr.MAX_FIELDS if (village != null and village.field_mgr != null) else 10
-		pop_inspector.configure(econ_stats, max_f, Callable(self, "_inspector_field_count_for_dock"))
-		if not pop_inspector.dismiss_requested.is_connected(_on_pop_inspector_dismiss):
-			pop_inspector.dismiss_requested.connect(_on_pop_inspector_dismiss)
+	var inspector_dock := get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
+	_inspector_ctrl.setup(inspector_dock, village)
 
 
 func update_ui() -> void:
-	_update_eco_bar()
-	update_inspector()
-
-
-func _eco_cap_display(cap: int) -> String:
-	if cap >= 1_000_000_000:
-		return "∞"
-	if cap >= 1_000_000:
-		var m: float = float(cap) / 1_000_000.0
-		return ("%.0fM" % m) if m < 100.0 else "∞"
-	if cap >= 10_000:
-		return "%dk" % int(round(float(cap) / 1000.0))
-	return str(cap)
-
-
-func _update_eco_bar() -> void:
-	"""Refresh all six economy-bar section labels from village snapshot data."""
-	if village == null or not is_instance_valid(village):
-		return
-
-	var snap: Dictionary = village.get_econ_snapshot()
-	var pop: Dictionary  = village.get_population_summary()
-
-	# SIM
-	if eco_sim_label:
-		eco_sim_label.text = "Day %d\n%.1f×" % [snap.get("day", 0), _current_speed]
-
-	# VILLAGE — prefix with the selected village's display name so the player always
-	# knows which village the HUD row describes.
-	if eco_village_label:
-		var vname: String = village.village_name if (village.get("village_name") as String) != "" else village.name
-		eco_village_label.text = (
-			"[%s]  Pop %d — households %d, farmers %d, bakers %d\nFields %d of %d"
-			% [vname, pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
-			   pop.get("bakers", 0), pop.get("fields", 0), pop.get("max_fields", 10)]
-		)
-
-	# MARKET
-	if eco_market_label:
-		var wc: String = _eco_cap_display(snap.get("wheat_cap", 999999999))
-		var bc: String = _eco_cap_display(snap.get("bread_cap", 999999999))
-		eco_market_label.text = (
-			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
-				snap.get("wheat", 0), wc, snap.get("wheat_price", 0.0),
-				snap.get("bread", 0), bc, snap.get("bread_price", 0.0)
-			]
-		)
-
-	# PROSPERITY
-	if eco_prosperity_label:
-		eco_prosperity_label.text = (
-			"Score %.2f\nWealth %.2f · Food %.2f · Hunger pressure %.2f" % [
-				snap.get("prosperity_score", 0.0),
-				snap.get("prosperity_wealth", 0.0),
-				snap.get("prosperity_food", 0.0),
-				snap.get("prosperity_starvation", 0.0)
-			]
-		)
-
-	# FARMER baseline
-	if eco_farmer_label:
-		var fd: Dictionary = snap.get("baseline_farmer", {})
-		if fd.is_empty():
-			eco_farmer_label.text = "(none)"
-		else:
-			eco_farmer_label.text = (
-				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [fd.get("cash", 0.0), fd.get("seeds", 0), fd.get("wheat", 0), fd.get("bread", 0),
-				   fd.get("hunger_days", 0), fd.get("hunger_max", 5),
-				   fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
-			)
-
-	# WORLD summary — aggregated across all villages
-	if eco_world_label and _world_node and _world_node.has_method("get_world_summary"):
-		var ws: Dictionary = _world_node.get_world_summary()
-		eco_world_label.text = (
-			"World: %d villages · total pop %d (H %d · F %d · B %d) · fields %d"
-			% [ws.get("village_count", 0), ws.get("total_pop", 0),
-			   ws.get("total_households", 0), ws.get("total_farmers", 0),
-			   ws.get("total_bakers", 0), ws.get("total_fields", 0)]
-		)
-
-	# BAKER baseline
-	if eco_baker_label:
-		var bd: Dictionary = snap.get("baseline_baker", {})
-		if bd.is_empty():
-			eco_baker_label.text = "(none)"
-		else:
-			eco_baker_label.text = (
-				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [bd.get("cash", 0.0), bd.get("wheat", 0), bd.get("flour", 0), bd.get("bread", 0),
-				   bd.get("hunger_days", 0), bd.get("hunger_max", 5),
-				   bd.get("status", ""), bd.get("inv_total", 0), bd.get("inv_max", 0)]
-			)
-
-
-# ── Pop Inspector ──────────────────────────────────────────────────────────────
-
-func _inspector_field_count_for_dock() -> int:
-	if village == null or not is_instance_valid(village):
-		return 0
-	return village.get_population_summary().get("fields", 0)
-
-
-func _on_pop_inspector_dismiss() -> void:
-	selected_pop = null
-
-
-func select_pop(pop: Node) -> void:
-	if not is_instance_valid(pop):
-		return
-	selected_pop = pop
-	update_inspector()
-
-
-func update_inspector() -> void:
-	if pop_inspector == null:
-		return
-	if selected_pop == null or not is_instance_valid(selected_pop):
-		selected_pop = null
-	pop_inspector.refresh(selected_pop)
+	if _hud_ctrl != null:
+		_hud_ctrl.update_display(village)
+	_inspector_ctrl.refresh()
 
 
 # ── Spawn info bar ─────────────────────────────────────────────────────────────
@@ -687,97 +567,6 @@ func _build_spawn_toolbar() -> void:
 	placement_cursor.visible = false
 	placement_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	world_spacer.add_child(placement_cursor)
-
-
-func _build_economy_bar() -> void:
-	var bar := PanelContainer.new()
-	bar.name = "EcoBar"
-
-	var bar_style := StyleBoxFlat.new()
-	bar_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
-	bar_style.border_color = Color(0.28, 0.28, 0.42, 0.85)
-	bar_style.set_border_width_all(1)
-	bar_style.set_corner_radius_all(5)
-	bar_style.content_margin_left   = 10
-	bar_style.content_margin_right  = 10
-	bar_style.content_margin_top    = 6
-	bar_style.content_margin_bottom = 6
-	bar.add_theme_stylebox_override("panel", bar_style)
-	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var outer := VBoxContainer.new()
-	outer.add_theme_constant_override("separation", 4)
-	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(outer)
-
-	var row1 := HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 0)
-	row1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row1)
-
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 0)
-	row2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row2)
-
-	eco_sim_label        = _add_eco_section(row1, "SIM",        Color(0.65, 0.75, 1.00), true)
-	eco_village_label    = _add_eco_section(row1, "VILLAGE",    Color(0.40, 0.90, 0.50), true)
-	eco_market_label     = _add_eco_section(row1, "MARKET",     Color(0.95, 0.65, 0.25), true)
-	eco_prosperity_label = _add_eco_section(row1, "PROSPERITY", Color(1.00, 0.85, 0.25), true)
-	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
-	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
-
-	# Row 3 — world-level summary (totals across all villages)
-	var row3 := HBoxContainer.new()
-	row3.add_theme_constant_override("separation", 0)
-	row3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row3)
-	eco_world_label = _add_eco_section(row3, "WORLD", Color(0.55, 0.80, 1.00), true)
-
-	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
-	left_column.add_child(bar)
-	left_column.move_child(bar, 1)
-
-
-func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, expand: bool) -> Label:
-	if hbox.get_child_count() > 0:
-		var sep := VSeparator.new()
-		var sep_style := StyleBoxFlat.new()
-		sep_style.bg_color = Color(0.30, 0.30, 0.45, 0.55)
-		sep_style.content_margin_top    = 5
-		sep_style.content_margin_bottom = 5
-		sep.add_theme_stylebox_override("separator", sep_style)
-		hbox.add_child(sep)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left",  10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top",   3)
-	margin.add_theme_constant_override("margin_bottom", 3)
-	if expand:
-		margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(margin)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 1)
-	margin.add_child(vbox)
-
-	var title_lbl := Label.new()
-	title_lbl.text = title_text
-	title_lbl.add_theme_font_size_override("font_size", 14)
-	title_lbl.add_theme_color_override("font_color", accent)
-	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(title_lbl)
-
-	var content_lbl := Label.new()
-	content_lbl.text = "..."
-	content_lbl.add_theme_font_size_override("font_size", 15)
-	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
-	content_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content_lbl.custom_minimum_size = Vector2(32, 0)
-	vbox.add_child(content_lbl)
-
-	return content_lbl
 
 
 func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Button:

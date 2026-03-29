@@ -189,10 +189,10 @@ func _validate_target(target: Node2D) -> bool:
 
 func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
 	if not _validate_target(house):
-		push_warning("[WARN] FarmerJob(%s): set_route_nodes rejected house %s" % [agent.name if agent else "?", house.name if house else "null"])
+		push_error("[ERROR] FarmerJob(%s): set_route_nodes rejected house %s" % [agent.name if agent else "?", house.name if house else "null"])
 		return
 	if not _validate_target(market_pos):
-		push_warning("[WARN] FarmerJob(%s): set_route_nodes rejected market %s" % [agent.name if agent else "?", market_pos.name if market_pos else "null"])
+		push_error("[ERROR] FarmerJob(%s): set_route_nodes rejected market %s" % [agent.name if agent else "?", market_pos.name if market_pos else "null"])
 		return
 	house_node = house
 	market_node = market_pos
@@ -412,6 +412,7 @@ func _on_travel_timeout(_t: Node2D) -> void:
 		var _timeout_target_name: String = trade_target_village.village_name if trade_target_village else "unknown"
 		var _timeout_from_name: String = agent.home_village_ref.village_name if agent.home_village_ref else "unknown"
 		trade_route_active = false
+		_intentional_cross_village = false
 		trade_target_village = null
 		_trade_target_market_node = null
 		trade_sale_completed = true

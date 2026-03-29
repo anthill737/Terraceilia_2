@@ -64,8 +64,8 @@ const MIN_PROFIT_THRESHOLD: float = 0.3
 ## Travel cost per world unit of distance. Villages are ~2000 units apart.
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks the baker must stay at a village after arrival before re-evaluating trade.
-## ~1 in-game day at 100 ticks/day. Large enough to prevent ping-ponging.
-const TRADE_MIN_STAY_TICKS: int = 100
+## Set to 200 — ~2 in-game days at 100 ticks/day; ~20% of inter-village travel time.
+const TRADE_MIN_STAY_TICKS: int = 200
 
 ## True while the baker is actively traveling to or operating at a foreign village.
 var trade_route_active: bool = false
@@ -274,6 +274,8 @@ func _on_travel_timeout(_t: Node2D) -> void:
 		_trade_target_market_node = null
 		_intentional_cross_village = false
 		trade_sale_completed = true
+		# Open commit window so agent cannot immediately retry the failed trip.
+		_begin_trade_commit_window()
 		if event_bus:
 			event_bus.log("[TRAVEL] Baker: trade travel timed out — trade state reset")
 	print("[BUGFIX] Baker: travel timeout, forcing RESTOCK")

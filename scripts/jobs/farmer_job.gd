@@ -352,6 +352,9 @@ func _on_travel_timeout(_t: Node2D) -> void:
 		trade_target_village = null
 		_trade_target_market_node = null
 		trade_sale_completed = true
+		# Open commit window so agent cannot immediately retry the failed trip.
+		var cv_name: String = agent.current_village_ref.village_name if agent.current_village_ref else "unknown"
+		_begin_trade_commit_window(agent.current_tick, cv_name)
 		print("[BUGFIX] Farmer: trade travel timed out — trade state reset")
 	print("[BUGFIX] Farmer: travel timeout, restarting route")
 	if event_bus:

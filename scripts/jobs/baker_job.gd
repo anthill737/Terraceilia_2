@@ -901,6 +901,7 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 
 	# Stop current activity and route to the target village's market.
 	production_state = ProductionState.IDLE
+	agent.pending_target = null  # prevent post-wait re-routing to home village nodes
 	route.stop()
 	route.set_target(target_market_node)
 
@@ -927,6 +928,11 @@ func _on_trade_arrival() -> void:
 	agent.current_village_ref = arrived_village
 	# Canonical migration-complete: increment counter immediately after village switch.
 	trade_arrival_count += 1
+	var vname_arrive: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
+	if event_bus:
+		event_bus.log("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
+	else:
+		print("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
 	var arrived_market: Market = arrived_village.get("market") as Market
 	var arrived_event_bus: EventBus = arrived_village.get("event_bus") as EventBus
 	if arrived_market:

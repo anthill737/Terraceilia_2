@@ -556,6 +556,9 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 	else:
 		print("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
 			agent.current_village_ref.village_name, target_village.village_name, reason])
+	# Stop any active wait/travel so set_target takes effect immediately,
+	# matching baker_job's _start_trade_travel() which also calls route.stop() first.
+	route.stop()
 	agent.pending_target = null
 	route.set_target(_trade_target_market_node)
 

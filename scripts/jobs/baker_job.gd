@@ -1119,6 +1119,9 @@ func _on_trade_arrival() -> void:
 		phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
 		if _validate_target(market_location):
 			agent.pending_target = market_location
+		# Explicitly clear route state so is_traveling=false and no stale foreign market
+		# target remains on the route runner (mirrors the stop() call in the foreign branch).
+		route.stop()
 		route.wait(WAIT_TIME)
 	else:
 		# ── Foreign village arrival (migration complete) ──────────────────────

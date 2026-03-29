@@ -559,7 +559,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 
 func _on_household_died(agent_node: Node) -> void:
-	var idx := households.find(agent_node)
+	var idx: int = households.find(agent_node)
 	if idx != -1:
 		households.remove_at(idx)
 

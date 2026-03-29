@@ -663,12 +663,17 @@ func _maybe_evaluate_trade(tick: int) -> void:
 			else:
 				if event_bus:
 					event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_buy_blocked cannot_return")
-		elif return_edge >= MIN_TRADE_EDGE:
+		# return_edge is total batch value (edge × qty − travel). Allow return when foreign
+		# is not materially better — threshold: -25% of MIN_EXPORT_BATCH_VALUE = -1.0.
+		# Prevents permanent stranding when prices equalize at the foreign village.
+		elif return_edge >= -(MIN_EXPORT_BATCH_VALUE * 0.25):
+			if event_bus:
+				event_bus.log("[TRADE OPPORTUNITY] agent=Farmer returning home return_edge=%.2f" % return_edge)
 			_start_travel_to(agent.home_village_ref, "return")
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_not_better_yet home_price=%.2f local_price=%.2f return_edge=%.2f" % [
-					home_price, local_price, return_edge])
+				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=foreign_materially_better home_price=%.2f local_price=%.2f return_edge=%.2f required>=%.2f" % [
+					home_price, local_price, return_edge, -(MIN_EXPORT_BATCH_VALUE * 0.25)])
 
 
 func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, expected_edge: float = 0.0) -> void:

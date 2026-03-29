@@ -83,6 +83,15 @@ const MIN_EXPORT_BATCH_VALUE: float = 8.0
 ## is considered a "bad outlet" — demand is weakening, bread is piling up.
 const HOME_BAD_OUTLET_FILL_RATIO: float = 1.00
 
+## Emitted when the baker departs for a foreign village (cargo on board, origin ctx still active).
+signal trade_departed(from_village: Node, to_village: Node)
+## Emitted when the baker departs back toward home village.
+signal trade_return_departed(from_village: Node, to_village: Node)
+## Emitted immediately after current_village_ref switches on arrival at a foreign village.
+signal trade_arrived(village: Node)
+## Emitted immediately after current_village_ref switches back to home village.
+signal trade_return_arrived(village: Node)
+
 ## True while the baker is actively traveling to or operating at a foreign village.
 var trade_route_active: bool = false
 ## Target village for the current cross-village trip (null when not traveling).
@@ -986,16 +995,35 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		var home_snap: Dictionary = home_village.get_trade_snapshot()
 		if home_snap.is_empty():
 			return
-		var home_bid: float   = home_snap.get("bread_price", 0.0)
+		var home_bid: float    = home_snap.get("bread_price", 0.0)
 		var local_pos: Vector2 = local_snap.get("world_pos", Vector2.ZERO)
 		var home_pos: Vector2  = home_snap.get("world_pos", Vector2.ZERO)
 		var return_cost: float = local_pos.distance_to(home_pos) * TRAVEL_COST_PER_DISTANCE
+
+		if surplus_qty <= 0:
+			# No exportable bread — baker can't produce at a foreign village.
+			# Return home unconditionally to resume the production cycle.
+			if event_bus:
+				event_bus.log("[TRADE OPPORTUNITY] agent=Baker returning home (no surplus, resuming production)")
+			_start_trade_travel(home_village, "return")
+			return
+
+		# Has cargo but no outbound market qualified. Compare per-unit return value.
+		# return_edge is per-unit (same unit as MIN_TRADE_EDGE).
 		var return_edge: float = home_bid - local_bid - return_cost
 		if event_bus:
-			event_bus.log("[TRADE EVAL] agent=Baker return home_bid=%.2f local_bid=%.2f return_edge=%.2f" % [
-				home_bid, local_bid, return_edge])
-		if return_edge >= MIN_TRADE_EDGE:
+			event_bus.log("[TRADE EVAL] agent=Baker return home_bid=%.2f local_bid=%.2f surplus=%d return_edge=%.2f" % [
+				home_bid, local_bid, surplus_qty, return_edge])
+		# Return when foreign advantage is not large enough to justify staying.
+		# Threshold: allow return if foreign is not more than (MIN_TRADE_EDGE / 2) per unit better.
+		if return_edge >= -(MIN_TRADE_EDGE * 0.5):
+			if event_bus:
+				event_bus.log("[TRADE OPPORTUNITY] agent=Baker returning home return_edge=%.2f" % return_edge)
 			_start_trade_travel(home_village, "return")
+		else:
+			if event_bus:
+				event_bus.log("[TRADE BLOCKED] agent=Baker reason=foreign_materially_better home_bid=%.2f local_bid=%.2f return_edge=%.2f threshold=%.2f" % [
+					home_bid, local_bid, return_edge, -(MIN_TRADE_EDGE * 0.5)])
 
 
 ## Initiates travel to target_village's market.

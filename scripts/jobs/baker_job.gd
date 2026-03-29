@@ -63,6 +63,8 @@ const TRADE_EVAL_INTERVAL: int = 10
 const MIN_PROFIT_THRESHOLD: float = 0.3
 ## Travel cost per world unit of distance. Villages are ~2000 units apart.
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
+## Ticks the baker must stay at a village after arrival before re-evaluating trade.
+const TRADE_MIN_STAY_TICKS: int = 50
 
 ## True while the baker is actively traveling to or operating at a foreign village.
 var trade_route_active: bool = false
@@ -72,6 +74,12 @@ var trade_target_village: Node = null
 var _trade_target_market_node: Node2D = null
 ## Bypass flag for _validate_target(): set true only during intentional trade travel.
 var _intentional_cross_village: bool = false
+## Tick at or after which a new trade evaluation is permitted (commitment window).
+## Deterministic: set to current_tick + TRADE_MIN_STAY_TICKS on every trade arrival.
+var trade_commit_until_tick: int = 0
+## False while a sale attempt at the current destination is still pending.
+## Evaluation is blocked until true. Initialized true (no pending cycle at start).
+var trade_sale_completed: bool = true
 
 
 func get_display_name() -> String:
@@ -778,9 +786,18 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	var world = _get_world()
 	if world == null or not world.get("trade_enabled"):
 		return
-	# Guard: already mid-trip — only re-evaluate when at destination (trade_route_active
-	# but not traveling means we arrived; re-eval allowed for return decision).
+	# Guard: mid-travel — never evaluate while physically moving between villages.
 	if trade_route_active and (route != null and route.is_traveling):
+		return
+	# Guard: sale cycle not yet complete at current destination.
+	if not trade_sale_completed:
+		if event_bus:
+			event_bus.log("[TRADE EVAL BLOCKED] agent=Baker reason=sale_cycle_incomplete")
+		return
+	# Guard: commitment window — must stay at current village until tick expires.
+	if tick < trade_commit_until_tick:
+		if event_bus:
+			event_bus.log("[TRADE EVAL BLOCKED] agent=Baker reason=commit_window")
 		return
 	# Guard: respect evaluation cadence.
 	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
@@ -848,6 +865,7 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	_trade_target_market_node = target_market_node
 	trade_route_active = true
 	_intentional_cross_village = true
+	trade_sale_completed = false  # block re-evaluation until sale attempt resolves
 
 	var from_name: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
@@ -858,6 +876,15 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	production_state = ProductionState.IDLE
 	route.stop()
 	route.set_target(target_market_node)
+
+
+## Sets the commitment window so baker cannot re-evaluate trade until
+## current_tick + TRADE_MIN_STAY_TICKS. Emits [TRADE COMMIT] log.
+func _begin_trade_commit_window() -> void:
+	trade_commit_until_tick = agent.current_tick + TRADE_MIN_STAY_TICKS
+	var vid: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
+	if event_bus:
+		event_bus.log("[TRADE COMMIT] agent=Baker village=%s until_tick=%d" % [vid, trade_commit_until_tick])
 
 
 ## Called when baker arrives at the trade destination (foreign village or home on return).
@@ -903,23 +930,33 @@ func _on_trade_arrival() -> void:
 		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
 		if event_bus:
 			event_bus.log("[TRADE RETURN] agent=Baker arrived home at %s" % vname)
+		# Mark cycle complete and start commitment window so we don't immediately leave again.
+		trade_sale_completed = true
+		_begin_trade_commit_window()
 		production_state = ProductionState.IDLE
 		phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
 		if _validate_target(market_location):
 			agent.pending_target = market_location
 		route.wait(WAIT_TIME)
 	else:
-		# Arrived at foreign village — sell all available bread.
+		# Arrived at foreign village — attempt to sell all available bread.
 		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
 		var sellable: int = inv.get_qty("bread")
+		var sold: int = 0
 		if sellable > 0 and arrived_market != null:
 			var snap_before: float = agent.get_cash()
-			var sold: int = arrived_market.buy_bread_from_agent(agent, sellable, 0.0, false)
+			sold = arrived_market.buy_bread_from_agent(agent, sellable, 0.0, false)
 			var earned: float = agent.get_cash() - snap_before
 			if event_bus:
 				event_bus.log("[TRADE SALE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname, sold, earned])
 			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname, earned])
 		elif event_bus:
 			event_bus.log("[TRADE SALE] agent=Baker village=%s no bread to sell" % vname)
+		# Sale attempt is now resolved (success, partial, or blocked) — mark complete.
+		trade_sale_completed = true
+		if event_bus:
+			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d" % [vname, sold])
+		# Start commitment window so baker stays long enough for the market to react.
+		_begin_trade_commit_window()
 		# Wait at destination — next trade eval tick will decide whether to return.
 		route.wait(WAIT_TIME)

@@ -13,14 +13,14 @@ extends Node
 var pending_conversions: Array = []
 
 # ── Injected references ─────────────────────────────────────────────────────────
-var _pop_mgr = null    # PopulationManager
-var _field_mgr = null  # FieldManager
-var _event_bus = null  # EventBus
+var _pop_mgr:   PopulationManager = null
+var _field_mgr: FieldManager      = null
+var _event_bus: EventBus          = null
 
 
 ## Wire the service to the village's managers and event bus.
 ## Call once from village.initialize() after all managers are created.
-func bind(pop_mgr, field_mgr, event_bus) -> void:
+func bind(pop_mgr: PopulationManager, field_mgr: FieldManager, event_bus: EventBus) -> void:
 	_pop_mgr = pop_mgr
 	_field_mgr = field_mgr
 	_event_bus = event_bus

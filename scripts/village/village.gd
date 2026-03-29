@@ -24,9 +24,9 @@ var audit = null          # EconomyAudit
 var labor_market = null   # LaborMarket
 
 # ── Managers ──────────────────────────────────────────────────────────────────
-var pop_mgr = null       # PopulationManager
-var field_mgr = null     # FieldManager
-var econ_stats = null    # EconomyStatsManager
+var pop_mgr:    PopulationManager    = null
+var field_mgr:  FieldManager         = null
+var econ_stats: EconomyStatsManager  = null
 
 # ── Population + field arrays — property getters delegate to managers ──────────
 # This ensures pop_mgr, labor_market, and econ_stats all share the same arrays.

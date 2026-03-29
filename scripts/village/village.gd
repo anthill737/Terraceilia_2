@@ -192,6 +192,14 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	baker.home_village_id = village_id
 	household_agent.home_village_id = village_id
 
+	# Bind village refs for trade evaluation (FarmerJob / BakerJob read these).
+	farmer.home_village_ref = self
+	farmer.current_village_ref = self
+	baker.home_village_ref = self
+	baker.current_village_ref = self
+	household_agent.home_village_ref = self
+	household_agent.current_village_ref = self
+
 	# Wire event_bus and market onto all base agents
 	market.event_bus = bus
 	farmer.event_bus = bus
@@ -337,6 +345,27 @@ func receive_tick(tick: int) -> void:
 
 func get_market() -> Market:
 	return market
+
+
+## Returns a lightweight snapshot of this village's market for trade evaluation.
+## FarmerJob / BakerJob call this on every village to compute
+##   expected_profit = sell_price - local_price - travel_cost
+## and decide whether to travel here.
+func get_trade_snapshot() -> Dictionary:
+	if market == null or not is_instance_valid(market):
+		return {}
+	return {
+		"village_ref":       self,
+		"village_id":        village_id,
+		"village_name":      village_name,
+		"wheat_price":       market.get_bid_price("wheat"),
+		"bread_price":       market.get_bid_price("bread"),
+		"wheat_qty":         market.wheat,
+		"bread_qty":         market.bread,
+		"world_pos":         global_position,
+		"wheat_buy_blocked": market.wheat_market_buy_blocked,
+		"bread_buy_blocked": market.bread_market_buy_blocked,
+	}
 
 
 func get_population_summary() -> Dictionary:
@@ -513,6 +542,8 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	f.name = "Farmer_%d" % pop_mgr.next_farmer_id
 	pop_mgr.next_farmer_id += 1
 	f.home_village_id = village_id
+	f.home_village_ref = self
+	f.current_village_ref = self
 	f.position = to_local(pos)
 	add_child(f)
 
@@ -594,6 +625,8 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	b.name = "Baker_%d" % pop_mgr.next_baker_id
 	pop_mgr.next_baker_id += 1
 	b.home_village_id = village_id
+	b.home_village_ref = self
+	b.current_village_ref = self
 	b.position = to_local(pos)
 	add_child(b)
 

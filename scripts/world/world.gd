@@ -17,9 +17,15 @@ var villages: Array = []
 ## Index of the village currently in focus (drives camera + HUD).
 var _focused_village_idx: int = 0
 
+## Whether inter-village trade is enabled. Agents check this before evaluating moves.
+var trade_enabled: bool = false
+
 ## Emitted when the player navigates to a different village.
 ## main.gd connects this to move the camera and rebind the economy HUD.
 signal village_focused(idx: int)
+
+## Emitted when trade is toggled. UI connects this to update the button label.
+signal trade_toggled(enabled: bool)
 
 
 func _ready() -> void:
@@ -155,3 +161,65 @@ func get_village(idx: int) -> Village:
 
 func get_village_count() -> int:
 	return villages.size()
+
+
+## Returns all Village nodes in deterministic insertion order.
+## Agents use this to iterate all villages during trade evaluation.
+func get_all_villages() -> Array:
+	return villages
+
+
+# ── Trade toggle ───────────────────────────────────────────────────────────────
+
+## Toggles inter-village trade on/off and emits trade_toggled.
+## Connected to the Trade button in the top bar (see main.gd / trade panel).
+func toggle_trade() -> void:
+	trade_enabled = !trade_enabled
+	trade_toggled.emit(trade_enabled)
+	print("[TRADE TOGGLE] trade_enabled=%s" % str(trade_enabled))
+
+
+# ── Market query API (used by FarmerJob / BakerJob for trade evaluation) ───────
+
+## Returns a snapshot of a single village's market state.
+## Agents use this to compute expected_profit = sell_price - local_price - travel_cost.
+##
+## Keys:
+##   village_ref   — Village node (use to switch current_village_ref on arrival)
+##   village_id    — int  (stable identifier across ticks)
+##   world_pos     — Vector2  (village global_position; used for travel cost)
+##   wheat_price   — float
+##   bread_price   — float
+##   wheat_qty     — int   (current market inventory)
+##   bread_qty     — int
+##   wheat_buy_blocked — bool  (market won't accept wheat; selling is pointless)
+##   bread_buy_blocked — bool  (market won't accept bread; selling is pointless)
+func get_village_market_snapshot(village: Node) -> Dictionary:
+	if village == null or not is_instance_valid(village):
+		return {}
+	var m = village.market
+	if m == null or not is_instance_valid(m):
+		return {}
+	return {
+		"village_ref":       village,
+		"village_id":        village.village_id,
+		"world_pos":         village.global_position,
+		"wheat_price":       m.wheat_price,
+		"bread_price":       m.bread_price,
+		"wheat_qty":         m.wheat,
+		"bread_qty":         m.bread,
+		"wheat_buy_blocked": m.wheat_market_buy_blocked,
+		"bread_buy_blocked": m.bread_market_buy_blocked,
+	}
+
+
+## Returns market snapshots for every village in deterministic insertion order.
+## Agents iterate this array when scanning for the best trade destination.
+func get_all_village_market_snapshots() -> Array:
+	var out: Array = []
+	for v in villages:
+		if v and is_instance_valid(v):
+			var snap := get_village_market_snapshot(v)
+			if not snap.is_empty():
+				out.append(snap)
+	return out

@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://btradepanel01"]
+
+[ext_resource type="Script" path="res://scripts/ui/panels/trade_panel.gd" id="1_trade"]
+
+[node name="TradePanel" type="PanelContainer"]
+script = ExtResource("1_trade")

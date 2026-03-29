@@ -32,16 +32,16 @@ func handle_migrate_requested(agent: Node, reason: String) -> void:
 	if not is_instance_valid(agent):
 		return
 	if _event_bus:
-		_event_bus.emit_log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
+		_event_bus.log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
 
 	if _pop_mgr:
-		var h_idx := _pop_mgr.households.find(agent)
+		var h_idx: int = _pop_mgr.households.find(agent)
 		if h_idx != -1:
 			_pop_mgr.households.remove_at(h_idx)
 			agent.remove_from_group("households")
 			agent.remove_from_group("agents")
 
-		var f_idx := _pop_mgr.all_farmers.find(agent)
+		var f_idx: int = _pop_mgr.all_farmers.find(agent)
 		if f_idx != -1:
 			_pop_mgr.all_farmers.remove_at(f_idx)
 			if _field_mgr:
@@ -51,7 +51,7 @@ func handle_migrate_requested(agent: Node, reason: String) -> void:
 			if agent.has_method("clear_fields_for_removal"):
 				agent.clear_fields_for_removal()
 
-		var b_idx := _pop_mgr.all_bakers.find(agent)
+		var b_idx: int = _pop_mgr.all_bakers.find(agent)
 		if b_idx != -1:
 			_pop_mgr.all_bakers.remove_at(b_idx)
 
@@ -64,7 +64,7 @@ func handle_migrate_requested(agent: Node, reason: String) -> void:
 	var _migrated_name: String = agent.name
 	agent.queue_free()
 	if _event_bus:
-		_event_bus.emit_log("[MIGRATE CONFIRM] %s removed (reason: %s)" % [_migrated_name, reason])
+		_event_bus.log("[MIGRATE CONFIRM] %s removed (reason: %s)" % [_migrated_name, reason])
 
 
 ## Signal handler for labor_market.role_switch_requested.
@@ -79,7 +79,7 @@ func handle_role_switch_requested(household: Node, new_role: String) -> void:
 
 	var training_days: int = LaborMarket.BAKER_TRAINING_DAYS if new_role == "baker" else LaborMarket.FARMER_TRAINING_DAYS
 	if _event_bus:
-		_event_bus.emit_log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
+		_event_bus.log("[MOBILITY] %s: training to become %s (%d days)" % [household.name, new_role, training_days])
 	if household.has_method("log_event"):
 		household.log_event("Started training to become a %s (%d days to go)." % [new_role.capitalize(), training_days])
 

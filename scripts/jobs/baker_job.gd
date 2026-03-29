@@ -1161,6 +1161,12 @@ func _on_trade_arrival() -> void:
 		if event_bus:
 			event_bus.log("[TRADE FLOW] agent=Baker from=%s to=%s good=bread qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
 				home_name_tf, vname_arrive, sold, _trip_depart_tick, agent.current_tick, profit_tf])
+		# Phase 3: Wire village flow tracking — record this outbound bread sale.
+		if sold > 0:
+			if is_instance_valid(arrived_village) and arrived_village.has_method("record_trade_import"):
+				arrived_village.record_trade_import("bread", sold)
+			if is_instance_valid(agent.home_village_ref) and agent.home_village_ref.has_method("record_trade_export"):
+				agent.home_village_ref.record_trade_export("bread", sold)
 		# Sale attempt is now resolved (success, partial, or blocked) — mark complete.
 		trade_sale_completed = true
 		# Start commitment window so baker stays long enough for the market to react.

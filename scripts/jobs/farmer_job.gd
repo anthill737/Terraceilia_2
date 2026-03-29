@@ -825,5 +825,11 @@ func _on_trade_arrival() -> void:
 		if event_bus:
 			event_bus.log("[TRADE FLOW] agent=Farmer from=%s to=%s good=wheat qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
 				_flow_home_name, arrived_village.village_name, sold_qty, _trip_depart_tick, agent.current_tick, _flow_profit])
+		# Phase 3: Wire village flow tracking — record this outbound wheat sale.
+		if sold_qty > 0:
+			if is_instance_valid(arrived_village) and arrived_village.has_method("record_trade_import"):
+				arrived_village.record_trade_import("wheat", sold_qty)
+			if is_instance_valid(agent.home_village_ref) and agent.home_village_ref.has_method("record_trade_export"):
+				agent.home_village_ref.record_trade_export("wheat", sold_qty)
 		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
 		route.wait(WAIT_TIME)

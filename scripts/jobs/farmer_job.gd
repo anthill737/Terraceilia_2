@@ -20,11 +20,13 @@ const ARRIVAL_DISTANCE: float = 5.0
 const WAIT_TIME: float = 1.0
 
 # Inter-village trade constants
-const TRADE_EVAL_INTERVAL: int = 10
+## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
+## Reduces log noise; agents remain reactive without churning every 10 ticks.
+const TRADE_EVAL_INTERVAL: int = 30
 const MIN_PROFIT_THRESHOLD: float = 0.3
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks an agent must remain in the arrived village before re-evaluating trade.
-## Prevents immediate ping-pong after arrival.
+## 200 ticks = 2 in-game days. Prevents ping-pong across a full production cycle.
 const TRADE_MIN_STAY_TICKS: int = 200
 
 const WHEAT_RECIPE: Dictionary = {

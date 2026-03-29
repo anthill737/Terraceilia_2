@@ -57,8 +57,9 @@ var day_money_start: float = -1.0
 var hysteresis_cooldown_ticks: int = 0
 
 # ── Inter-village trade evaluation ────────────────────────────────────────────
-## How many ticks between trade evaluations (deterministic cadence).
-const TRADE_EVAL_INTERVAL: int = 10
+## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
+## Reduces log noise and churn; baker remains reactive without over-evaluating.
+const TRADE_EVAL_INTERVAL: int = 30
 ## Minimum profit edge over staying local before baker commits to travel.
 const MIN_PROFIT_THRESHOLD: float = 0.3
 ## Travel cost per world unit of distance. Villages are ~2000 units apart.
@@ -884,10 +885,10 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 
 	var from_name: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
-	print("[TRADE DEBUG] agent=Baker last_move_tick=%d current_tick=%d" % [_last_trade_move_tick, agent.current_tick])
-	_last_trade_move_tick = agent.current_tick
 	if event_bus:
+		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [agent.name, _last_trade_move_tick, agent.current_tick])
 		event_bus.log("[TRADE MOVE] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
+	_last_trade_move_tick = agent.current_tick
 
 	# Stop current activity and route to the target village's market.
 	production_state = ProductionState.IDLE

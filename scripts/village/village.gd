@@ -644,7 +644,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			event_bus.emit_log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
 				ag.name, role, pos.x, pos.y, wallet_money])
 
-		var h_idx := households.find(ag)
+		var h_idx: int = households.find(ag)
 		if h_idx != -1:
 			households.remove_at(h_idx)
 		if ag.agent_died.is_connected(_on_household_died):

@@ -51,15 +51,8 @@ var pop_inspector: PopInspectorDock = null
 const POP_PICK_RADIUS_WORLD: float = 16.0
 
 # ── Event log ─────────────────────────────────────────────────────────────────
-var event_log: RichTextLabel = null
-var export_log_button: Button = null
-var jump_to_bottom_button: Button = null
+var _log_panel_ctrl: LogPanelController = null
 var sim_speed_label: Label = null
-var log_lines: Array[String] = []
-var log_buffer: Array[String] = []
-var user_at_bottom: bool = true
-const MAX_LOG_LINES: int = 200
-const SCROLL_THRESHOLD: int = 50
 
 
 func _ready() -> void:
@@ -99,15 +92,20 @@ func _ready() -> void:
 	if village == null:
 		push_error("Main: Could not find World/Village1 — World.gd must spawn it in _ready()")
 
-	# Wire every village's event_bus to the shared log panel.
-	if _world_node and _world_node.get("villages") != null:
-		for v in _world_node.villages:
-			if v and is_instance_valid(v) and v.get("event_bus") != null and v.event_bus != null:
-				if not v.event_bus.event_logged.is_connected(_on_event_logged):
-					v.event_bus.event_logged.connect(_on_event_logged)
+	# ── Log panel controller ──
+	_log_panel_ctrl = LogPanelController.new()
+	_log_panel_ctrl.name = "LogPanelController"
+	add_child(_log_panel_ctrl)
 
 	# ── Build UI ──
 	get_ui_labels()
+
+	# Wire every village's event_bus to the log panel controller.
+	if _world_node and _world_node.get("villages") != null:
+		for v in _world_node.villages:
+			if v and is_instance_valid(v) and v.get("event_bus") != null:
+				_log_panel_ctrl.connect_village_bus(v.event_bus)
+
 	update_ui()
 	_build_spawn_toolbar()
 	_build_economy_bar()
@@ -369,91 +367,9 @@ func _show_sim_fail_banner(day: int) -> void:
 	ui_node.add_child(_sim_fail_banner)
 
 
-func _on_event_logged(msg: String) -> void:
-	log_lines.append(msg)
-	log_buffer.append(msg)
-
-	while log_lines.size() > MAX_LOG_LINES:
-		log_lines.pop_front()
-
-	if event_log:
-		event_log.clear()
-		for line in log_lines:
-			event_log.append_text(line + "\n")
-		if user_at_bottom:
-			event_log.scroll_to_line(event_log.get_line_count())
-
-
-func _on_log_scroll(_value: float) -> void:
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			var max_scroll = vscroll.max_value - vscroll.page
-			user_at_bottom = (max_scroll - vscroll.value) <= SCROLL_THRESHOLD
-
-
-func _on_jump_to_bottom() -> void:
-	user_at_bottom = true
-	if event_log:
-		event_log.scroll_to_line(event_log.get_line_count())
-
-
-func export_log() -> void:
-	print("export_log() called - buffer size: ", log_buffer.size())
-
-	var log_snapshot = log_buffer.duplicate()
-
-	var dir = DirAccess.open("user://")
-	if not dir:
-		print("ERROR: Could not open user:// directory")
-		if event_log:
-			event_log.append_text("[ERROR] Could not access user directory\n")
-		return
-
-	if not dir.dir_exists("logs"):
-		var err = dir.make_dir("logs")
-		if err != OK:
-			if event_log:
-				event_log.append_text("[ERROR] Failed to create logs directory\n")
-			return
-
-	var datetime = Time.get_datetime_dict_from_system()
-	var filename = "economy_log_%04d-%02d-%02d_%02d-%02d-%02d.txt" % [
-		datetime.year, datetime.month, datetime.day,
-		datetime.hour, datetime.minute, datetime.second
-	]
-	var path = "user://logs/" + filename
-
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		for line in log_snapshot:
-			file.store_line(line)
-		file.close()
-		var abs_path = ProjectSettings.globalize_path(path)
-		if event_log:
-			event_log.append_text("[EXPORT] Log saved to: %s\n" % abs_path)
-			event_log.append_text("[EXPORT] (%d lines written)\n" % log_snapshot.size())
-	else:
-		var err = FileAccess.get_open_error()
-		if event_log:
-			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
-
-
 func get_ui_labels() -> void:
 	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
-	if log_vbox:
-		event_log = log_vbox.get_node_or_null("EventLog")
-		export_log_button = log_vbox.get_node_or_null("ExportLogButton")
-		if export_log_button:
-			export_log_button.pressed.connect(export_log)
-		if log_vbox.has_node("JumpToBottomButton"):
-			jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
-			jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
-
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			vscroll.value_changed.connect(_on_log_scroll)
+	_log_panel_ctrl.setup(log_vbox)
 
 	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
 	if pop_inspector:

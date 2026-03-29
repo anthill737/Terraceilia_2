@@ -85,6 +85,10 @@ var _last_trade_move_tick: int = -1
 ## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
 
+## Bypass flag for _validate_target(): set true only during intentional trade travel.
+## Mirrors BakerJob._intentional_cross_village to prevent stale foreign-node routing.
+var _intentional_cross_village: bool = false
+
 # Phase 3 telemetry counters
 var trips_taken: int = 0
 var successful_trades: int = 0
@@ -162,6 +166,25 @@ func deactivate() -> void:
 			route.wait_finished.disconnect(_on_wait_finished)
 		if route.travel_timeout.is_connected(_on_travel_timeout):
 			route.travel_timeout.disconnect(_on_travel_timeout)
+
+
+## Guards against routing to nodes that belong to a different village.
+## Uses the "village_id" meta stamped on market and other nodes by village.gd.
+## Targets without the meta pass through (backward-compatible with unstamped nodes).
+## Bypassed when _intentional_cross_village is true (trade travel).
+func _validate_target(target: Node2D) -> bool:
+	if target == null:
+		return false
+	if _intentional_cross_village:
+		return true
+	var target_vid: int = target.get_meta("village_id", -1)
+	var agent_vid: int = agent.home_village_id
+	if target_vid != -1 and target_vid != agent_vid:
+		push_error("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
+		if event_bus:
+			event_bus.log("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
+		return false
+	return true
 
 
 func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
@@ -720,12 +743,14 @@ func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, 
 		trade_departed.emit(agent.current_village_ref, target_village)
 	# Stop any active wait/travel so set_target takes effect immediately,
 	# matching baker_job's _start_trade_travel() which also calls route.stop() first.
+	_intentional_cross_village = true
 	route.stop()
 	agent.pending_target = null
 	route.set_target(_trade_target_market_node)
 
 
 func _on_trade_arrival() -> void:
+	_intentional_cross_village = false
 	var arrived_village: Node = trade_target_village
 	var arrived_market_node: Node2D = _trade_target_market_node
 	var is_home_return: bool = (arrived_village == agent.home_village_ref)
@@ -751,6 +776,8 @@ func _on_trade_arrival() -> void:
 
 	if is_home_return:
 		# ── Home return arrival ──────────────────────────────────────────────
+		# Explicitly clear stale trade market ref so normal routing uses only home nodes.
+		_trade_target_market_node = null
 		if event_bus:
 			event_bus.log("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
 		else:

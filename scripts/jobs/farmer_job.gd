@@ -188,6 +188,12 @@ func _validate_target(target: Node2D) -> bool:
 
 
 func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
+	if not _validate_target(house):
+		push_warning("[WARN] FarmerJob(%s): set_route_nodes rejected house %s" % [agent.name if agent else "?", house.name if house else "null"])
+		return
+	if not _validate_target(market_pos):
+		push_warning("[WARN] FarmerJob(%s): set_route_nodes rejected market %s" % [agent.name if agent else "?", market_pos.name if market_pos else "null"])
+		return
 	house_node = house
 	market_node = market_pos
 	if profit and market and event_bus:
@@ -267,6 +273,9 @@ func _on_arrived(t: Node2D) -> void:
 
 func _on_wait_finished() -> void:
 	if agent.pending_target != null:
+		if not _validate_target(agent.pending_target):
+			agent.pending_target = null
+			return
 		route.set_target(agent.pending_target)
 		agent.pending_target = null
 
@@ -473,7 +482,9 @@ func _check_idle_guard() -> void:
 	if event_bus:
 		event_bus.log("[STATE] Tick %d: Farmer idle guard triggered, restarting route" % agent.current_tick)
 	if route_targets.size() > 0:
-		route.set_target(route_targets[route_index])
+		var _idle_target: Node2D = route_targets[route_index]
+		if _validate_target(_idle_target):
+			route.set_target(_idle_target)
 
 
 func get_status_text() -> String:

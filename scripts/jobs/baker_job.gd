@@ -738,6 +738,12 @@ func _check_idle_and_pause_guard() -> void:
 	if trade_route_active:
 		agent.idle_ticks = 0
 		return
+	# Suppress idle guard when at a foreign village (commit window running).
+	# Without this the guard fires after MAX_IDLE_TICKS and forces RESTOCK +
+	# routes baker to market_location (home market) before the window expires.
+	if agent.current_village_ref != null and agent.current_village_ref != agent.home_village_ref:
+		agent.idle_ticks = 0
+		return
 	if route == null:
 		return
 	if route.is_traveling or route.is_waiting or route.target != null or agent.pending_target != null:
@@ -887,7 +893,7 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
 	if event_bus:
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [agent.name, _last_trade_move_tick, agent.current_tick])
-		event_bus.log("[TRADE MOVE] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
+		event_bus.log("[TRADE DEPART] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
 	_last_trade_move_tick = agent.current_tick
 
 	# Stop current activity and route to the target village's market.
@@ -948,6 +954,7 @@ func _on_trade_arrival() -> void:
 		var vname: String = arrived_village.get("village_name") if arrived_village.get("village_name") else arrived_village.name
 		if event_bus:
 			event_bus.log("[TRADE RETURN] agent=Baker arrived home at %s" % vname)
+			event_bus.log("[TRADE MIGRATION COMPLETE] agent=Baker village=%s (home return)" % vname)
 		# Mark cycle complete and start commitment window so we don't immediately leave again.
 		trade_sale_completed = true
 		_begin_trade_commit_window()
@@ -974,6 +981,8 @@ func _on_trade_arrival() -> void:
 		trade_sale_completed = true
 		if event_bus:
 			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d" % [vname, sold])
+			# Canonical migration-complete signal: current_village_ref already updated above.
+			event_bus.log("[TRADE MIGRATION COMPLETE] agent=Baker village=%s" % vname)
 		# Start commitment window so baker stays long enough for the market to react.
 		_begin_trade_commit_window()
 		# Explicitly clear route state before waiting (ensures is_traveling=false).

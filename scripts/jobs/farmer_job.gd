@@ -399,6 +399,12 @@ func _check_idle_guard() -> void:
 	if trade_route_active:
 		agent.idle_ticks = 0
 		return
+	# Suppress idle guard when at a foreign village (commit window running).
+	# Without this the guard fires after MAX_IDLE_TICKS and routes the farmer
+	# back toward home-village route nodes before the window expires.
+	if agent.current_village_ref != null and agent.current_village_ref != agent.home_village_ref:
+		agent.idle_ticks = 0
+		return
 	if route == null:
 		return
 	if route.is_traveling or route.is_waiting or route.target != null or agent.pending_target != null:
@@ -542,10 +548,10 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
 	if event_bus:
-		event_bus.log("[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s" % [
+		event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
 			agent.current_village_ref.village_name, target_village.village_name, reason])
 	else:
-		print("[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s" % [
+		print("[TRADE DEPART] agent=Farmer from=%s to=%s reason=%s" % [
 			agent.current_village_ref.village_name, target_village.village_name, reason])
 	agent.pending_target = null
 	route.set_target(_trade_target_market_node)
@@ -589,3 +595,8 @@ func _on_trade_arrival() -> void:
 	# Mark cycle complete and open commitment window regardless of sale outcome
 	_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
 	_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
+	# Canonical migration-complete signal: current_village_ref already updated above.
+	if event_bus:
+		event_bus.log("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)
+	else:
+		print("[TRADE MIGRATION COMPLETE] agent=Farmer village=%s" % arrived_village.village_name)

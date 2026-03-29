@@ -789,6 +789,11 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	# Guard: mid-travel — never evaluate while physically moving between villages.
 	if trade_route_active and (route != null and route.is_traveling):
 		return
+	# Guard: respect evaluation cadence (silent — fires every tick, no log spam).
+	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
+		return
+	# Advance the timer now so blocked logs below fire at cadence, not every tick.
+	agent.last_trade_eval_tick = tick
 	# Guard: sale cycle not yet complete at current destination.
 	if not trade_sale_completed:
 		if event_bus:
@@ -799,10 +804,6 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		if event_bus:
 			event_bus.log("[TRADE EVAL BLOCKED] agent=Baker reason=commit_window")
 		return
-	# Guard: respect evaluation cadence.
-	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
-		return
-	agent.last_trade_eval_tick = tick
 
 	var current_village = agent.current_village_ref
 	if current_village == null or not current_village.has_method("get_trade_snapshot"):

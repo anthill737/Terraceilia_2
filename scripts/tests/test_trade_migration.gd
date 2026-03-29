@@ -1,11 +1,12 @@
 extends Node
 
-## Headless trade-migration test suite. Validates five scenarios:
-##   1. TRADE_OFF  — no agent crosses village boundaries when trade disabled
-##   2. TRADE_ON   — agents migrate when a better market exists and trade is enabled
-##   3. RETURN     — agents return home once home market becomes more profitable
-##   4. DETERMINISM — same RNG seed produces identical movement patterns
-##   5. IDENTICAL  — equal prices + unblocked markets → little/no trade
+## Headless trade-migration test suite. Validates six scenarios:
+##   1. TRADE_OFF       — no agent crosses village boundaries when trade disabled
+##   2. TRADE_ON        — agents migrate when a better market exists and trade is enabled
+##   3. RETURN          — agents return home once home market becomes more profitable
+##   4. DETERMINISM     — same RNG seed produces identical movement patterns
+##   5. IDENTICAL       — equal prices + unblocked markets → little/no trade
+##   6. SCENE_TREE_TRUTH — after arrival, current_village_ref matches arrived village
 ##
 ## Depends on T2 (FarmerJob trade eval loop) and T3 (BakerJob trade eval loop).
 ##
@@ -29,6 +30,7 @@ const RETURN_MIGRATE_TICKS: int = 300 # Same: allow full migration
 const RETURN_FLIP_TICKS: int = 300    # After price flip: allow full return travel
 const DETERM_TICKS: int = 300         # Enough to capture post-arrival state
 const IDENTICAL_TICKS: int = 300      # Test 5: equal prices, unblocked → no trade
+const SCENE_TREE_TRUTH_TICKS: int = 300  # Test 6: asymmetric prices → migration, then check refs
 
 ## How much higher the "attractive" village prices are vs the home village.
 ## 3× is well above any travel cost the spec mandates, ensuring migration triggers.
@@ -49,7 +51,8 @@ enum Scenario {
 	RETURN,         ## Test 3: migration then price flip → return expected
 	DETERMINISM_A,  ## Test 4a: first run, record agent state
 	DETERMINISM_B,  ## Test 4b: second run, compare state
-	IDENTICAL,      ## Test 5: equal prices, unblocked markets → little/no trade
+	IDENTICAL,          ## Test 5: equal prices, unblocked markets → little/no trade
+	SCENE_TREE_TRUTH,   ## Test 6: after arrival, current_village_ref == arrived village
 }
 
 var _scenario: Scenario = Scenario.TRADE_OFF
@@ -91,6 +94,7 @@ func _ready() -> void:
 	print("[TRADE TEST]   3: Return      — agents come home after price flip")
 	print("[TRADE TEST]   4: Determinism — identical seeds → identical movement")
 	print("[TRADE TEST]   5: Identical   — equal prices, unblocked → little/no trade")
+	print("[TRADE TEST]   6: SceneTree   — current_village_ref == arrived village after arrival")
 	print("[TRADE TEST] ═══════════════════════════════════════════════════════")
 	# Defer so root is no longer busy setting up children before we add _main under it.
 	call_deferred("_begin_scenario", Scenario.TRADE_OFF)
@@ -129,6 +133,9 @@ func _begin_scenario(s: Scenario) -> void:
 		Scenario.IDENTICAL:
 			print("\n[TRADE TEST] ── Test 5: Identical Villages (no trade incentive) ──")
 			_ticks_remaining = IDENTICAL_TICKS
+		Scenario.SCENE_TREE_TRUTH:
+			print("\n[TRADE TEST] ── Test 6: Scene-Tree Truth (current_village_ref after arrival) ──")
+			_ticks_remaining = SCENE_TREE_TRUTH_TICKS
 
 	var scene: PackedScene = load("res://scenes/Main.tscn")
 	if scene == null:
@@ -227,6 +234,12 @@ func _setup_scenario() -> void:
 			if _world:
 				_world.trade_enabled = true
 			_set_identical_prices()
+
+		Scenario.SCENE_TREE_TRUTH:
+			if _world:
+				_world.trade_enabled = true
+			# Use asymmetric prices so migration actually occurs — same as TRADE_ON.
+			_set_v2_prices_high()
 
 
 ## Moves Village 2 to 250 px east of Village 1 so agents can complete the trip
@@ -470,6 +483,11 @@ func _evaluate_and_advance() -> void:
 		Scenario.IDENTICAL:
 			_check_no_trade_identical()
 			_teardown()
+			call_deferred("_begin_scenario", Scenario.SCENE_TREE_TRUTH)
+
+		Scenario.SCENE_TREE_TRUTH:
+			_check_scene_tree_truth()
+			_teardown()
 			_finish()
 
 
@@ -671,6 +689,51 @@ func _check_no_trade_identical() -> void:
 		print("[TRADE TEST] PASS: Test 5 — no agent migrated with identical prices and unblocked markets")
 	else:
 		_fail("Test 5: %d agent(s) migrated despite no price incentive (identical villages)" % violations)
+
+
+## Test 6: Phase 4 scene-tree truth invariant.
+## After a trade arrival, verify that:
+##   a. agent.current_village_ref is set (not null) — runtime truth is present
+##   b. agent.current_village_ref != agent.home_village_ref — agent is at foreign village
+##   c. agent job trade_arrival_count > 0 — canonical arrival counter confirms arrival
+## This proves: when trade_arrived fires and village logs [TRADE ARRIVE],
+## agent.current_village_ref is consistent with the arrived village.
+func _check_scene_tree_truth() -> void:
+	if not _any_agent_migrated():
+		print("[TRADE TEST] WARN: Test 6 — no migration in %d ticks; scene-tree truth check is vacuous" % SCENE_TREE_TRUTH_TICKS)
+		return
+
+	var violations: int = 0
+	var checked: int = 0
+	for a in _collect_agents():
+		var job = a.get("current_job")
+		var arrival_count = job.get("trade_arrival_count") if job != null else null
+		if arrival_count == null or (arrival_count as int) <= 0:
+			continue  # this agent never completed a trade arrival — skip
+		checked += 1
+		var cur = a.get("current_village_ref")
+		var home = a.get("home_village_ref")
+		# (a) current_village_ref must be set
+		if cur == null:
+			violations += 1
+			print("[TRADE TEST]   VIOLATION: %s arrival_count=%d but current_village_ref is null" % [
+				a.name, arrival_count])
+			continue
+		# (b) current_village_ref must differ from home (agent is at foreign village)
+		if cur == home:
+			violations += 1
+			print("[TRADE TEST]   VIOLATION: %s arrival_count=%d but current_village_ref == home_village_ref (%s)" % [
+				a.name, arrival_count,
+				cur.get("village_name") if cur.get("village_name") != null else "?"])
+
+	if checked == 0:
+		print("[TRADE TEST] WARN: Test 6 — _migration_completed fired but no agent has trade_arrival_count > 0")
+		return
+	if violations == 0:
+		print("[TRADE TEST] PASS: Test 6 — %d arrived agent(s): current_village_ref is consistent with arrival" % checked)
+	else:
+		_fail("Test 6: %d/%d arrived agent(s) have inconsistent current_village_ref (scene-tree truth broken)" % [
+			violations, checked])
 
 
 # ── Suite completion ──────────────────────────────────────────────────────────

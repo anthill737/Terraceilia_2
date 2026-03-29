@@ -884,10 +884,10 @@ func _start_trade_travel(target_village: Node, reason: String) -> void:
 
 	var from_name: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
+	print("[TRADE DEBUG] agent=Baker last_move_tick=%d current_tick=%d" % [_last_trade_move_tick, agent.current_tick])
+	_last_trade_move_tick = agent.current_tick
 	if event_bus:
 		event_bus.log("[TRADE MOVE] agent=Baker from=%s to=%s reason=%s" % [from_name, to_name, reason])
-		event_bus.log("[TRADE DEBUG] agent=Baker last_move_tick=%d current_tick=%d" % [_last_trade_move_tick, agent.current_tick])
-	_last_trade_move_tick = agent.current_tick
 
 	# Stop current activity and route to the target village's market.
 	production_state = ProductionState.IDLE

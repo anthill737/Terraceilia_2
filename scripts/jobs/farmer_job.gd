@@ -204,8 +204,9 @@ func _on_arrived(t: Node2D) -> void:
 	agent.idle_ticks = 0
 	if trade_route_active and t == _trade_target_market_node:
 		_on_trade_arrival()
-		if route_targets.size() > 0:
-			agent.pending_target = get_next_target()
+		# Do NOT advance route_targets here — the farmer should stay at the arrived
+		# village until the commitment window expires and the eval loop decides
+		# the next move.  The idle guard will recover if nothing triggers a route.
 		route.wait(WAIT_TIME)
 		return
 	handle_arrival(t)
@@ -534,11 +535,16 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 	_trade_target_market_node = target_mkt_node
 	trade_route_active = true
 	trade_sale_completed = false
-	print('[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d' % [
-		agent.name, _last_trade_move_tick, agent.current_tick])
+	if event_bus:
+		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
+			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
-	print('[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s' % [
-		agent.current_village_ref.village_name, target_village.village_name, reason])
+	if event_bus:
+		event_bus.log("[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s" % [
+			agent.current_village_ref.village_name, target_village.village_name, reason])
+	else:
+		print("[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s" % [
+			agent.current_village_ref.village_name, target_village.village_name, reason])
 	agent.pending_target = null
 	route.set_target(_trade_target_market_node)
 

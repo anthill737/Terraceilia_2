@@ -428,10 +428,8 @@ func _get_world() -> Node:
 
 
 ## Returns true when conditions allow a new trade evaluation.
-## Blocks while a trip is unresolved or the commitment window is still active.
+## trade_route_active is checked separately (before interval) so not re-checked here.
 func _can_run_trade_evaluation(tick: int) -> bool:
-	if trade_route_active:
-		return false
 	if not trade_sale_completed:
 		if event_bus:
 			event_bus.log("[TRADE EVAL BLOCKED] agent=Farmer reason=sale_cycle_incomplete")
@@ -464,11 +462,14 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		return
 	if agent.current_village_ref == null or agent.home_village_ref == null:
 		return
+	if trade_route_active:
+		return
 	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
 		return
+	# Update tick before gate so blocked logs fire at most once per TRADE_EVAL_INTERVAL
+	agent.last_trade_eval_tick = tick
 	if not _can_run_trade_evaluation(tick):
 		return
-	agent.last_trade_eval_tick = tick
 
 	var local_snap: Dictionary = agent.current_village_ref.get_trade_snapshot()
 	if local_snap.is_empty():

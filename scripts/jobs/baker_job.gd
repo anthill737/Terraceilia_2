@@ -105,6 +105,12 @@ var _last_trade_move_tick: int = -1
 ## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
 
+## Phase 3 trip telemetry counters.
+var trips_taken: int = 0
+var successful_trades: int = 0
+var failed_trades: int = 0
+var _trip_depart_tick: int = -1
+
 func get_display_name() -> String:
 	return "Baker"
 
@@ -297,6 +303,11 @@ func _on_travel_timeout(_t: Node2D) -> void:
 		_begin_trade_commit_window()
 		if event_bus:
 			event_bus.log("[TRAVEL] Baker: trade travel timed out — trade state reset")
+		failed_trades += 1
+		var timeout_home_tf: String = agent.home_village_ref.get("village_name") if agent.home_village_ref and agent.home_village_ref.get("village_name") else "?"
+		if event_bus:
+			event_bus.log("[TRADE FLOW] agent=Baker from=%s to=? good=bread qty=0 depart_tick=%d arrive_tick=%d profit=+0.0" % [
+				timeout_home_tf, _trip_depart_tick, agent.current_tick])
 	print("[BUGFIX] Baker: travel timeout, forcing RESTOCK")
 	if event_bus:
 		event_bus.log("[TRAVEL] Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % agent.current_tick)
@@ -1022,6 +1033,9 @@ func _start_trade_travel(target_village: Node, reason: String, cargo_qty: int = 
 		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
+	if not is_return:
+		_trip_depart_tick = agent.current_tick
+		trips_taken += 1
 	var depart_tag: String = "[TRADE RETURN DEPART]" if is_return else "[TRADE DEPART]"
 	if event_bus:
 		event_bus.log("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f reason=%s" % [
@@ -1126,6 +1140,24 @@ func _on_trade_arrival() -> void:
 			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname_arrive, earned])
 		elif event_bus:
 			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+0.0" % [vname_arrive, 0])
+		# Phase 3: [TRADE FLOW] telemetry — compute profit and update trip counters.
+		var home_name_tf: String = agent.home_village_ref.get("village_name") if agent.home_village_ref and agent.home_village_ref.get("village_name") else "?"
+		var arrive_snap_tf: Dictionary = arrived_village.get_trade_snapshot() if is_instance_valid(arrived_village) else {}
+		var home_snap_tf: Dictionary = agent.home_village_ref.get_trade_snapshot() if is_instance_valid(agent.home_village_ref) else {}
+		var arrive_bid_tf: float = arrive_snap_tf.get("bread_price", 0.0)
+		var home_bid_tf: float = home_snap_tf.get("bread_price", 0.0)
+		var dist_tf: float = 0.0
+		if is_instance_valid(agent.home_village_ref) and is_instance_valid(arrived_village):
+			dist_tf = agent.home_village_ref.global_position.distance_to(arrived_village.global_position)
+		var travel_cost_tf: float = TRAVEL_COST_PER_DISTANCE * dist_tf
+		var profit_tf: float = sold * (arrive_bid_tf - home_bid_tf) - travel_cost_tf
+		if sold > 0:
+			successful_trades += 1
+		else:
+			failed_trades += 1
+		if event_bus:
+			event_bus.log("[TRADE FLOW] agent=Baker from=%s to=%s good=bread qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
+				home_name_tf, vname_arrive, sold, _trip_depart_tick, agent.current_tick, profit_tf])
 		# Sale attempt is now resolved (success, partial, or blocked) — mark complete.
 		trade_sale_completed = true
 		# Start commitment window so baker stays long enough for the market to react.

@@ -302,7 +302,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Bootstrap market
 	_apply_market_seed()
 
-	event_bus.log("Tick 0: START")
+	event_bus.emit_log("Tick 0: START")
 
 
 ## Canonical tick entry-point.  World connects SimulationClock.ticked → tick_sim.
@@ -345,7 +345,7 @@ func receive_tick(tick: int) -> void:
 		)
 
 		if event_bus and calendar.day_index % 5 == 0:
-			event_bus.log("[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
+			event_bus.emit_log("[SPAWN CHECK] day=%d prosperity=%.3f threshold=%.2f suppress=%s households=%d" % [
 				calendar.day_index,
 				prosperity_meter.prosperity_score,
 				prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW,
@@ -491,7 +491,7 @@ func _fixup_node_name(node: Node, role_prefix: String) -> void:
 		node.name = fixed
 		print(msg)
 		if event_bus:
-			event_bus.log(msg)
+			event_bus.emit_log(msg)
 
 
 func _assign_field_to_farmer(field_node: Node2D, new_farmer: Node) -> void:
@@ -504,7 +504,7 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 		var msg := "[LAND] Spawn blocked — cap reached (%d/%d)" % [all_field_nodes.size(), field_mgr.MAX_FIELDS]
 		print(msg)
 		if event_bus:
-			event_bus.log(msg)
+			event_bus.emit_log(msg)
 		return null
 
 	var field_node = Node2D.new()
@@ -534,7 +534,7 @@ func spawn_field_at(pos: Vector2, assign_to: Node = null, skip_auto_assign: bool
 	field_mgr.register_field(field_node, field_node)
 
 	if event_bus:
-		event_bus.log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
+		event_bus.emit_log("PLACED: %s at (%d, %d)" % [field_node.name, int(pos.x), int(pos.y)])
 
 	if not skip_auto_assign:
 		if assign_to != null and is_instance_valid(assign_to):
@@ -580,8 +580,8 @@ func _on_calendar_day_changed(day: int) -> void:
 		return
 
 	if event_bus:
-		event_bus.log("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
-		event_bus.log("[POP STATUS] total=%d/%d (H=%d F=%d B=%d)" % [
+		event_bus.emit_log("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
+		event_bus.emit_log("[POP STATUS] total=%d/%d (H=%d F=%d B=%d)" % [
 			pop_mgr.count(), MAX_TOTAL_POP,
 			households.size(), all_farmers.size(), all_bakers.size()])
 
@@ -603,7 +603,7 @@ func _on_calendar_day_changed(day: int) -> void:
 	if not sim_failed and pop_mgr.count() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
 		sim_failed = true
 		if event_bus:
-			event_bus.log("[SIM FAIL] Population extinct on day %d" % day)
+			event_bus.emit_log("[SIM FAIL] Population extinct on day %d" % day)
 
 	if _labor_svc:
 		_labor_svc.tick_day(Callable(self, "_perform_role_conversion"))
@@ -619,7 +619,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
 		var block_line := "[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
 			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
-		if event_bus: event_bus.log(block_line)
+		if event_bus: event_bus.emit_log(block_line)
 		return
 
 	var pos: Vector2 = household.global_position
@@ -637,11 +637,11 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		var conv_delta: float = u_best - u_cur
 		var conv_ratio: float = u_best / maxf(0.01, absf(u_cur))
 		if event_bus:
-			event_bus.log("[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role])
+			event_bus.emit_log("[CONVERT] pop=%s from=%s to=%s allowed=1 block=none" % [pop_id, old_role, role])
 		ag.log_event("Switched from %s to %s — utility gain %.2f, ratio %.2f; had $%.0f." % [
 			old_role, role.capitalize(), conv_delta, conv_ratio, wallet_money])
 		if event_bus:
-			event_bus.log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
+			event_bus.emit_log("[MOBILITY] %s → in-place conversion to %s at (%.0f, %.0f) with $%.2f" % [
 				ag.name, role, pos.x, pos.y, wallet_money])
 
 		var h_idx := households.find(ag)
@@ -662,7 +662,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 				if not ag.agent_died.is_connected(_on_household_died):
 					ag.agent_died.connect(_on_household_died)
 				if event_bus:
-					event_bus.log("[MOBILITY] Farmer conversion aborted — field spawn returned null")
+					event_bus.emit_log("[MOBILITY] Farmer conversion aborted — field spawn returned null")
 				return
 
 			ag.set_role("Farmer")
@@ -694,7 +694,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			all_farmers.append(ag)
 
 			if event_bus:
-				event_bus.log("[LAND] New field for farmer %s at (%.0f, %.0f)" % [
+				event_bus.emit_log("[LAND] New field for farmer %s at (%.0f, %.0f)" % [
 					ag.name, field_pos.x, field_pos.y])
 
 		elif role == "baker":
@@ -736,7 +736,7 @@ func log_population_snapshot() -> void:
 		pop_mgr.count() if pop_mgr else 0]
 	print("[%s] %s" % [name, line])
 	if event_bus:
-		event_bus.log(line)
+		event_bus.emit_log(line)
 
 
 func _roll_global_cashflow() -> void:
@@ -818,7 +818,7 @@ func get_spawn_point_for_role(role: String) -> Vector2:
 func _on_agent_trade_arrived(arrived_village: Node) -> void:
 	if arrived_village == self:
 		if event_bus:
-			event_bus.log("[TRADE ARRIVE] village=%s: agent arrived (village notified via signal)" % village_name)
+			event_bus.emit_log("[TRADE ARRIVE] village=%s: agent arrived (village notified via signal)" % village_name)
 
 
 ## Called when any agent spawned by this village emits trade_return_arrived.
@@ -828,7 +828,7 @@ func _on_agent_trade_arrived(arrived_village: Node) -> void:
 func _on_agent_trade_return_arrived(home_village: Node) -> void:
 	if home_village == self:
 		if event_bus:
-			event_bus.log("[TRADE RETURN ARRIVE] village=%s: agent returned home (village notified via signal)" % village_name)
+			event_bus.emit_log("[TRADE RETURN ARRIVE] village=%s: agent returned home (village notified via signal)" % village_name)
 
 
 # ============================================================================

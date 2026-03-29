@@ -42,7 +42,7 @@ func check_margin_compression(recipe: Dictionary) -> bool:
 	# Validate recipe structure
 	if not recipe.has("output_good") or not recipe.has("output_quantity") or not recipe.has("inputs"):
 		if event_bus:
-			event_bus.log("ERROR: MarginCompression - invalid recipe structure for %s" % agent_name)
+			event_bus.emit_log("ERROR: MarginCompression - invalid recipe structure for %s" % agent_name)
 		return false
 	
 	var output_good: String = recipe["output_good"]
@@ -96,11 +96,11 @@ func check_margin_compression(recipe: Dictionary) -> bool:
 		if event_bus:
 			if is_compressed:
 				var margin_percent: float = ((output_price - cost_per_output) / output_price) * 100.0
-				event_bus.log("Tick %d: %s margin compression ON (margin: %.1f%%, input_cost: $%.2f, output: $%.2f)" % [
+				event_bus.emit_log("Tick %d: %s margin compression ON (margin: %.1f%%, input_cost: $%.2f, output: $%.2f)" % [
 					current_tick, agent_name, margin_percent, cost_per_output, output_price
 				])
 			else:
-				event_bus.log("Tick %d: %s margin compression OFF (margins recovered)" % [current_tick, agent_name])
+				event_bus.emit_log("Tick %d: %s margin compression OFF (margins recovered)" % [current_tick, agent_name])
 	
 	last_check_tick = current_tick
 	return is_compressed

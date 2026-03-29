@@ -122,7 +122,7 @@ func update_prosperity(day: int) -> void:
 	
 	# Log prosperity summary once per day if enabled
 	if LOG_DAILY and event_bus:
-		event_bus.log("Day %d: Prosperity=%.3f (wealth=%.2f food=%.2f starvation=%.2f)" % [
+		event_bus.emit_log("Day %d: Prosperity=%.3f (wealth=%.2f food=%.2f starvation=%.2f)" % [
 			day, prosperity_score, wealth_score, food_score, starvation_score
 		])
 

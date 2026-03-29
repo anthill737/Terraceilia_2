@@ -159,7 +159,7 @@ func seed_market(seed_wheat: int, seed_bread: int, seed_seeds: int) -> void:
 		seed_wheat, seed_bread, seed_seeds]
 	print(msg)
 	if event_bus:
-		event_bus.log(msg)
+		event_bus.emit_log(msg)
 
 
 func _agent_label(agent) -> String:
@@ -186,7 +186,7 @@ func set_tick(t: int) -> void:
 		# Log wheat parameters
 		var wheat_lower: int = int(float(wheat_target) * (1.0 - TARGET_BAND_PCT))
 		var wheat_upper: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("[MARKET PARAMS] wheat: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
+		event_bus.emit_log("[MARKET PARAMS] wheat: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
 			wheat_target, wheat_lower, wheat_upper, TARGET_BAND_PCT,
 			DECAY_CONFIG["wheat"]["min_rate_per_day"],
 			DECAY_CONFIG["wheat"]["max_rate_per_day"],
@@ -195,7 +195,7 @@ func set_tick(t: int) -> void:
 		# Log bread parameters
 		var bread_lower: int = int(float(bread_target) * (1.0 - TARGET_BAND_PCT))
 		var bread_upper: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("[MARKET PARAMS] bread: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
+		event_bus.emit_log("[MARKET PARAMS] bread: target=%d, lower_band=%d, upper_band=%d, band_pct=%.2f, decay_min=%.2f, decay_max=%.2f, lower_bid_mult=%.2f" % [
 			bread_target, bread_lower, bread_upper, TARGET_BAND_PCT,
 			DECAY_CONFIG["bread"]["min_rate_per_day"],
 			DECAY_CONFIG["bread"]["max_rate_per_day"],
@@ -237,9 +237,9 @@ func _update_producer_hysteresis(good: String, current_inv: int, target_inv: int
 		# Log only on state change
 		if was_can_sell != state["can_sell"] and event_bus:
 			if state["can_sell"]:
-				event_bus.log("[HYSTERESIS] %s SELLING RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
+				event_bus.emit_log("[HYSTERESIS] %s SELLING RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
 			else:
-				event_bus.log("[HYSTERESIS] %s SELLING PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
+				event_bus.emit_log("[HYSTERESIS] %s SELLING PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
 	
 	# Update production state
 	if config["stop_produce_at_or_above_upper_band"]:
@@ -251,9 +251,9 @@ func _update_producer_hysteresis(good: String, current_inv: int, target_inv: int
 		# Log only on state change
 		if was_can_produce != state["can_produce"] and event_bus:
 			if state["can_produce"]:
-				event_bus.log("[HYSTERESIS] %s PRODUCTION RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
+				event_bus.emit_log("[HYSTERESIS] %s PRODUCTION RESUMED (inventory %d <= lower_band %d)" % [good, current_inv, lower_band])
 			else:
-				event_bus.log("[HYSTERESIS] %s PRODUCTION PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
+				event_bus.emit_log("[HYSTERESIS] %s PRODUCTION PAUSED (inventory %d >= upper_band %d)" % [good, current_inv, upper_band])
 
 
 func can_producer_sell(good: String) -> bool:
@@ -413,7 +413,7 @@ func is_saturated(good: String) -> bool:
 			return bread >= bread_capacity
 		_:
 			if event_bus:
-				event_bus.log("ERROR: Unknown good '%s' in is_saturated()" % good)
+				event_bus.emit_log("ERROR: Unknown good '%s' in is_saturated()" % good)
 			return false
 
 
@@ -426,7 +426,7 @@ func remaining_capacity(good: String) -> int:
 			return max(0, bread_capacity - bread)
 		_:
 			if event_bus:
-				event_bus.log("ERROR: Unknown good '%s' in remaining_capacity()" % good)
+				event_bus.emit_log("ERROR: Unknown good '%s' in remaining_capacity()" % good)
 			return 0
 
 
@@ -471,7 +471,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	var upper_band_check: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 	if not is_survival and wheat >= upper_band_check:
 		if event_bus:
-			event_bus.log("[WHEAT SELL OVERRIDE] day=%d inv_high=%d allowing_sell=true" % [current_day, wheat])
+			event_bus.emit_log("[WHEAT SELL OVERRIDE] day=%d inv_high=%d allowing_sell=true" % [current_day, wheat])
 	
 	var farmer_inv: Inventory = get_inv(farmer)
 	var farmer_wallet: Wallet = get_wallet(farmer)
@@ -485,7 +485,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	var available_space: int = wheat_capacity - wheat
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to sell %d wheat, but market wheat storage FULL (%d/%d)" % [current_tick, _agent_label(farmer), farmer_wheat, wheat, wheat_capacity])
+			event_bus.emit_log("Tick %d: %s tried to sell %d wheat, but market wheat storage FULL (%d/%d)" % [current_tick, _agent_label(farmer), farmer_wheat, wheat, wheat_capacity])
 		_set_result(0, "storage_full", "wheat", wheat_price)
 		return 0
 	
@@ -542,9 +542,9 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 	_set_result(units_bought, reason, "wheat", avg_price)
 	
 	if event_bus and units_bought > 0:
-		event_bus.log("Tick %d: %s wheat sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(farmer), farmer_wheat, units_bought, avg_price, initial_bid, final_bid, reason])
+		event_bus.emit_log("Tick %d: %s wheat sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)" % [current_tick, _agent_label(farmer), farmer_wheat, units_bought, avg_price, initial_bid, final_bid, reason])
 		var inv_after_sale: int = wheat
-		event_bus.log("[WHEAT SALE] day=%d pop=%s offered=%d cleared=%d avg_price=%.2f inv_before=%d inv_after=%d" % [
+		event_bus.emit_log("[WHEAT SALE] day=%d pop=%s offered=%d cleared=%d avg_price=%.2f inv_before=%d inv_after=%d" % [
 			current_day, _agent_label(farmer), farmer_wheat, units_bought, avg_price,
 			wheat - units_bought, inv_after_sale])
 	
@@ -570,7 +570,7 @@ func sell_seeds_to_farmer(farmer: Agent) -> void:
 		farmer_inv.add("seeds", needed)
 		
 		if event_bus:
-			event_bus.log("Tick %d: Market sold %d seeds to %s for $%.2f" % [current_tick, needed, _agent_label(farmer), cost])
+			event_bus.emit_log("Tick %d: Market sold %d seeds to %s for $%.2f" % [current_tick, needed, _agent_label(farmer), cost])
 
 
 func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
@@ -582,7 +582,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	
 	if wheat == 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
+			event_bus.emit_log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
 		_set_result(0, "empty", "wheat", wheat_price)
 		return 0
 	
@@ -592,7 +592,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	
 	if max_affordable == 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to buy wheat, but cannot afford any at $%.2f (money=$%.2f)." % [current_tick, _agent_label(baker), wheat_price, baker_wallet.money])
+			event_bus.emit_log("Tick %d: %s tried to buy wheat, but cannot afford any at $%.2f (money=$%.2f)." % [current_tick, _agent_label(baker), wheat_price, baker_wallet.money])
 		_set_result(0, "insufficient_funds", "wheat", wheat_price)
 		return 0
 	
@@ -615,9 +615,9 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	
 	if event_bus:
 		if amount_sold < requested:
-			event_bus.log("Tick %d: %s requested %d wheat; bought %d (market wheat=%d, affordable=%d)." % [current_tick, _agent_label(baker), requested, amount_sold, before_market_wheat, max_affordable])
+			event_bus.emit_log("Tick %d: %s requested %d wheat; bought %d (market wheat=%d, affordable=%d)." % [current_tick, _agent_label(baker), requested, amount_sold, before_market_wheat, max_affordable])
 		else:
-			event_bus.log("Tick %d: Market sold %d wheat to %s for $%.2f" % [current_tick, amount_sold, _agent_label(baker), cost])
+			event_bus.emit_log("Tick %d: Market sold %d wheat to %s for $%.2f" % [current_tick, amount_sold, _agent_label(baker), cost])
 	
 	return amount_sold
 
@@ -629,7 +629,7 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	
 	if not is_survival and not can_producer_sell("bread"):
 		if event_bus:
-			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(baker)])
+			event_bus.emit_log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(baker)])
 		_set_result(0, "blocked", "bread", bread_price)
 		return 0
 	
@@ -644,7 +644,7 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(baker), baker_bread, bread, bread_capacity])
+			event_bus.emit_log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(baker), baker_bread, bread, bread_capacity])
 		_set_result(0, "storage_full", "bread", bread_price)
 		return 0
 	
@@ -696,7 +696,7 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 	
 	if event_bus and units_bought > 0:
 		var trade_type: String = " (SURVIVAL)" if is_survival else ""
-		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
+		event_bus.emit_log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(baker), baker_bread, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
 	return units_bought
 
@@ -708,7 +708,7 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 
 	if not is_survival and agent.is_in_group("bakers") and not can_producer_sell("bread"):
 		if event_bus:
-			event_bus.log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
+			event_bus.emit_log("Tick %d: %s bread sale BLOCKED by hysteresis (inventory >= upper_band)" % [current_tick, _agent_label(agent)])
 		_set_result(0, "blocked", "bread", bread_price)
 		return 0
 	
@@ -727,7 +727,7 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	var available_space: int = bread_capacity - bread
 	if available_space <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(agent), amount_offered, bread, bread_capacity])
+			event_bus.emit_log("Tick %d: %s tried to sell %d bread, but market bread storage FULL (%d/%d)" % [current_tick, _agent_label(agent), amount_offered, bread, bread_capacity])
 		_set_result(0, "storage_full", "bread", bread_price)
 		return 0
 	
@@ -779,7 +779,7 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 	
 	if event_bus and units_bought > 0:
 		var trade_type: String = " (SURVIVAL)" if is_survival else ""
-		event_bus.log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
+		event_bus.emit_log("Tick %d: %s bread sale: offered=%d, cleared=%d, avg=$%.2f, bid=%.2f→%.2f (%s)%s" % [current_tick, _agent_label(agent), amount_offered, units_bought, avg_price, initial_bid, final_bid, reason, trade_type])
 	
 	return units_bought
 
@@ -793,7 +793,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	if bread <= 0:
 		if event_bus:
-			event_bus.log("[BREAD EMPTY] day=%d tick=%d buyer=%s wanted=%d inv=0" % [current_day, current_tick, _agent_label(h), requested])
+			event_bus.emit_log("[BREAD EMPTY] day=%d tick=%d buyer=%s wanted=%d inv=0" % [current_day, current_tick, _agent_label(h), requested])
 		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
@@ -804,7 +804,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	if qty <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(h), bread_price, h_wallet.money])
+			event_bus.emit_log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(h), bread_price, h_wallet.money])
 		_set_result(0, "insufficient_funds", "bread", bread_price)
 		return 0
 	
@@ -835,13 +835,13 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 			can_buy_own_output = true
 		if not can_buy_own_output:
 			if event_bus:
-				event_bus.log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED)" % current_tick)
+				event_bus.emit_log("ERROR Tick %d: Baker attempted to buy bread (BLOCKED)" % current_tick)
 			_set_result(0, "blocked", "bread", bread_price)
 			return 0
 	
 	if bread <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
+			event_bus.emit_log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
 		_set_result(0, "empty", "bread", bread_price)
 		return 0
 	
@@ -852,7 +852,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	
 	if qty <= 0:
 		if event_bus:
-			event_bus.log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(agent), bread_price, agent_wallet.money])
+			event_bus.emit_log("Tick %d: %s cannot afford bread ($%.2f), money=$%.2f" % [current_tick, _agent_label(agent), bread_price, agent_wallet.money])
 		_set_result(0, "insufficient_funds", "bread", bread_price)
 		return 0
 	
@@ -865,7 +865,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	_set_result(qty, reason, "bread", bread_price)
 	
 	if event_bus and qty < requested:
-		event_bus.log("Tick %d: %s bought %d/%d bread (limited by availability or money)" % [current_tick, _agent_label(agent), qty, requested])
+		event_bus.emit_log("Tick %d: %s bought %d/%d bread (limited by availability or money)" % [current_tick, _agent_label(agent), qty, requested])
 	
 	return qty
 
@@ -913,14 +913,14 @@ func on_day_changed(day: int) -> void:
 	# PART 4: Log market-side hysteresis blocking before reset
 	if wheat_market_buy_blocked and event_bus:
 		var wheat_upper: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, wheat_upper])
+		event_bus.emit_log("Day %d: MARKET BUY BLOCKED - wheat (inventory %d >= upper_band %d)" % [day, wheat, wheat_upper])
 	if bread_market_buy_blocked and event_bus:
 		var bread_upper: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
-		event_bus.log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, bread_upper])
+		event_bus.emit_log("Day %d: MARKET BUY BLOCKED - bread (inventory %d >= upper_band %d)" % [day, bread, bread_upper])
 	
 	# Daily bread status diagnostic
 	if event_bus:
-		event_bus.log("[BREAD STATUS] day=%d inv=%d paused_sell=%s paused_prod=%s" % [
+		event_bus.emit_log("[BREAD STATUS] day=%d inv=%d paused_sell=%s paused_prod=%s" % [
 			day, bread,
 			not can_producer_sell("bread"),
 			not can_producer_produce("bread")])
@@ -1002,7 +1002,7 @@ func _apply_inventory_decay(day: int) -> void:
 			
 			# PART 4: Log when new decay rate is rolled
 			if event_bus:
-				event_bus.log("Day %d: %s decay rate set to %.1f%% for next %d days" % [
+				event_bus.emit_log("Day %d: %s decay rate set to %.1f%% for next %d days" % [
 					day, good_name, current_decay_rate * 100.0, DECAY_WINDOW_DAYS
 				])
 		
@@ -1035,7 +1035,7 @@ func _apply_inventory_decay(day: int) -> void:
 		
 		# PART 4: Log decay application
 		if event_bus:
-			event_bus.log("Day %d: %s decay removed %d units (rate %.1f%%), inv %d→%d" % [
+			event_bus.emit_log("Day %d: %s decay removed %d units (rate %.1f%%), inv %d→%d" % [
 				day, good_name, decay_amount, current_decay_rate * 100.0,
 				old_inventory, current_inventory
 			])
@@ -1136,13 +1136,13 @@ func _adjust_wheat_price(day: int) -> void:
 	# Daily diagnostic log
 	if event_bus:
 		if wheat_total_cleared > 0:
-			event_bus.log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
+			event_bus.emit_log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
 				day, wheat, lower_band, wheat_target, upper_band, bid_mult, max_buy,
 				wheat_total_cleared, old_price, wheat_price,
 				update_reason + (" (CAP)" if cap_applied else "")
 			])
 		else:
-			event_bus.log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
+			event_bus.emit_log("Day %d: wheat | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
 				day, wheat, lower_band, wheat_target, upper_band, bid_mult, max_buy,
 				old_price, wheat_price, update_reason
 			])
@@ -1243,13 +1243,13 @@ func _adjust_bread_price(day: int) -> void:
 	# Daily diagnostic log
 	if event_bus:
 		if bread_total_cleared > 0:
-			event_bus.log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
+			event_bus.emit_log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=%d | $%.2f→$%.2f | %s" % [
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				bread_total_cleared, old_price, bread_price,
 				update_reason + (" (CAP)" if cap_applied else "")
 			])
 		else:
-			event_bus.log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
+			event_bus.emit_log("Day %d: bread | inv %d [%d-%d-%d] | bid×%.2f | cap %d | trades=0 | $%.2f→$%.2f | %s" % [
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				old_price, bread_price, update_reason
 			])

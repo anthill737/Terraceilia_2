@@ -46,7 +46,7 @@ func arm(type: String) -> void:
 	_create_ghost_preview(type)
 	
 	if event_bus:
-		event_bus.log("PLACE MODE: %s armed (click world to place, Esc to cancel)" % type.capitalize())
+		event_bus.emit_log("PLACE MODE: %s armed (click world to place, Esc to cancel)" % type.capitalize())
 
 
 func cancel() -> void:
@@ -63,7 +63,7 @@ func cancel() -> void:
 		ghost_node = null
 	
 	if event_bus:
-		event_bus.log("PLACE MODE: canceled")
+		event_bus.emit_log("PLACE MODE: canceled")
 
 
 func _create_ghost_preview(type: String) -> void:
@@ -93,7 +93,7 @@ func _spawn_at_position(pos: Vector2) -> void:
 		return
 	
 	if event_bus:
-		event_bus.log("PLACE: Spawning %s at (%.0f,%.0f)" % [place_type, pos.x, pos.y])
+		event_bus.emit_log("PLACE: Spawning %s at (%.0f,%.0f)" % [place_type, pos.x, pos.y])
 	
 	match place_type:
 		"farmer":

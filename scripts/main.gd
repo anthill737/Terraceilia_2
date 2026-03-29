@@ -121,7 +121,7 @@ func _ready() -> void:
 	if village != null:
 		var eb = village.event_bus
 		if eb:
-			eb.log("Tick 0: START")
+			eb.emit_log("Tick 0: START")
 
 
 func _process(_delta: float) -> void:

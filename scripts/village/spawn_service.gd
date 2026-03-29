@@ -38,7 +38,7 @@ func _load_agent_scene() -> void:
 func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 	if _agent_scene == null:
 		if _village.event_bus:
-			_village.event_bus.log("[ERROR] Cannot spawn farmer: AgentScene not loaded")
+			_village.event_bus.emit_log("[ERROR] Cannot spawn farmer: AgentScene not loaded")
 		return null
 
 	var total_pop: int = _village.get_total_population()
@@ -46,7 +46,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
 		print(msg)
 		if _village.event_bus:
-			_village.event_bus.log(msg)
+			_village.event_bus.emit_log(msg)
 		return null
 
 	var f: Agent = _agent_scene.instantiate() as Agent
@@ -119,7 +119,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		var msg: String = "PLACED: %s at (%d, %d)" % [f.name, int(pos.x), int(pos.y)]
 		if absorbed > 0:
 			msg += " → absorbed %d unassigned field(s)" % absorbed
-		_village.event_bus.log(msg)
+		_village.event_bus.emit_log(msg)
 
 	return f
 
@@ -127,7 +127,7 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 func spawn_baker_at(pos: Vector2) -> Node:
 	if _agent_scene == null:
 		if _village.event_bus:
-			_village.event_bus.log("[ERROR] Cannot spawn baker: AgentScene not loaded")
+			_village.event_bus.emit_log("[ERROR] Cannot spawn baker: AgentScene not loaded")
 		return null
 
 	var total_pop: int = _village.get_total_population()
@@ -135,7 +135,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
 		print(msg)
 		if _village.event_bus:
-			_village.event_bus.log(msg)
+			_village.event_bus.emit_log(msg)
 		return null
 
 	var b: Agent = _agent_scene.instantiate() as Agent
@@ -195,7 +195,7 @@ func spawn_baker_at(pos: Vector2) -> Node:
 	_village.all_bakers.append(b)
 
 	if _village.event_bus:
-		_village.event_bus.log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
+		_village.event_bus.emit_log("PLACED: %s at (%d, %d)" % [b.name, int(pos.x), int(pos.y)])
 
 	return b
 
@@ -210,7 +210,7 @@ func spawn_household_at(pos: Vector2) -> Node:
 		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
 		print(msg)
 		if _village.event_bus:
-			_village.event_bus.log(msg)
+			_village.event_bus.emit_log(msg)
 		return null
 
 	var h: Agent = _agent_scene.instantiate() as Agent
@@ -256,6 +256,6 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 	if _village.event_bus:
 		var prosperity_val: float = _village.prosperity_meter.prosperity_score if _village.prosperity_meter else 0.0
-		_village.event_bus.log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_val])
+		_village.event_bus.emit_log("POP GROWTH: spawning %s (prosperity=%.3f)" % [h.name, prosperity_val])
 
 	return h

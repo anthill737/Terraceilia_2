@@ -12,7 +12,7 @@ signal trade_flow(data: Dictionary)
 var village_label: String = ""
 
 
-func log(msg: String) -> void:
+func emit_log(msg: String) -> void:
 	if village_label.is_empty():
 		event_logged.emit(msg)
 	else:

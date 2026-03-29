@@ -161,7 +161,7 @@ func set_tick(t: int) -> void:
 			var has_wheat: bool = inv.get_qty("wheat") > 0
 			var at_bakery: bool = route and route.target == null and bakery_location != null and agent.position.distance_to(bakery_location.global_position) <= 10.0
 			if has_wheat and at_bakery and event_bus:
-				event_bus.log("Tick %d: [DIAGNOSTIC] Baker produced 0 bread on day %d (wheat=%d, at_bakery=%s, profit=%s, override=%s)" % [
+				event_bus.emit_log("Tick %d: [DIAGNOSTIC] Baker produced 0 bread on day %d (wheat=%d, at_bakery=%s, profit=%s, override=%s)" % [
 					t, last_diagnostic_day, inv.get_qty("wheat"), at_bakery,
 					(str(profit.is_production_profitable(BREAD_RECIPE)) if profit else "N/A"),
 					(food_reserve.survival_override_active if food_reserve else false)
@@ -169,7 +169,7 @@ func set_tick(t: int) -> void:
 		last_diagnostic_day = current_day
 		bread_produced_today = 0
 	if t == 0 and event_bus:
-		event_bus.log("Tick 0: Baker starting food=%d" % inv.get_qty("bread"))
+		event_bus.emit_log("Tick 0: Baker starting food=%d" % inv.get_qty("bread"))
 	if hysteresis_cooldown_ticks > 0:
 		hysteresis_cooldown_ticks -= 1
 	_check_travel_timeout()
@@ -223,10 +223,10 @@ func _validate_target(target: Node2D) -> bool:
 	if target_vid != -1 and target_vid != agent_vid:
 		push_error("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
 		if event_bus:
-			event_bus.log("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
+			event_bus.emit_log("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
 		return false
 	if event_bus:
-		event_bus.log("[TARGET] agent=%s village=%d -> target=%s" % [agent.name, agent_vid, target.name])
+		event_bus.emit_log("[TARGET] agent=%s village=%d -> target=%s" % [agent.name, agent_vid, target.name])
 	return true
 
 
@@ -302,15 +302,15 @@ func _on_travel_timeout(_t: Node2D) -> void:
 		# Open commit window so agent cannot immediately retry the failed trip.
 		_begin_trade_commit_window()
 		if event_bus:
-			event_bus.log("[TRAVEL] Baker: trade travel timed out — trade state reset")
+			event_bus.emit_log("[TRAVEL] Baker: trade travel timed out — trade state reset")
 		failed_trades += 1
 		var timeout_home_tf: String = agent.home_village_ref.get("village_name") if agent.home_village_ref and agent.home_village_ref.get("village_name") else "?"
 		if event_bus:
-			event_bus.log("[TRADE FLOW] agent=Baker from=%s to=? good=bread qty=0 depart_tick=%d arrive_tick=%d profit=+0.0" % [
+			event_bus.emit_log("[TRADE FLOW] agent=Baker from=%s to=? good=bread qty=0 depart_tick=%d arrive_tick=%d profit=+0.0" % [
 				timeout_home_tf, _trip_depart_tick, agent.current_tick])
 	print("[BUGFIX] Baker: travel timeout, forcing RESTOCK")
 	if event_bus:
-		event_bus.log("[TRAVEL] Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % agent.current_tick)
+		event_bus.emit_log("[TRAVEL] Tick %d: Baker travel timeout recovery - forcing RESTOCK phase" % agent.current_tick)
 	production_state = ProductionState.IDLE
 	phase = Phase.RESTOCK
 	if _validate_target(market_location):
@@ -334,7 +334,7 @@ func perform_market_transactions() -> void:
 				hysteresis_cooldown_ticks = randi_range(5, 15)
 				print("[BUGFIX] Baker BUY blocked by hysteresis → cooldown %d ticks" % hysteresis_cooldown_ticks)
 				if event_bus:
-					event_bus.log("[HYSTERESIS] Tick %d: Baker BUY blocked → cooldown %d ticks (bread production paused)" % [agent.current_tick, hysteresis_cooldown_ticks])
+					event_bus.emit_log("[HYSTERESIS] Tick %d: Baker BUY blocked → cooldown %d ticks (bread production paused)" % [agent.current_tick, hysteresis_cooldown_ticks])
 				phase = Phase.PRODUCE
 				if _validate_target(bakery_location):
 					agent.pending_target = bakery_location
@@ -369,7 +369,7 @@ func perform_market_transactions() -> void:
 				hysteresis_cooldown_ticks = randi_range(5, 15)
 				print("[BUGFIX] Baker SELL blocked by hysteresis → cooldown %d ticks" % hysteresis_cooldown_ticks)
 				if event_bus:
-					event_bus.log("[HYSTERESIS] Tick %d: Baker SELL blocked → cooldown %d ticks" % [agent.current_tick, hysteresis_cooldown_ticks])
+					event_bus.emit_log("[HYSTERESIS] Tick %d: Baker SELL blocked → cooldown %d ticks" % [agent.current_tick, hysteresis_cooldown_ticks])
 				phase = Phase.PRODUCE
 				if _validate_target(bakery_location):
 					agent.pending_target = bakery_location
@@ -384,7 +384,7 @@ func perform_market_transactions() -> void:
 			if market.is_saturated("bread"):
 				if event_bus:
 					var info = market.get_saturation_info("bread")
-					event_bus.log("Tick %d: Baker skipping sell - market bread storage saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
+					event_bus.emit_log("Tick %d: Baker skipping sell - market bread storage saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
 				if _validate_target(market_location):
 					agent.pending_target = market_location
 				route.wait(WAIT_TIME)
@@ -428,7 +428,7 @@ func perform_market_transactions() -> void:
 				route.wait(WAIT_TIME)
 		Phase.PRODUCE:
 			if event_bus and (agent.current_tick - last_phase_error_tick) >= phase_error_cooldown:
-				event_bus.log("ERROR Tick %d: Baker at market during PRODUCE phase (state machine leak)" % agent.current_tick)
+				event_bus.emit_log("ERROR Tick %d: Baker at market during PRODUCE phase (state machine leak)" % agent.current_tick)
 				last_phase_error_tick = agent.current_tick
 			phase = Phase.RESTOCK
 			if _validate_target(market_location):
@@ -450,11 +450,11 @@ func handle_bakery_arrival() -> void:
 func start_production() -> void:
 	if bakery_location == null or not _validate_target(bakery_location):
 		if event_bus:
-			event_bus.log("Tick %d: Baker start_production blocked — bakery_location null or cross-village" % agent.current_tick)
+			event_bus.emit_log("Tick %d: Baker start_production blocked — bakery_location null or cross-village" % agent.current_tick)
 		return
 	if agent.global_position.distance_to(bakery_location.global_position) > ARRIVAL_DISTANCE * 2:
 		if event_bus:
-			event_bus.log("Tick %d: Baker attempting production while not at bakery" % agent.current_tick)
+			event_bus.emit_log("Tick %d: Baker attempting production while not at bakery" % agent.current_tick)
 		return
 	route.stop()
 
@@ -536,7 +536,7 @@ func process_grinding(delta: float) -> void:
 			var ok: bool = prod.convert("wheat", "flour", units, FLOUR_PER_WHEAT)
 			if not ok:
 				if event_bus:
-					event_bus.log("ERROR Tick %d: Baker grinding failed due to capacity/rollback safety" % agent.current_tick)
+					event_bus.emit_log("ERROR Tick %d: Baker grinding failed due to capacity/rollback safety" % agent.current_tick)
 				production_state = ProductionState.IDLE
 				phase = Phase.RESTOCK
 				if _validate_target(market_location):
@@ -545,7 +545,7 @@ func process_grinding(delta: float) -> void:
 			else:
 				var flour_produced: int = units * FLOUR_PER_WHEAT
 				if event_bus:
-					event_bus.log("Tick %d: Baker ground %d wheat into %d flour" % [agent.current_tick, units, flour_produced])
+					event_bus.emit_log("Tick %d: Baker ground %d wheat into %d flour" % [agent.current_tick, units, flour_produced])
 				agent.log_event("Ground %d wheat into %d flour." % [units, flour_produced])
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
@@ -554,7 +554,7 @@ func process_grinding(delta: float) -> void:
 					if market.is_saturated("bread"):
 						if event_bus:
 							var info = market.get_saturation_info("bread")
-							event_bus.log("Tick %d: Baker pausing production - market bread saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
+							event_bus.emit_log("Tick %d: Baker pausing production - market bread saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
 						production_state = ProductionState.IDLE
 						phase = Phase.SELL
 						if _validate_target(market_location):
@@ -622,7 +622,7 @@ func process_baking(delta: float) -> void:
 			return
 		if bread_produced_today >= oven_capacity_per_day:
 			if event_bus:
-				event_bus.log("Tick %d: Baker [CAP] oven capacity reached (%d/%d) - going to sell" % [
+				event_bus.emit_log("Tick %d: Baker [CAP] oven capacity reached (%d/%d) - going to sell" % [
 					agent.current_tick, bread_produced_today, oven_capacity_per_day])
 			production_state = ProductionState.IDLE
 			phase = Phase.SELL if inv.get_qty("bread") >= BREAD_PRODUCTION_MIN else Phase.RESTOCK
@@ -655,7 +655,7 @@ func process_baking(delta: float) -> void:
 			var ok: bool = prod.convert("flour", "bread", units, BREAD_PER_FLOUR)
 			if not ok:
 				if event_bus:
-					event_bus.log("ERROR Tick %d: Baker baking failed due to capacity/rollback safety" % agent.current_tick)
+					event_bus.emit_log("ERROR Tick %d: Baker baking failed due to capacity/rollback safety" % agent.current_tick)
 				production_state = ProductionState.IDLE
 				phase = Phase.RESTOCK
 				if _validate_target(market_location):
@@ -672,7 +672,7 @@ func process_baking(delta: float) -> void:
 					inv.remove("bread", mini(-_diff, inv.get_qty("bread")))
 				bread_produced_today += bread_produced
 				if event_bus:
-					event_bus.log("Tick %d: Baker baked %d flour into %d bread (skill=%.2f)" % [agent.current_tick, units, bread_produced, agent.skill_baker])
+					event_bus.emit_log("Tick %d: Baker baked %d flour into %d bread (skill=%.2f)" % [agent.current_tick, units, bread_produced, agent.skill_baker])
 				agent.log_event(
 					"Baked %d loaves of bread (baker skill %.2f, yield ×%.2f)." %
 					[bread_produced, agent.skill_baker, _sk_mult]
@@ -684,7 +684,7 @@ func process_baking(delta: float) -> void:
 					if market.is_saturated("bread"):
 						if event_bus:
 							var info = market.get_saturation_info("bread")
-							event_bus.log("Tick %d: Baker pausing production - market bread saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
+							event_bus.emit_log("Tick %d: Baker pausing production - market bread saturated (%d/%d)" % [agent.current_tick, info["current"], info["capacity"]])
 						production_state = ProductionState.IDLE
 						phase = Phase.SELL
 						if _validate_target(market_location):
@@ -744,7 +744,7 @@ func _check_travel_timeout() -> void:
 			var tname: String = route.target.name if route.target else "null"
 			print("[BUGFIX] Baker: travel timeout reset after %d ticks (target=%s)" % [agent.travel_ticks, tname])
 			if event_bus:
-				event_bus.log("[TRAVEL] Tick %d: Baker travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.travel_ticks, tname])
+				event_bus.emit_log("[TRAVEL] Tick %d: Baker travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.travel_ticks, tname])
 			route.stop()
 			agent.travel_ticks = 0
 			production_state = ProductionState.IDLE
@@ -789,11 +789,11 @@ func _check_idle_and_pause_guard() -> void:
 		hysteresis_cooldown_ticks = randi_range(5, 15)
 		print("[BUGFIX] Baker: idle during production pause → cooldown %d ticks" % hysteresis_cooldown_ticks)
 		if event_bus:
-			event_bus.log("[HYSTERESIS] Tick %d: Baker idle during production pause, cooldown %d ticks" % [agent.current_tick, hysteresis_cooldown_ticks])
+			event_bus.emit_log("[HYSTERESIS] Tick %d: Baker idle during production pause, cooldown %d ticks" % [agent.current_tick, hysteresis_cooldown_ticks])
 	else:
 		print("[STATE] Baker: idle guard triggered, forcing RESTOCK")
 		if event_bus:
-			event_bus.log("[STATE] Tick %d: Baker idle guard triggered, forcing RESTOCK" % agent.current_tick)
+			event_bus.emit_log("[STATE] Tick %d: Baker idle guard triggered, forcing RESTOCK" % agent.current_tick)
 		phase = Phase.RESTOCK
 		if _validate_target(market_location):
 			agent.pending_target = market_location
@@ -918,12 +918,12 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	# Guard: sale cycle not yet complete at current destination.
 	if not trade_sale_completed:
 		if event_bus:
-			event_bus.log("[TRADE EVAL BLOCKED] agent=Baker reason=sale_cycle_incomplete")
+			event_bus.emit_log("[TRADE EVAL BLOCKED] agent=Baker reason=sale_cycle_incomplete")
 		return
 	# Guard: commitment window — must stay at current village until tick expires.
 	if tick < trade_commit_until_tick:
 		if event_bus:
-			event_bus.log("[TRADE EVAL BLOCKED] agent=Baker reason=commit_window")
+			event_bus.emit_log("[TRADE EVAL BLOCKED] agent=Baker reason=commit_window")
 		return
 
 	var current_village = agent.current_village_ref
@@ -938,13 +938,13 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	var home_bad: bool   = is_home_market_bad_outlet()
 
 	if event_bus:
-		event_bus.log("[TRADE EVAL] agent=Baker local_price=%.2f home_bad=%s surplus=%d" % [
+		event_bus.emit_log("[TRADE EVAL] agent=Baker local_price=%.2f home_bad=%s surplus=%d" % [
 			local_bid, str(home_bad), surplus])
 
 	# ── Outbound trade: only when a meaningful export batch exists ───────────
 	if not has_exportable_surplus():
 		if event_bus:
-			event_bus.log("[TRADE BLOCKED] agent=Baker reason=no_exportable_surplus surplus=%d min=%d" % [
+			event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=no_exportable_surplus surplus=%d min=%d" % [
 				surplus, MIN_EXPORT_SURPLUS_BREAD])
 	else:
 		var best_village: Node = null
@@ -959,24 +959,24 @@ func _maybe_evaluate_trade(tick: int) -> void:
 			if should_depart_for_trade(village, local_snap, surplus):
 				var score: float = score_trade_opportunity(village, local_snap, surplus)
 				if event_bus:
-					event_bus.log("[TRADE OPPORTUNITY] agent=Baker from=%s to=%s qty=%d score=%.2f" % [
+					event_bus.emit_log("[TRADE OPPORTUNITY] agent=Baker from=%s to=%s qty=%d score=%.2f" % [
 						local_snap.get("village_name", "?"), vname, surplus, score])
 				if score > best_score:
 					best_score   = score
 					best_village = village
 			else:
 				if event_bus:
-					event_bus.log("[TRADE BLOCKED] agent=Baker reason=insufficient_edge to=%s" % vname)
+					event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=insufficient_edge to=%s" % vname)
 
 		if best_village != null:
 			_start_trade_travel(best_village, "profit", surplus, best_score)
 			return
 		elif home_bad:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=no_sufficient_edge surplus=%d" % surplus)
+				event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=no_sufficient_edge surplus=%d" % surplus)
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=home_market_good_enough local_price=%.2f" % local_bid)
+				event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=home_market_good_enough local_price=%.2f" % local_bid)
 
 	# ── Return home: when away and conditions favour going home ──────────────
 	var home_village = agent.home_village_ref
@@ -997,7 +997,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 				score_trade_opportunity(home_village, local_snap, surplus))
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=home_not_better_yet home_bid=%.2f local_bid=%.2f surplus=%d" % [
+				event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=home_not_better_yet home_bid=%.2f local_bid=%.2f surplus=%d" % [
 					home_bid, local_bid, surplus])
 	else:
 		# Sold everything — return home when home is not materially worse.
@@ -1005,7 +1005,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 			_start_trade_travel(home_village, "return_empty", 0, 0.0)
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Baker reason=foreign_still_better home_bid=%.2f local_bid=%.2f" % [
+				event_bus.emit_log("[TRADE BLOCKED] agent=Baker reason=foreign_still_better home_bid=%.2f local_bid=%.2f" % [
 					home_bid, local_bid])
 
 
@@ -1017,7 +1017,7 @@ func _start_trade_travel(target_village: Node, reason: String, cargo_qty: int = 
 	var target_market_node: Node2D = target_village.get("market_node") as Node2D
 	if target_market_node == null:
 		if event_bus:
-			event_bus.log("[TRADE] Baker: cannot travel to %s — market_node not found" % target_village.name)
+			event_bus.emit_log("[TRADE] Baker: cannot travel to %s — market_node not found" % target_village.name)
 		return
 
 	trade_target_village = target_village
@@ -1030,7 +1030,7 @@ func _start_trade_travel(target_village: Node, reason: String, cargo_qty: int = 
 	var to_name: String   = target_village.get("village_name") if target_village.get("village_name") else target_village.name
 	var is_return: bool   = (target_village == agent.home_village_ref)
 	if event_bus:
-		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
+		event_bus.emit_log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
 	if not is_return:
@@ -1038,7 +1038,7 @@ func _start_trade_travel(target_village: Node, reason: String, cargo_qty: int = 
 		trips_taken += 1
 	var depart_tag: String = "[TRADE RETURN DEPART]" if is_return else "[TRADE DEPART]"
 	if event_bus:
-		event_bus.log("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f reason=%s" % [
+		event_bus.emit_log("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f reason=%s" % [
 			depart_tag, from_name, to_name, cargo_qty, expected_score, reason])
 	else:
 		print("%s agent=Baker from=%s to=%s cargo=bread qty=%d expected_score=%.2f reason=%s" % [
@@ -1062,7 +1062,7 @@ func _begin_trade_commit_window() -> void:
 	trade_commit_until_tick = agent.current_tick + TRADE_MIN_STAY_TICKS
 	var vid: String = agent.current_village_ref.get("village_name") if agent.current_village_ref else "?"
 	if event_bus:
-		event_bus.log("[TRADE COMMIT] agent=Baker village=%s until_tick=%d" % [vid, trade_commit_until_tick])
+		event_bus.emit_log("[TRADE COMMIT] agent=Baker village=%s until_tick=%d" % [vid, trade_commit_until_tick])
 
 
 ## Called when baker arrives at the trade destination (foreign village or home on return).
@@ -1104,7 +1104,7 @@ func _on_trade_arrival() -> void:
 	if is_home_return:
 		# ── Home return arrival ──────────────────────────────────────────────
 		if event_bus:
-			event_bus.log("[TRADE RETURN ARRIVE] agent=Baker village=%s" % vname_arrive)
+			event_bus.emit_log("[TRADE RETURN ARRIVE] agent=Baker village=%s" % vname_arrive)
 		else:
 			print("[TRADE RETURN ARRIVE] agent=Baker village=%s" % vname_arrive)
 		trade_return_arrived.emit(arrived_village)
@@ -1127,7 +1127,7 @@ func _on_trade_arrival() -> void:
 		# ── Foreign village arrival (migration complete) ──────────────────────
 		trade_arrival_count += 1
 		if event_bus:
-			event_bus.log("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
+			event_bus.emit_log("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
 		else:
 			print("[TRADE ARRIVE] agent=Baker village=%s arrival_count=%d" % [vname_arrive, trade_arrival_count])
 		trade_arrived.emit(arrived_village)
@@ -1139,10 +1139,10 @@ func _on_trade_arrival() -> void:
 			sold = arrived_market.buy_bread_from_agent(agent, sellable, 0.0, false)
 			var earned: float = agent.get_cash() - snap_before
 			if event_bus:
-				event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname_arrive, sold, earned])
+				event_bus.emit_log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+%.1f" % [vname_arrive, sold, earned])
 			agent.log_event("Cross-village sale: sold %d bread at %s (+$%.1f)." % [sold, vname_arrive, earned])
 		elif event_bus:
-			event_bus.log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+0.0" % [vname_arrive, 0])
+			event_bus.emit_log("[TRADE SALE COMPLETE] agent=Baker village=%s qty=%d profit=+0.0" % [vname_arrive, 0])
 		# Phase 3: [TRADE FLOW] telemetry — compute profit and update trip counters.
 		var home_name_tf: String = agent.home_village_ref.get("village_name") if agent.home_village_ref and agent.home_village_ref.get("village_name") else "?"
 		var arrive_snap_tf: Dictionary = arrived_village.get_trade_snapshot() if is_instance_valid(arrived_village) else {}
@@ -1159,7 +1159,7 @@ func _on_trade_arrival() -> void:
 		else:
 			failed_trades += 1
 		if event_bus:
-			event_bus.log("[TRADE FLOW] agent=Baker from=%s to=%s good=bread qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
+			event_bus.emit_log("[TRADE FLOW] agent=Baker from=%s to=%s good=bread qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
 				home_name_tf, vname_arrive, sold, _trip_depart_tick, agent.current_tick, profit_tf])
 		# Phase 3: Wire village flow tracking — record this outbound bread sale.
 		if sold > 0:

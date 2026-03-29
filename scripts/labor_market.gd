@@ -157,7 +157,7 @@ func update_daily(day: int) -> void:
 
 	# Periodic diagnostic log (every 5 days)
 	if event_bus and day % 5 == 0:
-		event_bus.log("[LaborMkt] Day %d | f_profit=%.2f b_profit=%.2f bread_scar=%.2f wheat_scar=%.2f" % [
+		event_bus.emit_log("[LaborMkt] Day %d | f_profit=%.2f b_profit=%.2f bread_scar=%.2f wheat_scar=%.2f" % [
 			day, farmer_profit_ema, baker_profit_ema, bread_scarcity_ema, wheat_scarcity_ema])
 
 	# Track first-ever bread supply (checked before household evaluation each day).
@@ -166,7 +166,7 @@ func update_daily(day: int) -> void:
 	if not ever_had_bread_supply and market != null and market.bread > 0:
 		ever_had_bread_supply = true
 		if event_bus:
-			event_bus.log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
+			event_bus.emit_log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
 
 	# On the 7-day cadence, recompute utility for ALL agents and log [CAREER EVAL]
 	if day % EVAL_INTERVAL_DAYS == 0:
@@ -200,7 +200,7 @@ func update_daily(day: int) -> void:
 			push_warning(warn)
 			print(warn)
 			if event_bus:
-				event_bus.log(warn)
+				event_bus.emit_log(warn)
 
 	var avg_f: float = farmer_profit_ema
 	var avg_b: float = baker_profit_ema
@@ -208,7 +208,7 @@ func update_daily(day: int) -> void:
 		day, evals_today, switches_today, blocked_today, avg_f, avg_b, reason_scarcity_today, reason_utility_today]
 	print(summary_line)
 	if event_bus:
-		event_bus.log(summary_line)
+		event_bus.emit_log(summary_line)
 
 
 # ─── Unified career evaluation (single authority) ────────────────────────────
@@ -326,7 +326,7 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 		best_role, allowed, block]
 	print(line)
 	if event_bus:
-		event_bus.log(line)
+		event_bus.emit_log(line)
 
 	# Emit [CAREER EXPECT] for Household agents when scarcity contributes
 	if role == "Household" and (ce.last_household_scar_income_f > 0.0 or ce.last_household_scar_income_b > 0.0):
@@ -336,7 +336,7 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 			ce.last_diag_expected_baker, bread_scarcity_ema, _scarcity_weight_baker]
 		print(expect_line)
 		if event_bus:
-			event_bus.log(expect_line)
+			event_bus.emit_log(expect_line)
 
 	# ── Aggregation for [CAREER EVAL SUMMARY] ────────────────────────────
 	_eval_diag.total += 1
@@ -422,7 +422,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 		if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS or \
 				h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (startup grace) - day=%d fail_streak=%d survival=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (startup grace) - day=%d fail_streak=%d survival=%d" % [
 					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
 			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 		h.consecutive_failed_food_days = 0
@@ -433,13 +433,13 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS:
 		if allow_migration:
 			if event_bus:
-				event_bus.log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
+				event_bus.emit_log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
 			migrate_requested.emit(h, "survival")
 			return
 		else:
 			# Post-grace but bread never established - suppress and reset
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d survival=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d survival=%d" % [
 					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
 			h.consecutive_failed_food_days = 0
 			h.days_in_survival_mode = 0
@@ -448,12 +448,12 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
 		if allow_migration:
 			if event_bus:
-				event_bus.log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
+				event_bus.emit_log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
 			migrate_requested.emit(h, "no_food")
 			return
 		else:
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d" % [
 					day, h.consecutive_failed_food_days])
 			h.consecutive_failed_food_days = 0
 			h.days_in_survival_mode = 0
@@ -553,7 +553,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 		u_current, best_u, delta, ratio, cash, bread_count, food_target]
 	print(decision_line)
 	if event_bus:
-		event_bus.log(decision_line)
+		event_bus.emit_log(decision_line)
 	if h.has_method("log_event"):
 		h.log_event(
 			"Decided to switch from %s to %s — looked like a better deal (gain %.2f, ratio %.2f); had $%.0f on hand." %
@@ -580,7 +580,7 @@ func _evaluate_producer_migration(_day: int) -> void:
 		if f and is_instance_valid(f):
 			if f.consecutive_days_negative_cashflow >= MIGRATION_NEG_PROFIT_DAYS:
 				if event_bus:
-					event_bus.log("[LaborMkt] %s migrating: %d days negative cashflow" % [
+					event_bus.emit_log("[LaborMkt] %s migrating: %d days negative cashflow" % [
 						f.name, f.consecutive_days_negative_cashflow])
 				migrate_requested.emit(f, "negative_profit")
 
@@ -588,7 +588,7 @@ func _evaluate_producer_migration(_day: int) -> void:
 		if b and is_instance_valid(b):
 			if b.consecutive_days_negative_cashflow >= MIGRATION_NEG_PROFIT_DAYS:
 				if event_bus:
-					event_bus.log("[LaborMkt] %s migrating: %d days negative cashflow" % [
+					event_bus.emit_log("[LaborMkt] %s migrating: %d days negative cashflow" % [
 						b.name, b.consecutive_days_negative_cashflow])
 				migrate_requested.emit(b, "negative_profit")
 
@@ -642,17 +642,17 @@ func _emit_eval_summary(day: int) -> void:
 		_blocked_quota_farmer_today, _blocked_quota_baker_today]
 	print(summary)
 	if event_bus:
-		event_bus.log(summary)
+		event_bus.emit_log(summary)
 	for ex in d.examples_blocked:
 		var line: String = "[CAREER EXAMPLE BLOCKED] %s" % ex
 		print(line)
 		if event_bus:
-			event_bus.log(line)
+			event_bus.emit_log(line)
 	for ex in d.examples_allowed:
 		var line: String = "[CAREER EXAMPLE ALLOWED] %s" % ex
 		print(line)
 		if event_bus:
-			event_bus.log(line)
+			event_bus.emit_log(line)
 
 
 func _emit_pop_snap(day: int) -> void:
@@ -666,7 +666,7 @@ func _emit_pop_snap(day: int) -> void:
 	var snap: String = "[POP SNAP] day=%d households=%d farmers=%d bakers=%d total=%d" % [day, h, f, b, t]
 	print(snap)
 	if event_bus:
-		event_bus.log(snap)
+		event_bus.emit_log(snap)
 
 
 func _emit_econ_snap(day: int) -> void:
@@ -681,7 +681,7 @@ func _emit_econ_snap(day: int) -> void:
 		farmer_profit_ema, baker_profit_ema]
 	print(snap)
 	if event_bus:
-		event_bus.log(snap)
+		event_bus.emit_log(snap)
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────
@@ -696,7 +696,7 @@ func _log_career_blocked(day: int, pop_id: String, desired_role: String, block: 
 		day, pop_id, current_role, desired_role, block, uc, ub]
 	print(line)
 	if event_bus:
-		event_bus.log(line)
+		event_bus.emit_log(line)
 	if h and h.get("last_career_decision") != null:
 		h.last_career_decision = "day=%d blocked=%s desired=%s Uc=%.2f Ub=%.2f" % [day, block, desired_role, uc, ub]
 

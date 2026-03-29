@@ -57,7 +57,7 @@ func assign_field(field_node: Node2D, new_farmer) -> void:
 		new_farmer.add_field(field_node, field_node)
 	if event_bus:
 		var fname: String = new_farmer.name if new_farmer else "(none)"
-		event_bus.log("ASSIGNED: %s → %s" % [field_node.name, fname])
+		event_bus.emit_log("ASSIGNED: %s → %s" % [field_node.name, fname])
 
 
 func release_fields_for_agent(agent: Node) -> void:

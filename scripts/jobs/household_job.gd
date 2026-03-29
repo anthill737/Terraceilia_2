@@ -113,7 +113,7 @@ func _calculate_effective_reserve_target() -> int:
 	var adjusted_target: int = reserve_target_base - int(reduction_ratio * target_range)
 	if adjusted_target != reserve_target_base and agent.current_tick - last_logged_price_adjustment_tick > 100:
 		if event_bus:
-			event_bus.log("%s high price $%.2f: reserve_target %d→%d" % [agent.name, current_price, reserve_target_base, adjusted_target])
+			event_bus.emit_log("%s high price $%.2f: reserve_target %d→%d" % [agent.name, current_price, reserve_target_base, adjusted_target])
 		last_logged_price_adjustment_tick = agent.current_tick
 	return clamp(adjusted_target, reserve_target_min, reserve_target_base)
 
@@ -157,11 +157,11 @@ func _on_arrived(t: Node2D) -> void:
 		if needs_food_trip():
 			agent.pending_target = market_location
 			if event_bus and not logged_staying_home:
-				event_bus.log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
+				event_bus.emit_log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
 		else:
 			agent.pending_target = home_location
 			if event_bus and not logged_staying_home:
-				event_bus.log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
+				event_bus.emit_log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
 				logged_staying_home = true
 		route.wait(WAIT_TIME)
 
@@ -171,7 +171,7 @@ func _on_wait_finished() -> void:
 		if agent.pending_target == market_location and not needs_food_trip():
 			agent.pending_target = home_location
 			if event_bus:
-				event_bus.log("Tick %d: %s [BUGFIX] market trip cancelled - need resolved during wait" % [agent.current_tick, agent.name])
+				event_bus.emit_log("Tick %d: %s [BUGFIX] market trip cancelled - need resolved during wait" % [agent.current_tick, agent.name])
 		if agent.pending_target == market_location and agent.pending_target != route.target:
 			log_travel_decision("going to market")
 		route.set_target(agent.pending_target)
@@ -189,7 +189,7 @@ func attempt_buy_bread() -> void:
 		var desired: int = ceili(deficit * buy_batch_multiplier)
 		if desired == 0:
 			if event_bus:
-				event_bus.log("Tick %d: %s [BUGFIX] at market but no deficit (%d/%d) - returning home" % [agent.current_tick, agent.name, current_bread, effective_reserve_target])
+				event_bus.emit_log("Tick %d: %s [BUGFIX] at market but no deficit (%d/%d) - returning home" % [agent.current_tick, agent.name, current_bread, effective_reserve_target])
 			return
 		var qty_bought: int = market.sell_bread_to_household(agent, desired)
 		var tr: Dictionary = market.last_trade_result
@@ -198,7 +198,7 @@ func attempt_buy_bread() -> void:
 			agent.cashflow_today_expense += float(qty_bought) * (market.bread_price if market else 0.0)
 			consecutive_failed_food_days = 0
 			if event_bus:
-				event_bus.log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [agent.current_tick, agent.name, qty_bought, desired, inv.get_qty("bread")])
+				event_bus.emit_log("Tick %d: %s bought %d bread (wanted %d, now have %d)" % [agent.current_tick, agent.name, qty_bought, desired, inv.get_qty("bread")])
 			agent.log_event(
 				"Bought %d of %d loaves at $%.2f each (%s)." %
 				[qty_bought, desired, tr.get("price", 0.0), tr.get("reason", "?")]
@@ -206,7 +206,7 @@ func attempt_buy_bread() -> void:
 		else:
 			consecutive_failed_food_days += 1
 			if event_bus:
-				event_bus.log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [agent.current_tick, agent.name, desired, consecutive_failed_food_days])
+				event_bus.emit_log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [agent.current_tick, agent.name, desired, consecutive_failed_food_days])
 			agent.log_event(
 				"Could not buy bread (wanted %d; market had %d; %s)." %
 				[desired, tr.get("market_bread", -1), tr.get("reason", "unknown")]
@@ -240,7 +240,7 @@ func needs_food_trip() -> bool:
 func log_travel_decision(action: String) -> void:
 	if event_bus and inv and hunger:
 		var current_bread: int = inv.get_qty("bread")
-		event_bus.log("Tick %d: %s %s (reserve=%d/%d, hunger=%d/%d)" % [
+		event_bus.emit_log("Tick %d: %s %s (reserve=%d/%d, hunger=%d/%d)" % [
 			agent.current_tick, agent.name, action,
 			current_bread, effective_reserve_target,
 			hunger.hunger_days, hunger.hunger_max_days
@@ -254,7 +254,7 @@ func _on_travel_timeout(_t: Node2D) -> void:
 	agent.idle_ticks = 0
 	print("[BUGFIX] %s: travel timeout recovery - returning home" % get_display_name())
 	if event_bus:
-		event_bus.log("[TRAVEL] Tick %d: %s travel timeout recovery - returning home" % [agent.current_tick, agent.name])
+		event_bus.emit_log("[TRAVEL] Tick %d: %s travel timeout recovery - returning home" % [agent.current_tick, agent.name])
 	phase = Phase.AT_HOME
 	agent.pending_target = home_location
 	if route:
@@ -270,7 +270,7 @@ func _check_travel_timeout() -> void:
 			var tname: String = route.target.name if route.target else "null"
 			print("[BUGFIX] %s: travel timeout reset after %d ticks (target=%s)" % [get_display_name(), agent.travel_ticks, tname])
 			if event_bus:
-				event_bus.log("[TRAVEL] Tick %d: %s travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.name, agent.travel_ticks, tname])
+				event_bus.emit_log("[TRAVEL] Tick %d: %s travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.name, agent.travel_ticks, tname])
 			route.stop()
 			agent.travel_ticks = 0
 			phase = Phase.AT_HOME
@@ -292,7 +292,7 @@ func _check_idle_guard() -> void:
 	agent.idle_ticks = 0
 	print("[BUGFIX] %s: idle guard triggered" % get_display_name())
 	if event_bus:
-		event_bus.log("[STATE] Tick %d: %s idle guard triggered" % [agent.current_tick, agent.name])
+		event_bus.emit_log("[STATE] Tick %d: %s idle guard triggered" % [agent.current_tick, agent.name])
 	if needs_food_trip():
 		agent.pending_target = market_location
 	else:
@@ -324,5 +324,5 @@ func on_day_changed(_day: int) -> void:
 func _on_starved(agent_name_param: String) -> void:
 	agent.log_event("Died of starvation.")
 	if event_bus:
-		event_bus.log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
+		event_bus.emit_log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
 	agent.agent_died.emit(agent)

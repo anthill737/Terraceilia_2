@@ -103,7 +103,7 @@ func set_controller(ctrl) -> void:
 		var event_bus = controller.get_node_or_null("EventBus")
 		world_click_catcher.set_references(placement_controller, self, controller, event_bus)
 		if event_bus:
-			event_bus.log("UI: WorldClickCatcher wired from set_controller")
+			event_bus.emit_log("UI: WorldClickCatcher wired from set_controller")
 
 
 func set_placement_controller(pc) -> void:
@@ -115,7 +115,7 @@ func set_placement_controller(pc) -> void:
 		var event_bus = controller.get_node_or_null("EventBus")
 		world_click_catcher.set_references(placement_controller, self, controller, event_bus)
 		if event_bus:
-			event_bus.log("UI: WorldClickCatcher wired from set_placement_controller")
+			event_bus.emit_log("UI: WorldClickCatcher wired from set_placement_controller")
 
 
 func get_panel_rect() -> Rect2:
@@ -152,12 +152,12 @@ func toggle_visibility() -> void:
 	if visible:
 		hide()
 		if controller and controller.event_bus:
-			controller.event_bus.log("UI: AdminMenu closed")
+			controller.event_bus.emit_log("UI: AdminMenu closed")
 	else:
 		show()
 		refresh()
 		if controller and controller.event_bus:
-			controller.event_bus.log("UI: AdminMenu opened")
+			controller.event_bus.emit_log("UI: AdminMenu opened")
 
 
 func refresh() -> void:
@@ -260,22 +260,22 @@ func _on_assign_field() -> void:
 	var field_idx = field_select.selected
 	
 	if controller.event_bus:
-		controller.event_bus.log("UI DEBUG: Assign clicked - farmer_idx=%d field_idx=%d" % [farmer_idx, field_idx])
+		controller.event_bus.emit_log("UI DEBUG: Assign clicked - farmer_idx=%d field_idx=%d" % [farmer_idx, field_idx])
 	
 	if farmer_idx < 0 or farmer_idx >= controller.farmers.size():
 		if controller.event_bus:
-			controller.event_bus.log("UI ERROR: Invalid farmer index %d (have %d farmers)" % [farmer_idx, controller.farmers.size()])
+			controller.event_bus.emit_log("UI ERROR: Invalid farmer index %d (have %d farmers)" % [farmer_idx, controller.farmers.size()])
 		return
 	if field_idx < 0 or field_idx >= controller.fields.size():
 		if controller.event_bus:
-			controller.event_bus.log("UI ERROR: Invalid field index %d (have %d fields)" % [field_idx, controller.fields.size()])
+			controller.event_bus.emit_log("UI ERROR: Invalid field index %d (have %d fields)" % [field_idx, controller.fields.size()])
 		return
 	
 	var farmer = controller.farmers[farmer_idx]
 	var field = controller.fields[field_idx]
 	
 	if controller.event_bus:
-		controller.event_bus.log("UI: Attempting to assign %s to %s" % [field.name, farmer.name])
+		controller.event_bus.emit_log("UI: Attempting to assign %s to %s" % [field.name, farmer.name])
 	
 	controller.assign_field_to_farmer(field, farmer)
 	refresh()

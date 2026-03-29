@@ -34,12 +34,12 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event_bus:
 			var pc_status = "null" if placement_controller == null else ("active" if placement_controller.active else "inactive")
-			event_bus.log("CATCHER DEBUG: MouseButton=%d placement_controller=%s" % [event.button_index, pc_status])
+			event_bus.emit_log("CATCHER DEBUG: MouseButton=%d placement_controller=%s" % [event.button_index, pc_status])
 	
 	# Only handle input when placement is active
 	if placement_controller == null:
 		if event is InputEventMouseButton and event.pressed and event_bus:
-			event_bus.log("CATCHER ERROR: placement_controller is null")
+			event_bus.emit_log("CATCHER ERROR: placement_controller is null")
 		return
 	
 	if not placement_controller.active:
@@ -55,7 +55,7 @@ func _gui_input(event: InputEvent) -> void:
 		
 		# Log click for debugging
 		if event_bus:
-			event_bus.log("CLICK CATCHER: received click screen=(%.0f,%.0f) over_menu=%s active=%s type=%s" % 
+			event_bus.emit_log("CLICK CATCHER: received click screen=(%.0f,%.0f) over_menu=%s active=%s type=%s" % 
 				[screen_pos.x, screen_pos.y, str(over_menu), str(placement_controller.active), placement_controller.place_type])
 		
 		# Don't place if over menu

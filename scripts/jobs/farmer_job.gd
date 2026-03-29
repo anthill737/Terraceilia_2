@@ -23,6 +23,9 @@ const WAIT_TIME: float = 1.0
 const TRADE_EVAL_INTERVAL: int = 10
 const MIN_PROFIT_THRESHOLD: float = 0.3
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
+## Ticks an agent must remain in the arrived village before re-evaluating trade.
+## Prevents immediate ping-pong after arrival.
+const TRADE_MIN_STAY_TICKS: int = 30
 
 const WHEAT_RECIPE: Dictionary = {
 	"output_good": "wheat",
@@ -51,6 +54,12 @@ var warned_no_field_today: bool = false
 var trade_route_active: bool = false
 var trade_target_village: Node = null
 var _trade_target_market_node: Node2D = null
+
+## Tick at which the commitment window expires and re-evaluation is allowed.
+var trade_commit_until_tick: int = 0
+## True once the sale attempt at the current destination has completed.
+## Reset to false when a new trip begins; set to true after _on_trade_arrival() sells.
+var trade_sale_completed: bool = true
 
 
 func get_display_name() -> String:
@@ -418,6 +427,37 @@ func _get_world() -> Node:
 	return Engine.get_main_loop().current_scene.get_node_or_null('World')
 
 
+## Returns true when conditions allow a new trade evaluation.
+## Blocks while a trip is unresolved or the commitment window is still active.
+func _can_run_trade_evaluation(tick: int) -> bool:
+	if trade_route_active:
+		return false
+	if not trade_sale_completed:
+		if event_bus:
+			event_bus.log("[TRADE EVAL BLOCKED] agent=Farmer reason=sale_cycle_incomplete")
+		return false
+	if tick < trade_commit_until_tick:
+		if event_bus:
+			event_bus.log("[TRADE EVAL BLOCKED] agent=Farmer reason=commit_window")
+		return false
+	return true
+
+
+## Sets the commitment window after arriving at a village.
+## Prevents re-evaluation for TRADE_MIN_STAY_TICKS ticks.
+func _begin_trade_commit_window(tick: int, village_name: String) -> void:
+	trade_commit_until_tick = tick + TRADE_MIN_STAY_TICKS
+	if event_bus:
+		event_bus.log("[TRADE COMMIT] agent=Farmer village=%s until_tick=%d" % [village_name, trade_commit_until_tick])
+
+
+## Marks the sale cycle as complete and logs accordingly.
+func _mark_trade_sale_completed(village_name: String, qty: int) -> void:
+	trade_sale_completed = true
+	if event_bus:
+		event_bus.log("[TRADE SALE COMPLETE] agent=Farmer village=%s qty=%d" % [village_name, qty])
+
+
 func _maybe_evaluate_trade(tick: int) -> void:
 	var world = _get_world()
 	if world == null or not world.trade_enabled:
@@ -425,6 +465,8 @@ func _maybe_evaluate_trade(tick: int) -> void:
 	if agent.current_village_ref == null or agent.home_village_ref == null:
 		return
 	if tick - agent.last_trade_eval_tick < TRADE_EVAL_INTERVAL:
+		return
+	if not _can_run_trade_evaluation(tick):
 		return
 	agent.last_trade_eval_tick = tick
 
@@ -476,6 +518,7 @@ func _start_travel_to(target_village: Node, reason: String) -> void:
 	trade_target_village = target_village
 	_trade_target_market_node = target_mkt_node
 	trade_route_active = true
+	trade_sale_completed = false
 	print('[TRADE MOVE] agent=Farmer from=%s to=%s reason=%s' % [
 		agent.current_village_ref.village_name, target_village.village_name, reason])
 	agent.pending_target = null
@@ -505,14 +548,18 @@ func _on_trade_arrival() -> void:
 	if food_reserve and market and event_bus:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
 
-	# Sell all wheat at new market
+	# Sell all wheat at new market (sale attempt always completes — full, partial, or zero)
+	var sold_qty: int = 0
 	if inv.get_qty("wheat") > 0:
 		var min_price: float = 0.0
 		if profit:
 			min_price = profit.get_min_acceptable_price(WHEAT_RECIPE)
 		var _cf_snap: float = agent.get_cash()
-		var qty: int = market.buy_wheat_from_farmer(agent, min_price)
+		sold_qty = market.buy_wheat_from_farmer(agent, min_price)
 		agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
 		var trade_profit: float = max(0.0, agent.get_cash() - _cf_snap)
 		print('[TRADE SALE] agent=Farmer village=%s qty=%d profit=+%.1f' % [
-			arrived_village.village_name, qty, trade_profit])
+			arrived_village.village_name, sold_qty, trade_profit])
+	# Mark cycle complete and open commitment window regardless of sale outcome
+	_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
+	_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)

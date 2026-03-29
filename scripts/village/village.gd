@@ -363,6 +363,8 @@ func get_trade_snapshot() -> Dictionary:
 		"wheat_qty":         market.wheat,
 		"bread_qty":         market.bread,
 		"world_pos":         global_position,
+		"wheat_target":      market.wheat_target,
+		"bread_target":      market.bread_target,
 		"wheat_buy_blocked": market.wheat_market_buy_blocked,
 		"bread_buy_blocked": market.bread_market_buy_blocked,
 	}

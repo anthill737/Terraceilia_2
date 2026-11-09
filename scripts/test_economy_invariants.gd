@@ -106,7 +106,7 @@ func _physics_process(_delta: float) -> void:
 		get_tree().quit(1)
 		return
 
-	var _village := _main.village
+	var _village = _main.village
 	var day_index: int = _village.calendar.day_index if (_village != null and _village.calendar != null) else _tick / TICKS_PER_DAY
 	var max_ticks: int = _max_days * TICKS_PER_DAY
 	var sim_failed: bool = _village != null and _village.sim_failed

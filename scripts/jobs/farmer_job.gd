@@ -85,6 +85,17 @@ var _last_trade_move_tick: int = -1
 ## Canonical migration-complete counter: non-zero means at least one trip finished.
 var trade_arrival_count: int = 0
 
+## Bypass flag for _validate_target(): set true only during intentional trade travel.
+## Mirrors BakerJob._intentional_cross_village to prevent stale foreign-node routing.
+var _intentional_cross_village: bool = false
+
+# Phase 3 telemetry counters
+var trips_taken: int = 0
+var successful_trades: int = 0
+var failed_trades: int = 0
+## Tick at which the last outbound trip departed; -1 if no trip has started.
+var _trip_depart_tick: int = -1
+
 func get_display_name() -> String:
 	return "Farmer"
 
@@ -122,7 +133,7 @@ func set_tick(t: int) -> void:
 		food_reserve.check_survival_mode()
 		food_reserve.update_survival_override()
 	if t == 0 and event_bus:
-		event_bus.log("Tick 0: Farmer starting food=%d" % inv.get_qty("bread"))
+		event_bus.emit_log("Tick 0: Farmer starting food=%d" % inv.get_qty("bread"))
 	if hysteresis_cooldown_ticks > 0:
 		hysteresis_cooldown_ticks -= 1
 	_check_travel_timeout()
@@ -131,6 +142,7 @@ func set_tick(t: int) -> void:
 
 
 const STARTING_CASH: float = 500.0
+var wheat_harvested_today: int = 0
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
@@ -157,7 +169,32 @@ func deactivate() -> void:
 			route.travel_timeout.disconnect(_on_travel_timeout)
 
 
+## Guards against routing to nodes that belong to a different village.
+## Uses the "village_id" meta stamped on market and other nodes by village.gd.
+## Targets without the meta pass through (backward-compatible with unstamped nodes).
+## Bypassed when _intentional_cross_village is true (trade travel).
+func _validate_target(target: Node2D) -> bool:
+	if target == null:
+		return false
+	if _intentional_cross_village:
+		return true
+	var target_vid: int = target.get_meta("village_id", -1)
+	var agent_vid: int = agent.home_village_id
+	if target_vid != -1 and target_vid != agent_vid:
+		push_error("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
+		if event_bus:
+			event_bus.emit_log("[ERROR] CROSS-VILLAGE TARGET BLOCKED: agent=%s (village=%d) -> target=%s (village=%d)" % [agent.name, agent_vid, target.name, target_vid])
+		return false
+	return true
+
+
 func set_route_nodes(house: Node2D, market_pos: Node2D) -> void:
+	if not _validate_target(house):
+		push_error("[ERROR] FarmerJob(%s): set_route_nodes rejected house %s" % [agent.name if agent else "?", house.name if house else "null"])
+		return
+	if not _validate_target(market_pos):
+		push_error("[ERROR] FarmerJob(%s): set_route_nodes rejected market %s" % [agent.name if agent else "?", market_pos.name if market_pos else "null"])
+		return
 	house_node = house
 	market_node = market_pos
 	if profit and market and event_bus:
@@ -193,7 +230,7 @@ func add_field(field_node: Node2D, field_plot: FieldPlot) -> void:
 		_initialized = true
 		_rebuild_route()
 		if event_bus:
-			event_bus.log("%s: New field assigned (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
+			event_bus.emit_log("%s: New field assigned (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
 
 
 func remove_field(field_node: Node2D) -> void:
@@ -203,7 +240,7 @@ func remove_field(field_node: Node2D) -> void:
 		fields.remove_at(idx)
 		_rebuild_route()
 		if event_bus:
-			event_bus.log("%s: Field removed (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
+			event_bus.emit_log("%s: Field removed (%s, total fields: %d)" % [get_display_name(), field_node.name, fields.size()])
 
 
 func clear_fields_for_removal() -> void:
@@ -237,6 +274,9 @@ func _on_arrived(t: Node2D) -> void:
 
 func _on_wait_finished() -> void:
 	if agent.pending_target != null:
+		if not _validate_target(agent.pending_target):
+			agent.pending_target = null
+			return
 		route.set_target(agent.pending_target)
 		agent.pending_target = null
 
@@ -269,19 +309,22 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		return
 	if fields_worked_today >= field_work_capacity_per_day:
 		if event_bus:
-			event_bus.log("Tick %d: Farmer [CAP] skipping %s - daily field capacity reached (%d/%d)" % [
+			event_bus.emit_log("Tick %d: Farmer [CAP] skipping %s - daily field capacity reached (%d/%d)" % [
 				agent.current_tick, field_name, fields_worked_today, field_work_capacity_per_day])
 		return
 	fields_worked_today += 1
 	if field.is_mature():
 		var harvest_result = field.harvest()
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
-		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult))
+		# Hired hands (wages mode) work the field with the farmer: more labour, more yield.
+		var _hand_mult: float = 1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)
+		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult))
+		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
 		inv.add("wheat", actual_wheat)
 		inv.add("seeds", actual_seeds)
 		if event_bus:
-			event_bus.log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds, skill=%.2f)" % [agent.current_tick, field_name, actual_wheat, actual_seeds, agent.skill_farmer])
+			event_bus.emit_log("Tick %d: Farmer harvested %s (+%d wheat, +%d seeds, skill=%.2f)" % [agent.current_tick, field_name, actual_wheat, actual_seeds, agent.skill_farmer])
 		agent.log_event(
 			"Harvested %d wheat and %d seeds (farmer skill %.2f, yield ×%.2f)." %
 			[actual_wheat, actual_seeds, agent.skill_farmer, _sk_mult]
@@ -289,7 +332,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
 		if not market.can_producer_produce("wheat"):
 			if event_bus:
-				event_bus.log("Tick %d: Farmer SKIPPED planting %s (wheat production paused by hysteresis)" % [agent.current_tick, field_name])
+				event_bus.emit_log("Tick %d: Farmer SKIPPED planting %s (wheat production paused by hysteresis)" % [agent.current_tick, field_name])
 			return
 		var should_plant: bool = true
 		if inventory_throttle:
@@ -298,11 +341,11 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		if should_plant and field.plant():
 			inv.remove("seeds", 5)
 			if event_bus:
-				event_bus.log("Tick %d: Farmer planted %s (-5 seeds)" % [agent.current_tick, field_name])
+				event_bus.emit_log("Tick %d: Farmer planted %s (-5 seeds)" % [agent.current_tick, field_name])
 			agent.log_event("Planted a field (spent 5 seeds).")
 		elif inventory_throttle and not should_plant:
 			if event_bus:
-				event_bus.log("Tick %d: Farmer SKIPPED planting %s (throttle %.0f%%)" % [agent.current_tick, field_name, inventory_throttle.production_throttle * 100.0])
+				event_bus.emit_log("Tick %d: Farmer SKIPPED planting %s (throttle %.0f%%)" % [agent.current_tick, field_name, inventory_throttle.production_throttle * 100.0])
 
 
 func handle_market_arrival() -> void:
@@ -334,7 +377,7 @@ func handle_market_arrival() -> void:
 			agent.cashflow_today_expense += float(bought) * (market.bread_price if market else 0.0)
 		inv.add("bread", bought)
 		if bought > 0 and event_bus:
-			event_bus.log("Tick %d: Farmer bought %d bread for food buffer" % [agent.current_tick, bought])
+			event_bus.emit_log("Tick %d: Farmer bought %d bread for food buffer" % [agent.current_tick, bought])
 		if bought == 0:
 			agent.log_event(
 				"Could not buy bread (wanted %d loaves; market had %d; %s)." %
@@ -355,7 +398,9 @@ func on_day_changed(_day: int) -> void:
 	)
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:
-		if cur_money <= day_money_start:
+		# Only a day that lost money is a strike; breaking even is the healthy state of a
+		# working market (docs/ECONOMY_BATCH1.md). It was <=, which counted it as a loss.
+		if cur_money < day_money_start - 0.001:
 			consecutive_days_negative_cashflow += 1
 		else:
 			consecutive_days_negative_cashflow = 0
@@ -363,6 +408,8 @@ func on_day_changed(_day: int) -> void:
 		wallet.debit(maintenance_cost_per_day)
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
+	set_meta("output_ema", 0.3 * float(wheat_harvested_today) + 0.7 * float(get_meta("output_ema", float(wheat_harvested_today))))
+	wheat_harvested_today = 0
 	fields_worked_today = 0
 	warned_no_field_today = false
 
@@ -370,17 +417,24 @@ func on_day_changed(_day: int) -> void:
 func _on_travel_timeout(_t: Node2D) -> void:
 	agent.travel_ticks = 0
 	if trade_route_active:
+		var _timeout_target_name: String = trade_target_village.village_name if trade_target_village else "unknown"
+		var _timeout_from_name: String = agent.home_village_ref.village_name if agent.home_village_ref else "unknown"
 		trade_route_active = false
+		_intentional_cross_village = false
 		trade_target_village = null
 		_trade_target_market_node = null
 		trade_sale_completed = true
+		failed_trades += 1
+		if event_bus:
+			event_bus.emit_log("[TRADE FLOW] agent=Farmer from=%s to=%s good=wheat qty=0 depart_tick=%d arrive_tick=%d profit=+0.0 note=timeout" % [
+				_timeout_from_name, _timeout_target_name, _trip_depart_tick, agent.current_tick])
 		# Open commit window so agent cannot immediately retry the failed trip.
 		var cv_name: String = agent.current_village_ref.village_name if agent.current_village_ref else "unknown"
 		_begin_trade_commit_window(agent.current_tick, cv_name)
 		print("[BUGFIX] Farmer: trade travel timed out — trade state reset")
 	print("[BUGFIX] Farmer: travel timeout, restarting route")
 	if event_bus:
-		event_bus.log("[TRAVEL] Tick %d: Farmer travel timeout recovery - restarting route" % agent.current_tick)
+		event_bus.emit_log("[TRAVEL] Tick %d: Farmer travel timeout recovery - restarting route" % agent.current_tick)
 	agent.pending_target = route_targets[route_index] if route_targets.size() > 0 else null
 	if agent.pending_target:
 		route.wait(WAIT_TIME)
@@ -398,7 +452,7 @@ func _check_travel_timeout() -> void:
 			var tname: String = route.target.name if route.target else "null"
 			print("[BUGFIX] Farmer: travel timeout reset after %d ticks (target=%s)" % [agent.travel_ticks, tname])
 			if event_bus:
-				event_bus.log("[TRAVEL] Tick %d: Farmer travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.travel_ticks, tname])
+				event_bus.emit_log("[TRAVEL] Tick %d: Farmer travel timeout reset (travel_ticks=%d, target=%s)" % [agent.current_tick, agent.travel_ticks, tname])
 			route.stop()
 			agent.travel_ticks = 0
 			agent.pending_target = route_targets[route_index] if route_targets.size() > 0 else null
@@ -435,9 +489,11 @@ func _check_idle_guard() -> void:
 	agent.idle_ticks = 0
 	print("[BUGFIX] Farmer: idle guard triggered, restarting route")
 	if event_bus:
-		event_bus.log("[STATE] Tick %d: Farmer idle guard triggered, restarting route" % agent.current_tick)
+		event_bus.emit_log("[STATE] Tick %d: Farmer idle guard triggered, restarting route" % agent.current_tick)
 	if route_targets.size() > 0:
-		route.set_target(route_targets[route_index])
+		var _idle_target: Node2D = route_targets[route_index]
+		if _validate_target(_idle_target):
+			route.set_target(_idle_target)
 
 
 func get_status_text() -> String:
@@ -474,11 +530,11 @@ func _get_world() -> Node:
 func _can_run_trade_evaluation(tick: int) -> bool:
 	if not trade_sale_completed:
 		if event_bus:
-			event_bus.log("[TRADE EVAL BLOCKED] agent=Farmer reason=sale_cycle_incomplete")
+			event_bus.emit_log("[TRADE EVAL BLOCKED] agent=Farmer reason=sale_cycle_incomplete")
 		return false
 	if tick < trade_commit_until_tick:
 		if event_bus:
-			event_bus.log("[TRADE EVAL BLOCKED] agent=Farmer reason=commit_window")
+			event_bus.emit_log("[TRADE EVAL BLOCKED] agent=Farmer reason=commit_window")
 		return false
 	return true
 
@@ -488,14 +544,14 @@ func _can_run_trade_evaluation(tick: int) -> bool:
 func _begin_trade_commit_window(tick: int, village_name: String) -> void:
 	trade_commit_until_tick = tick + TRADE_MIN_STAY_TICKS
 	if event_bus:
-		event_bus.log("[TRADE COMMIT] agent=Farmer village=%s until_tick=%d" % [village_name, trade_commit_until_tick])
+		event_bus.emit_log("[TRADE COMMIT] agent=Farmer village=%s until_tick=%d" % [village_name, trade_commit_until_tick])
 
 
 ## Marks the sale cycle as complete and logs accordingly.
 func _mark_trade_sale_completed(village_name: String, qty: int) -> void:
 	trade_sale_completed = true
 	if event_bus:
-		event_bus.log("[TRADE SALE COMPLETE] agent=Farmer village=%s qty=%d" % [village_name, qty])
+		event_bus.emit_log("[TRADE SALE COMPLETE] agent=Farmer village=%s qty=%d" % [village_name, qty])
 
 
 # ── Trade decision helpers ────────────────────────────────────────────────────
@@ -593,7 +649,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 
 	var local_sellable: bool = market != null and not market.is_market_buy_blocked("wheat")
 	if event_bus:
-		event_bus.log("[TRADE EVAL] agent=Farmer local_price=%.2f local_sellable=%s surplus=%d home_bad=%s" % [
+		event_bus.emit_log("[TRADE EVAL] agent=Farmer local_price=%.2f local_sellable=%s surplus=%d home_bad=%s" % [
 			local_price, local_sellable, surplus_qty, home_bad])
 
 	var is_at_home: bool = (agent.current_village_ref == agent.home_village_ref)
@@ -602,7 +658,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		# ── Outbound evaluation ───────────────────────────────────────────────
 		if not has_exportable_surplus():
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=no_exportable_surplus qty=%d min=%d" % [
+				event_bus.emit_log("[TRADE BLOCKED] agent=Farmer reason=no_exportable_surplus qty=%d min=%d" % [
 					surplus_qty, MIN_EXPORT_BATCH_WHEAT])
 			return
 
@@ -619,7 +675,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 			var vname: String   = snap.get("village_name", village.name)
 			var edge: float     = score_trade_opportunity(village, local_snap)
 			if event_bus:
-				event_bus.log("[TRADE EVAL] agent=Farmer target=%s price=%.2f edge=%.2f" % [
+				event_bus.emit_log("[TRADE EVAL] agent=Farmer target=%s price=%.2f edge=%.2f" % [
 					vname, snap.get("wheat_price", 0.0), edge])
 			if should_depart_for_trade(village, local_snap) and edge > best_edge:
 				best_edge    = edge
@@ -627,14 +683,14 @@ func _maybe_evaluate_trade(tick: int) -> void:
 
 		if best_village != null:
 			if event_bus:
-				event_bus.log("[TRADE OPPORTUNITY] agent=Farmer from=%s to=%s qty=%d edge=%.2f" % [
+				event_bus.emit_log("[TRADE OPPORTUNITY] agent=Farmer from=%s to=%s qty=%d edge=%.2f" % [
 					agent.current_village_ref.village_name, best_village.village_name, surplus_qty, best_edge])
 			_start_travel_to(best_village, "profit", surplus_qty, best_edge)
 		else:
 			if event_bus:
 				var reason: String = "home_market_not_bad" if not home_bad else "no_opportunity_meets_threshold"
 				var required: float = MIN_TRADE_EDGE + (0.0 if home_bad else TRADE_EDGE_HOME_NOT_BLOCKED)
-				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=%s surplus=%d home_bad=%s required_edge=%.2f" % [
+				event_bus.emit_log("[TRADE BLOCKED] agent=Farmer reason=%s surplus=%d home_bad=%s required_edge=%.2f" % [
 					reason, surplus_qty, home_bad, required])
 	else:
 		# ── Return evaluation (currently at a foreign village) ────────────────
@@ -647,7 +703,7 @@ func _maybe_evaluate_trade(tick: int) -> void:
 		# Total return value: price uplift per unit × held surplus − flat travel overhead.
 		var return_edge: float = (home_price - local_price) * float(surplus_qty) - return_cost
 		if event_bus:
-			event_bus.log("[TRADE EVAL] agent=Farmer return home_price=%.2f local_price=%.2f return_edge=%.2f surplus=%d" % [
+			event_bus.emit_log("[TRADE EVAL] agent=Farmer return home_price=%.2f local_price=%.2f return_edge=%.2f surplus=%d" % [
 				home_price, local_price, return_edge, surplus_qty])
 		if surplus_qty < MIN_EXPORT_BATCH_WHEAT:
 			# Nothing left to sell here — return home unless home market is hard-blocked.
@@ -655,17 +711,17 @@ func _maybe_evaluate_trade(tick: int) -> void:
 				_start_travel_to(agent.home_village_ref, "return_empty")
 			else:
 				if event_bus:
-					event_bus.log("[TRADE BLOCKED] agent=Farmer reason=home_buy_blocked cannot_return")
+					event_bus.emit_log("[TRADE BLOCKED] agent=Farmer reason=home_buy_blocked cannot_return")
 		# return_edge is total batch value (edge × qty − travel). Allow return when foreign
 		# is not materially better — threshold: -25% of MIN_EXPORT_BATCH_VALUE = -1.0.
 		# Prevents permanent stranding when prices equalize at the foreign village.
 		elif return_edge >= -(MIN_EXPORT_BATCH_VALUE * 0.25):
 			if event_bus:
-				event_bus.log("[TRADE OPPORTUNITY] agent=Farmer returning home return_edge=%.2f" % return_edge)
+				event_bus.emit_log("[TRADE OPPORTUNITY] agent=Farmer returning home return_edge=%.2f" % return_edge)
 			_start_travel_to(agent.home_village_ref, "return")
 		else:
 			if event_bus:
-				event_bus.log("[TRADE BLOCKED] agent=Farmer reason=foreign_materially_better home_price=%.2f local_price=%.2f return_edge=%.2f required>=%.2f" % [
+				event_bus.emit_log("[TRADE BLOCKED] agent=Farmer reason=foreign_materially_better home_price=%.2f local_price=%.2f return_edge=%.2f required>=%.2f" % [
 					home_price, local_price, return_edge, -(MIN_EXPORT_BATCH_VALUE * 0.25)])
 
 
@@ -683,7 +739,7 @@ func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, 
 	trade_route_active = true
 	trade_sale_completed = false
 	if event_bus:
-		event_bus.log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
+		event_bus.emit_log("[TRADE DEBUG] agent=%s last_move_tick=%d current_tick=%d" % [
 			agent.name, _last_trade_move_tick, agent.current_tick])
 	_last_trade_move_tick = agent.current_tick
 	var from_name: String = agent.current_village_ref.village_name
@@ -691,13 +747,15 @@ func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, 
 	var is_return: bool = (target_village == agent.home_village_ref)
 	if is_return:
 		if event_bus:
-			event_bus.log("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
+			event_bus.emit_log("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
 		else:
 			print("[TRADE RETURN DEPART] agent=Farmer from=%s to=%s" % [from_name, to_name])
 		trade_return_departed.emit(agent.current_village_ref, target_village)
 	else:
+		trips_taken += 1
+		_trip_depart_tick = agent.current_tick
 		if event_bus:
-			event_bus.log("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
+			event_bus.emit_log("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
 				from_name, to_name, cargo_qty, expected_edge])
 		else:
 			print("[TRADE DEPART] agent=Farmer from=%s to=%s cargo=wheat qty=%d expected_edge=%.2f" % [
@@ -705,12 +763,14 @@ func _start_travel_to(target_village: Node, reason: String, cargo_qty: int = 0, 
 		trade_departed.emit(agent.current_village_ref, target_village)
 	# Stop any active wait/travel so set_target takes effect immediately,
 	# matching baker_job's _start_trade_travel() which also calls route.stop() first.
+	_intentional_cross_village = true
 	route.stop()
 	agent.pending_target = null
 	route.set_target(_trade_target_market_node)
 
 
 func _on_trade_arrival() -> void:
+	_intentional_cross_village = false
 	var arrived_village: Node = trade_target_village
 	var arrived_market_node: Node2D = _trade_target_market_node
 	var is_home_return: bool = (arrived_village == agent.home_village_ref)
@@ -736,8 +796,10 @@ func _on_trade_arrival() -> void:
 
 	if is_home_return:
 		# ── Home return arrival ──────────────────────────────────────────────
+		# Explicitly clear stale trade market ref so normal routing uses only home nodes.
+		_trade_target_market_node = null
 		if event_bus:
-			event_bus.log("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
+			event_bus.emit_log("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
 		else:
 			print("[TRADE RETURN ARRIVE] agent=Farmer village=%s" % arrived_village.village_name)
 		trade_return_arrived.emit(arrived_village)
@@ -748,7 +810,7 @@ func _on_trade_arrival() -> void:
 		# ── Foreign village arrival (migration complete) ──────────────────────
 		trade_arrival_count += 1
 		if event_bus:
-			event_bus.log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
+			event_bus.emit_log("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
 				arrived_village.village_name, trade_arrival_count])
 		else:
 			print("[TRADE ARRIVE] agent=Farmer village=%s arrival_count=%d" % [
@@ -766,5 +828,28 @@ func _on_trade_arrival() -> void:
 			agent.cashflow_today_income += max(0.0, agent.get_cash() - _cf_snap)
 		# Canonical TRADE SALE COMPLETE log — fired by _mark_trade_sale_completed regardless of qty
 		_mark_trade_sale_completed(arrived_village.village_name, sold_qty)
+		# Phase 3 telemetry: [TRADE FLOW] with per-trip metrics
+		var _flow_home_name: String = agent.home_village_ref.village_name if agent.home_village_ref else "unknown"
+		var _flow_home_snap: Dictionary = agent.home_village_ref.get_trade_snapshot() if agent.home_village_ref else {}
+		var _flow_arr_snap: Dictionary = arrived_village.get_trade_snapshot()
+		var _flow_home_bid: float = _flow_home_snap.get("wheat_price", 0.0)
+		var _flow_arr_bid: float = _flow_arr_snap.get("wheat_price", 0.0)
+		var _flow_dist: float = 0.0
+		if _flow_home_snap.has("world_pos") and _flow_arr_snap.has("world_pos"):
+			_flow_dist = (_flow_home_snap["world_pos"] as Vector2).distance_to(_flow_arr_snap["world_pos"] as Vector2)
+		var _flow_profit: float = float(sold_qty) * (_flow_arr_bid - _flow_home_bid) - TRAVEL_COST_PER_DISTANCE * _flow_dist
+		if sold_qty > 0:
+			successful_trades += 1
+		else:
+			failed_trades += 1
+		if event_bus:
+			event_bus.emit_log("[TRADE FLOW] agent=Farmer from=%s to=%s good=wheat qty=%d depart_tick=%d arrive_tick=%d profit=+%.1f" % [
+				_flow_home_name, arrived_village.village_name, sold_qty, _trip_depart_tick, agent.current_tick, _flow_profit])
+		# Phase 3: Wire village flow tracking — record this outbound wheat sale.
+		if sold_qty > 0:
+			if is_instance_valid(arrived_village) and arrived_village.has_method("record_trade_import"):
+				arrived_village.record_trade_import("wheat", sold_qty)
+			if is_instance_valid(agent.home_village_ref) and agent.home_village_ref.has_method("record_trade_export"):
+				agent.home_village_ref.record_trade_export("wheat", sold_qty)
 		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
 		route.wait(WAIT_TIME)

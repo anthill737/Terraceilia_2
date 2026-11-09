@@ -78,5 +78,5 @@ func audit(farmer: Agent, baker: Agent, market: Market, bus: EventBus, tick: int
 	# Report errors
 	if errors.size() > 0:
 		for error in errors:
-			bus.log("Tick %d: AUDIT FAIL: %s" % [tick, error])
+			bus.emit_log("Tick %d: AUDIT FAIL: %s" % [tick, error])
 		assert(false, "Economy audit failed at tick %d" % tick)

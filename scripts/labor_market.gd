@@ -31,6 +31,27 @@ const FOOD_BUFFER_FRACTION: float = 2.0 / 3.0
 const MIGRATION_NO_FOOD_DAYS: int = 4      # Consecutive days without food → migrate
 const MIGRATION_NEG_PROFIT_DAYS: int = 8  # Consecutive days negative cashflow → migrate
 const MIGRATION_SURVIVAL_DAYS: int = 5    # Days in survival mode → migrate
+## A producer only leaves when the losing streak has also left them broke: less than this many
+## days of upkeep, or than BROKE_LOAVES loaves of bread at today's price. A working market drives
+## profit towards zero; breaking even is not failure (docs/ECONOMY_BATCH1.md).
+const BROKE_UPKEEP_DAYS: float = 8.0
+const BROKE_LOAVES: float = 3.0
+
+# ─── Labor mode (docs/ECONOMY_BATCH1.md) ─────────────────────────────────────
+## "switching": farmers and bakers change trade when the career evaluator says so.
+## "wages": producers keep their trade; one with more work than hands hires households as
+## farm or bakery hands and pays them a daily wage out of their own wallet.
+## Set by config ("labor": {"mode": ...}) or --labor-mode=<mode> after "--".
+var labor_mode: String = "switching"
+const HAND_WAGE_LOAVES: float = 2.0       # a day's wage, in loaves at today's bread price
+const HAND_OUTPUT_BOOST: float = 0.5      # each hand adds this share of the employer's own output
+const MAX_HANDS: int = 2
+const HIRE_CASH_DAYS: float = 10.0        # employer keeps this many days of wages in hand
+const FIRE_LOSS_DAYS: int = 5             # days of falling cash before a hand is let go
+## Producer trade switches: days between switches for one person.
+const PRODUCER_SWITCH_COOLDOWN_DAYS: int = 21
+## Fields with no farmer (village sets it): a farmer can take one over instead of a new plot.
+var free_field_count: Callable = func() -> int: return 0
 
 # ─── Startup grace period ─────────────────────────────────────────────────────
 ## Days at sim start during which household migration is suppressed.
@@ -115,6 +136,13 @@ func load_career_entry_config(cfg: Dictionary) -> void:
 	_quota_pct = float(ce_cfg.get("career_entry_quota_pct", 0.10))
 	_quota_min = int(ce_cfg.get("career_entry_quota_min", 1))
 	_quota_max = int(ce_cfg.get("career_entry_quota_max", 5))
+	labor_mode = str(cfg.get("labor", {}).get("mode", labor_mode))
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--labor-mode="):
+			labor_mode = arg.substr(13)
+	if event_bus:
+		event_bus.emit_log("[LaborMkt] labor mode: %s" % labor_mode)
+	print("[LaborMkt] labor mode: %s" % labor_mode)
 
 
 # ─── Main daily update ────────────────────────────────────────────────────────
@@ -157,7 +185,7 @@ func update_daily(day: int) -> void:
 
 	# Periodic diagnostic log (every 5 days)
 	if event_bus and day % 5 == 0:
-		event_bus.log("[LaborMkt] Day %d | f_profit=%.2f b_profit=%.2f bread_scar=%.2f wheat_scar=%.2f" % [
+		event_bus.emit_log("[LaborMkt] Day %d | f_profit=%.2f b_profit=%.2f bread_scar=%.2f wheat_scar=%.2f" % [
 			day, farmer_profit_ema, baker_profit_ema, bread_scarcity_ema, wheat_scarcity_ema])
 
 	# Track first-ever bread supply (checked before household evaluation each day).
@@ -166,7 +194,7 @@ func update_daily(day: int) -> void:
 	if not ever_had_bread_supply and market != null and market.bread > 0:
 		ever_had_bread_supply = true
 		if event_bus:
-			event_bus.log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
+			event_bus.emit_log("[LaborMkt] Day %d: first bread supply established (market.bread=%d) - migration now eligible after grace" % [day, market.bread])
 
 	# On the 7-day cadence, recompute utility for ALL agents and log [CAREER EVAL]
 	if day % EVAL_INTERVAL_DAYS == 0:
@@ -177,6 +205,16 @@ func update_daily(day: int) -> void:
 	for h in all_households.duplicate():
 		if h and is_instance_valid(h):
 			_evaluate_household(h, day)
+
+	# Producers change trade (switching mode) on the evaluation cadence.
+	if labor_mode == "switching" and day % EVAL_INTERVAL_DAYS == 0:
+		for p in all_farmers.duplicate() + all_bakers.duplicate():
+			if p and is_instance_valid(p):
+				_evaluate_producer_switch(p, day)
+
+	# Hands and wages (wages mode): pay today's wages, then hire or let go.
+	if labor_mode == "wages":
+		_update_hands(day)
 
 	# Evaluate producers for sustained-loss migration
 	_evaluate_producer_migration(day)
@@ -200,7 +238,7 @@ func update_daily(day: int) -> void:
 			push_warning(warn)
 			print(warn)
 			if event_bus:
-				event_bus.log(warn)
+				event_bus.emit_log(warn)
 
 	var avg_f: float = farmer_profit_ema
 	var avg_b: float = baker_profit_ema
@@ -208,7 +246,7 @@ func update_daily(day: int) -> void:
 		day, evals_today, switches_today, blocked_today, avg_f, avg_b, reason_scarcity_today, reason_utility_today]
 	print(summary_line)
 	if event_bus:
-		event_bus.log(summary_line)
+		event_bus.emit_log(summary_line)
 
 
 # ─── Unified career evaluation (single authority) ────────────────────────────
@@ -326,7 +364,7 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 		best_role, allowed, block]
 	print(line)
 	if event_bus:
-		event_bus.log(line)
+		event_bus.emit_log(line)
 
 	# Emit [CAREER EXPECT] for Household agents when scarcity contributes
 	if role == "Household" and (ce.last_household_scar_income_f > 0.0 or ce.last_household_scar_income_b > 0.0):
@@ -336,7 +374,7 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 			ce.last_diag_expected_baker, bread_scarcity_ema, _scarcity_weight_baker]
 		print(expect_line)
 		if event_bus:
-			event_bus.log(expect_line)
+			event_bus.emit_log(expect_line)
 
 	# ── Aggregation for [CAREER EVAL SUMMARY] ────────────────────────────
 	_eval_diag.total += 1
@@ -422,7 +460,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 		if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS or \
 				h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (startup grace) - day=%d fail_streak=%d survival=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (startup grace) - day=%d fail_streak=%d survival=%d" % [
 					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
 			h.switch_cooldown_days = 0  # Allow role mobility as pressure relief
 		h.consecutive_failed_food_days = 0
@@ -433,13 +471,13 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if h.days_in_survival_mode >= MIGRATION_SURVIVAL_DAYS:
 		if allow_migration:
 			if event_bus:
-				event_bus.log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
+				event_bus.emit_log("[LaborMkt] %s migrating: %d days in survival mode" % [h.name, h.days_in_survival_mode])
 			migrate_requested.emit(h, "survival")
 			return
 		else:
 			# Post-grace but bread never established - suppress and reset
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d survival=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d survival=%d" % [
 					day, h.consecutive_failed_food_days, h.days_in_survival_mode])
 			h.consecutive_failed_food_days = 0
 			h.days_in_survival_mode = 0
@@ -448,12 +486,12 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if h.consecutive_failed_food_days >= MIGRATION_NO_FOOD_DAYS:
 		if allow_migration:
 			if event_bus:
-				event_bus.log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
+				event_bus.emit_log("[LaborMkt] %s migrating: %d consecutive days no food" % [h.name, h.consecutive_failed_food_days])
 			migrate_requested.emit(h, "no_food")
 			return
 		else:
 			if event_bus:
-				event_bus.log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d" % [
+				event_bus.emit_log("[MIGRATION] suppressed (no bread ever) - day=%d fail_streak=%d" % [
 					day, h.consecutive_failed_food_days])
 			h.consecutive_failed_food_days = 0
 			h.days_in_survival_mode = 0
@@ -553,7 +591,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 		u_current, best_u, delta, ratio, cash, bread_count, food_target]
 	print(decision_line)
 	if event_bus:
-		event_bus.log(decision_line)
+		event_bus.emit_log(decision_line)
 	if h.has_method("log_event"):
 		h.log_event(
 			"Decided to switch from %s to %s — looked like a better deal (gain %.2f, ratio %.2f); had $%.0f on hand." %
@@ -574,23 +612,213 @@ func _evaluate_household(h: Node, day: int) -> void:
 
 # ─── Producer migration evaluation ───────────────────────────────────────────
 
-## Check producers for sustained negative cashflow and emit migration signal.
+## Producers leave only after a losing streak that has left them broke, and never the last of
+## their trade: a town that still eats bread keeps its last farmer and its last baker.
 func _evaluate_producer_migration(_day: int) -> void:
-	for f in all_farmers.duplicate():
-		if f and is_instance_valid(f):
-			if f.consecutive_days_negative_cashflow >= MIGRATION_NEG_PROFIT_DAYS:
+	for group in [all_farmers, all_bakers]:
+		for p in group.duplicate():
+			if not (p and is_instance_valid(p)):
+				continue
+			if p.consecutive_days_negative_cashflow < MIGRATION_NEG_PROFIT_DAYS:
+				continue
+			if not _is_broke(p):
+				continue
+			if _live_count(group) <= 1:
 				if event_bus:
-					event_bus.log("[LaborMkt] %s migrating: %d days negative cashflow" % [
-						f.name, f.consecutive_days_negative_cashflow])
-				migrate_requested.emit(f, "negative_profit")
+					event_bus.emit_log("[LaborMkt] %s kept: last of their trade (%d losing days, $%.1f)" % [
+						p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
+				continue
+			if event_bus:
+				event_bus.emit_log("[LaborMkt] %s migrating: %d losing days and broke ($%.1f)" % [
+					p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
+			_release_hands(p, "employer left")
+			migrate_requested.emit(p, "negative_profit")
 
-	for b in all_bakers.duplicate():
-		if b and is_instance_valid(b):
-			if b.consecutive_days_negative_cashflow >= MIGRATION_NEG_PROFIT_DAYS:
-				if event_bus:
-					event_bus.log("[LaborMkt] %s migrating: %d days negative cashflow" % [
-						b.name, b.consecutive_days_negative_cashflow])
-				migrate_requested.emit(b, "negative_profit")
+
+func _is_broke(p: Node) -> bool:
+	var upkeep: float = 0.0
+	if p.get("current_job") and p.current_job and p.current_job.get("maintenance_cost_per_day") != null:
+		upkeep = float(p.current_job.maintenance_cost_per_day)
+	var bread_p: float = market.bread_price if market else 2.5
+	return p.get_cash() < maxf(BROKE_UPKEEP_DAYS * upkeep, BROKE_LOAVES * bread_p)
+
+
+func _live_count(group: Array) -> int:
+	var n: int = 0
+	for a in group:
+		if a and is_instance_valid(a):
+			n += 1
+	return n
+
+
+# ─── Producer trade switches (switching mode) ────────────────────────────────
+
+## The same gates a household passes, plus: never the last of a trade, and not twice within
+## PRODUCER_SWITCH_COOLDOWN_DAYS. Utilities were refreshed for everyone this eval day.
+func _evaluate_producer_switch(p: Node, day: int) -> void:
+	var ce = p.get_node_or_null("CareerEvaluator")
+	if ce == null:
+		return
+	var role: String = p.current_role
+	var best_role: String = "Farmer" if ce.utility_farmer >= ce.utility_baker else "Baker"
+	if best_role == role:
+		return
+	var pop_id: String = p.person_name if p.get("person_name") and p.person_name != "" else p.name
+	var last: int = int(p.get_meta("producer_switch_day", -999))
+	if day - last < PRODUCER_SWITCH_COOLDOWN_DAYS:
+		_log_career_blocked(day, pop_id, best_role, "cooldown", day - last, p)
+		return
+	if p.days_in_role < MIN_TENURE_DAYS:
+		_log_career_blocked(day, pop_id, best_role, "tenure", p.days_in_role, p)
+		return
+	var cash: float = p.get_cash()
+	if cash < SAVINGS_BUFFER_REQUIRED:
+		_log_career_blocked(day, pop_id, best_role, "savings", int(cash), p)
+		return
+	var own: Array = all_farmers if role == "Farmer" else all_bakers
+	if _live_count(own) <= 1:
+		_log_career_blocked(day, pop_id, best_role, "last_of_trade", 1, p)
+		return
+	if best_role == "Farmer" and field_count_ref.size() >= max_fields and free_field_count.call() == 0:
+		_log_career_blocked(day, pop_id, "Farmer", "land_cap", field_count_ref.size(), p)
+		return
+	var u_best: float = maxf(ce.utility_farmer, ce.utility_baker)
+	var u_cur: float = ce.utility_current
+	var margin: float = RECENT_SWITCH_MARGIN if last >= 0 and day - last < RECENT_SWITCH_WINDOW_DAYS else IMPROVEMENT_MARGIN
+	if u_best <= 0.0:
+		_log_career_blocked(day, pop_id, best_role, "margin_zero", 0, p)
+		return
+	if u_cur > 0.0 and u_best < u_cur * (1.0 + margin):
+		_log_career_blocked(day, pop_id, best_role, "margin", int(margin * 100.0), p)
+		return
+	if (best_role == "Farmer" and _entries_to_farmer_today >= _current_quota) or (best_role == "Baker" and _entries_to_baker_today >= _current_quota):
+		_log_career_blocked(day, pop_id, best_role, "quota_" + best_role.to_lower(), _current_quota, p)
+		return
+	switches_today += 1
+	reason_utility_today += 1
+	if best_role == "Farmer":
+		_entries_to_farmer_today += 1
+	else:
+		_entries_to_baker_today += 1
+	p.set_meta("producer_switch_day", day)
+	var line: String = "[CAREER DECISION] day=%d pop=%s from=%s to=%s reason=utility Uc=%.2f Ub=%.2f cash=%.0f (producer)" % [
+		day, pop_id, role, best_role, u_cur, u_best, cash]
+	print(line)
+	if event_bus:
+		event_bus.emit_log(line)
+	if p.has_method("log_event"):
+		p.log_event("Decided to give up %s work for %s; had $%.0f on hand." % [role.to_lower(), best_role.to_lower(), cash])
+	role_switch_requested.emit(p, best_role.to_lower())
+
+
+# ─── Hands and wages (wages mode) ────────────────────────────────────────────
+
+## Daily: each employer pays each hand HAND_WAGE_LOAVES loaves' worth (money moves from one
+## wallet to the other; none is made or destroyed). An employer lets a hand go when it cannot
+## pay, or after FIRE_LOSS_DAYS days of its cash falling; it takes one on when it can keep
+## HIRE_CASH_DAYS of wages in hand and the hand's extra output (HAND_OUTPUT_BOOST of its own,
+## valued at today's prices) is worth more than the wage. Households without an employer are
+## the labour pool.
+func _update_hands(day: int) -> void:
+	var wage: float = HAND_WAGE_LOAVES * (market.bread_price if market else 2.5)
+	var paid: float = 0.0
+	var employed: int = 0
+	for p in all_farmers + all_bakers:
+		if not (p and is_instance_valid(p)):
+			continue
+		var hands: Array = p.get_meta("hands", [])
+		hands = hands.filter(func(h): return is_instance_valid(h) and all_households.has(h))
+		var cash_now: float = p.get_cash()
+		var prev: float = float(p.get_meta("hand_prev_cash", cash_now))
+		var falling: int = int(p.get_meta("hand_falling_days", 0))
+		falling = falling + 1 if cash_now < prev - 0.01 else 0
+		# Pay.
+		var kept: Array = []
+		for h in hands:
+			if p.wallet and h.wallet and p.wallet.money >= wage:
+				p.wallet.debit(wage)
+				h.wallet.credit(wage)
+				p.cashflow_today_expense += wage
+				paid += wage
+				kept.append(h)
+			else:
+				_let_go(p, h, day, "could not pay")
+		hands = kept
+		if not hands.is_empty() and falling >= FIRE_LOSS_DAYS:
+			# A losing stretch: let one go.
+			_let_go(p, hands.pop_back(), day, "losing money")
+			falling = 0
+		elif hands.size() < MAX_HANDS and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1):
+			var value: float = _hand_value(p)
+			if value > wage * 1.1:
+				var h = _free_hand()
+				if h != null:
+					hands.append(h)
+					h.set_meta("employer", p)
+					if event_bus:
+						event_bus.emit_log("[HANDS] day=%d %s hired %s at $%.2f/day (extra output worth $%.2f)" % [day, p.name, h.name, wage, value])
+					if h.has_method("log_event"):
+						h.log_event("Taken on as a hand by %s at $%.2f a day." % [p.name, wage])
+		p.set_meta("hands", hands)
+		p.set_meta("hand_prev_cash", p.get_cash())
+		p.set_meta("hand_falling_days", falling)
+		employed += hands.size()
+	if day % 5 == 0:
+		var line: String = "[HANDS] day=%d employed=%d wage=$%.2f paid_today=$%.2f" % [day, employed, wage, paid]
+		print(line)
+		if event_bus:
+			event_bus.emit_log(line)
+
+
+## Value of one more hand to `p` per day: HAND_OUTPUT_BOOST of what it made per day (output_ema:
+## wheat for a farmer, bread for a baker, less the wheat in the bread) at today's market prices.
+func _hand_value(p: Node) -> float:
+	var job = p.current_job
+	if job == null or market == null:
+		return 0.0
+	var made: float = float(job.get_meta("output_ema", 0.0))
+	if p.current_role == "Farmer":
+		return HAND_OUTPUT_BOOST * made * market.wheat_price
+	return HAND_OUTPUT_BOOST * made * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 1.0)))
+
+
+## The poorest household that has no employer.
+func _free_hand():
+	var best = null
+	for h in all_households:
+		if not (h and is_instance_valid(h)):
+			continue
+		if h.has_meta("employer") and is_instance_valid(h.get_meta("employer")):
+			continue
+		if best == null or h.get_cash() < best.get_cash():
+			best = h
+	return best
+
+
+func _let_go(p: Node, h, day: int, why: String) -> void:
+	var hname: String = h.name if is_instance_valid(h) else "?"
+	if is_instance_valid(h):
+		h.remove_meta("employer")
+		if h.has_method("log_event"):
+			h.log_event("Let go by %s (%s)." % [p.name, why])
+	if event_bus:
+		event_bus.emit_log("[HANDS] day=%d %s let %s go (%s)" % [day, p.name, hname, why])
+
+
+func _release_hands(p: Node, why: String) -> void:
+	for h in p.get_meta("hands", []):
+		if is_instance_valid(h):
+			h.remove_meta("employer")
+			if h.has_method("log_event"):
+				h.log_event("Out of work: %s." % why)
+	p.set_meta("hands", [])
+
+
+## Hands an employer has today (0 outside wages mode).
+static func hands_of(p: Node) -> int:
+	if p == null or not p.has_meta("hands"):
+		return 0
+	return (p.get_meta("hands", []) as Array).size()
 
 
 # ─── Spawn suppression ────────────────────────────────────────────────────────
@@ -642,17 +870,17 @@ func _emit_eval_summary(day: int) -> void:
 		_blocked_quota_farmer_today, _blocked_quota_baker_today]
 	print(summary)
 	if event_bus:
-		event_bus.log(summary)
+		event_bus.emit_log(summary)
 	for ex in d.examples_blocked:
 		var line: String = "[CAREER EXAMPLE BLOCKED] %s" % ex
 		print(line)
 		if event_bus:
-			event_bus.log(line)
+			event_bus.emit_log(line)
 	for ex in d.examples_allowed:
 		var line: String = "[CAREER EXAMPLE ALLOWED] %s" % ex
 		print(line)
 		if event_bus:
-			event_bus.log(line)
+			event_bus.emit_log(line)
 
 
 func _emit_pop_snap(day: int) -> void:
@@ -666,7 +894,7 @@ func _emit_pop_snap(day: int) -> void:
 	var snap: String = "[POP SNAP] day=%d households=%d farmers=%d bakers=%d total=%d" % [day, h, f, b, t]
 	print(snap)
 	if event_bus:
-		event_bus.log(snap)
+		event_bus.emit_log(snap)
 
 
 func _emit_econ_snap(day: int) -> void:
@@ -681,7 +909,7 @@ func _emit_econ_snap(day: int) -> void:
 		farmer_profit_ema, baker_profit_ema]
 	print(snap)
 	if event_bus:
-		event_bus.log(snap)
+		event_bus.emit_log(snap)
 
 
 # ─── Private helpers ─────────────────────────────────────────────────────────
@@ -696,7 +924,7 @@ func _log_career_blocked(day: int, pop_id: String, desired_role: String, block: 
 		day, pop_id, current_role, desired_role, block, uc, ub]
 	print(line)
 	if event_bus:
-		event_bus.log(line)
+		event_bus.emit_log(line)
 	if h and h.get("last_career_decision") != null:
 		h.last_career_decision = "day=%d blocked=%s desired=%s Uc=%.2f Ub=%.2f" % [day, block, desired_role, uc, ub]
 

@@ -5,8 +5,6 @@ extends Node
 var village: Village = null
 ## WorldManager node — exposes .villages array and helper methods.
 var _world_node: Node = null
-## 0-based index into _world_node.villages for the currently-selected village.
-var _selected_village_idx: int = 0
 # ── Simulation clock (world-level — controls Engine.time_scale) ───────────────
 var clock: SimulationClock = null
 
@@ -24,42 +22,27 @@ var spawn_info_label: Label = null
 var sim_failed: bool = false
 var _sim_fail_banner: PanelContainer = null
 
-# ── Economy HUD bar labels ────────────────────────────────────────────────────
-var eco_sim_label: Label        = null
-var eco_village_label: Label    = null
-var eco_market_label: Label     = null
-var eco_prosperity_label: Label = null
-var eco_farmer_label: Label     = null
-var eco_baker_label: Label      = null
-## World-summary line shown below the per-village rows.
-var eco_world_label: Label      = null
+# ── HUD controller ────────────────────────────────────────────────────────────
+var _hud_ctrl: HudController = null
 var _current_speed: float = 1.0
 
 # ── Pause control ─────────────────────────────────────────────────────────────
 var _is_paused: bool = false
 var _pause_btn: Button = null
 
+# ── Village navigation ────────────────────────────────────────────────────────
+var _village_nav_ctrl: VillageNavController = null
+
 # ── Trade toggle + telemetry panel ────────────────────────────────────────────
 var _trade_btn: Button = null
 var _trade_panel: TradePanel = null
-## Village navigation buttons in the toolbar (one per village).
-var _village_nav_btns: Array[Button] = []
 
 # ── Pop Inspector ─────────────────────────────────────────────────────────────
-var selected_pop: Node = null
-var pop_inspector: PopInspectorDock = null
-const POP_PICK_RADIUS_WORLD: float = 16.0
+var _inspector_ctrl: InspectorController = null
 
 # ── Event log ─────────────────────────────────────────────────────────────────
-var event_log: RichTextLabel = null
-var export_log_button: Button = null
-var jump_to_bottom_button: Button = null
+var _log_panel_ctrl: LogPanelController = null
 var sim_speed_label: Label = null
-var log_lines: Array[String] = []
-var log_buffer: Array[String] = []
-var user_at_bottom: bool = true
-const MAX_LOG_LINES: int = 200
-const SCROLL_THRESHOLD: int = 50
 
 
 func _ready() -> void:
@@ -99,24 +82,46 @@ func _ready() -> void:
 	if village == null:
 		push_error("Main: Could not find World/Village1 — World.gd must spawn it in _ready()")
 
-	# Wire every village's event_bus to the shared log panel.
-	if _world_node and _world_node.get("villages") != null:
-		for v in _world_node.villages:
-			if v and is_instance_valid(v) and v.get("event_bus") != null and v.event_bus != null:
-				if not v.event_bus.event_logged.is_connected(_on_event_logged):
-					v.event_bus.event_logged.connect(_on_event_logged)
+	# ── Log panel controller ──
+	_log_panel_ctrl = LogPanelController.new()
+	_log_panel_ctrl.name = "LogPanelController"
+	add_child(_log_panel_ctrl)
+
+	# ── Inspector controller ──
+	_inspector_ctrl = InspectorController.new()
+	_inspector_ctrl.name = "InspectorController"
+	add_child(_inspector_ctrl)
+
+	# ── Village nav controller ──
+	_village_nav_ctrl = VillageNavController.new()
+	_village_nav_ctrl.name = "VillageNavController"
+	add_child(_village_nav_ctrl)
+	_village_nav_ctrl.setup(_world_node)
+	_village_nav_ctrl.village_selected.connect(_on_village_nav_selected)
 
 	# ── Build UI ──
 	get_ui_labels()
+
+	# Wire every village's event_bus to the log panel controller.
+	if _world_node and _world_node.get("villages") != null:
+		for v in _world_node.villages:
+			if v and is_instance_valid(v) and v.get("event_bus") != null:
+				_log_panel_ctrl.connect_village_bus(v.event_bus)
+
+	_hud_ctrl = HudController.new()
+	_hud_ctrl.name = "HudController"
+	add_child(_hud_ctrl)
+
 	update_ui()
 	_build_spawn_toolbar()
-	_build_economy_bar()
+	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
+	_hud_ctrl.setup(left_column, _world_node)
 	_build_trade_panel()
 
 	if village != null:
 		var eb = village.event_bus
 		if eb:
-			eb.log("Tick 0: START")
+			eb.emit_log("Tick 0: START")
 
 
 func _process(_delta: float) -> void:
@@ -188,7 +193,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var screen_pos: Vector2 = event.position
 		var world_pos: Vector2 = _screen_to_world(screen_pos)
-		var r2: float = POP_PICK_RADIUS_WORLD * POP_PICK_RADIUS_WORLD
+		var r2: float = InspectorController.POP_PICK_RADIUS_WORLD * InspectorController.POP_PICK_RADIUS_WORLD
 
 		var best_pop: Node = null
 		var best_d2: float = INF
@@ -205,7 +210,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					best_pop = pop
 
 		if best_pop != null:
-			select_pop(best_pop)
+			_inspector_ctrl.handle_pop_clicked(best_pop)
 			get_viewport().set_input_as_handled()
 			return
 
@@ -220,6 +225,8 @@ func _on_world_click(_event: InputEvent) -> void:
 
 func _on_speed_changed(new_speed: float) -> void:
 	_current_speed = new_speed
+	if _hud_ctrl != null:
+		_hud_ctrl.set_speed(new_speed)
 	if sim_speed_label and not _is_paused:
 		sim_speed_label.text = "Speed: %.1fx" % new_speed
 
@@ -229,54 +236,28 @@ func _recenter_camera() -> void:
 	_center_on_village(village)
 
 
-## Move the camera to the nominal centre of a specific village.
-## Uses fly_to() so auto-follow is disabled — camera stays on the target village.
+## Delegate village selection to VillageNavController, which updates state
+## and emits village_selected → _on_village_nav_selected moves the camera.
 func _center_on_village(v: Village) -> void:
+	_village_nav_ctrl.select_village(v)
+
+
+## Handle village_selected signal from VillageNavController:
+## update main.gd village var, inspector, and camera position.
+func _on_village_nav_selected(v: Node) -> void:
+	village = v as Village
+	_inspector_ctrl.set_village(v)
 	if _camera == null:
 		return
 	if v == null or not is_instance_valid(v):
 		_camera.fly_to(Vector2(400, 300), _camera.zoom.x)
 		return
-	# Use WorldManager helper when available; fall back to village global_position + offset.
 	var center: Vector2
 	if _world_node and _world_node.has_method("get_village_center"):
 		center = _world_node.get_village_center(v)
 	else:
 		center = (v as Node2D).global_position + Vector2(400.0, 300.0)
 	_camera.fly_to(center, _camera.zoom.x)
-	# Switch the selected village so HUD + placement follow the camera destination.
-	_select_village(v)
-
-
-## Update button highlight so the active village button has a distinct border.
-func _refresh_village_nav_highlights(active_idx: int) -> void:
-	for i in range(_village_nav_btns.size()):
-		var btn: Button = _village_nav_btns[i]
-		if not is_instance_valid(btn):
-			continue
-		var s := StyleBoxFlat.new()
-		if i == active_idx:
-			s.bg_color     = Color(0.20, 0.35, 0.20, 0.95)
-			s.border_color = Color(0.40, 1.00, 0.40, 1.00)
-		else:
-			s.bg_color     = Color(0.20, 0.20, 0.25, 0.90)
-			s.border_color = Color(0.50, 0.50, 0.60, 0.80)
-		s.set_border_width_all(2)
-		s.set_corner_radius_all(4)
-		s.set_content_margin_all(4)
-		btn.add_theme_stylebox_override("normal", s)
-
-
-## Select a village as the active HUD + placement target.
-func _select_village(v: Village) -> void:
-	if v == null or not is_instance_valid(v):
-		return
-	village = v
-	if _world_node and _world_node.get("villages") != null:
-		var idx: int = _world_node.villages.find(v)
-		if idx >= 0:
-			_selected_village_idx = idx
-			_refresh_village_nav_highlights(idx)
 
 
 ## Zoom camera out so both villages are visible simultaneously.
@@ -369,224 +350,18 @@ func _show_sim_fail_banner(day: int) -> void:
 	ui_node.add_child(_sim_fail_banner)
 
 
-func _on_event_logged(msg: String) -> void:
-	log_lines.append(msg)
-	log_buffer.append(msg)
-
-	while log_lines.size() > MAX_LOG_LINES:
-		log_lines.pop_front()
-
-	if event_log:
-		event_log.clear()
-		for line in log_lines:
-			event_log.append_text(line + "\n")
-		if user_at_bottom:
-			event_log.scroll_to_line(event_log.get_line_count())
-
-
-func _on_log_scroll(_value: float) -> void:
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			var max_scroll = vscroll.max_value - vscroll.page
-			user_at_bottom = (max_scroll - vscroll.value) <= SCROLL_THRESHOLD
-
-
-func _on_jump_to_bottom() -> void:
-	user_at_bottom = true
-	if event_log:
-		event_log.scroll_to_line(event_log.get_line_count())
-
-
-func export_log() -> void:
-	print("export_log() called - buffer size: ", log_buffer.size())
-
-	var log_snapshot = log_buffer.duplicate()
-
-	var dir = DirAccess.open("user://")
-	if not dir:
-		print("ERROR: Could not open user:// directory")
-		if event_log:
-			event_log.append_text("[ERROR] Could not access user directory\n")
-		return
-
-	if not dir.dir_exists("logs"):
-		var err = dir.make_dir("logs")
-		if err != OK:
-			if event_log:
-				event_log.append_text("[ERROR] Failed to create logs directory\n")
-			return
-
-	var datetime = Time.get_datetime_dict_from_system()
-	var filename = "economy_log_%04d-%02d-%02d_%02d-%02d-%02d.txt" % [
-		datetime.year, datetime.month, datetime.day,
-		datetime.hour, datetime.minute, datetime.second
-	]
-	var path = "user://logs/" + filename
-
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		for line in log_snapshot:
-			file.store_line(line)
-		file.close()
-		var abs_path = ProjectSettings.globalize_path(path)
-		if event_log:
-			event_log.append_text("[EXPORT] Log saved to: %s\n" % abs_path)
-			event_log.append_text("[EXPORT] (%d lines written)\n" % log_snapshot.size())
-	else:
-		var err = FileAccess.get_open_error()
-		if event_log:
-			event_log.append_text("[ERROR] Failed to export log (Error: %d)\n" % err)
-
-
 func get_ui_labels() -> void:
 	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
-	if log_vbox:
-		event_log = log_vbox.get_node_or_null("EventLog")
-		export_log_button = log_vbox.get_node_or_null("ExportLogButton")
-		if export_log_button:
-			export_log_button.pressed.connect(export_log)
-		if log_vbox.has_node("JumpToBottomButton"):
-			jump_to_bottom_button = log_vbox.get_node("JumpToBottomButton")
-			jump_to_bottom_button.pressed.connect(_on_jump_to_bottom)
+	_log_panel_ctrl.setup(log_vbox)
 
-	if event_log:
-		var vscroll = event_log.get_v_scroll_bar()
-		if vscroll:
-			vscroll.value_changed.connect(_on_log_scroll)
-
-	pop_inspector = get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
-	if pop_inspector:
-		# Pass village.econ_stats and field-count getter; both may be null until T4 fills initialize()
-		var econ_stats = village.econ_stats if (village != null and village.get("econ_stats") != null) else null
-		var max_f: int = village.field_mgr.MAX_FIELDS if (village != null and village.field_mgr != null) else 10
-		pop_inspector.configure(econ_stats, max_f, Callable(self, "_inspector_field_count_for_dock"))
-		if not pop_inspector.dismiss_requested.is_connected(_on_pop_inspector_dismiss):
-			pop_inspector.dismiss_requested.connect(_on_pop_inspector_dismiss)
+	var inspector_dock := get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
+	_inspector_ctrl.setup(inspector_dock, village)
 
 
 func update_ui() -> void:
-	_update_eco_bar()
-	update_inspector()
-
-
-func _eco_cap_display(cap: int) -> String:
-	if cap >= 1_000_000_000:
-		return "∞"
-	if cap >= 1_000_000:
-		var m: float = float(cap) / 1_000_000.0
-		return ("%.0fM" % m) if m < 100.0 else "∞"
-	if cap >= 10_000:
-		return "%dk" % int(round(float(cap) / 1000.0))
-	return str(cap)
-
-
-func _update_eco_bar() -> void:
-	"""Refresh all six economy-bar section labels from village snapshot data."""
-	if village == null or not is_instance_valid(village):
-		return
-
-	var snap: Dictionary = village.get_econ_snapshot()
-	var pop: Dictionary  = village.get_population_summary()
-
-	# SIM
-	if eco_sim_label:
-		eco_sim_label.text = "Day %d\n%.1f×" % [snap.get("day", 0), _current_speed]
-
-	# VILLAGE — prefix with the selected village's display name so the player always
-	# knows which village the HUD row describes.
-	if eco_village_label:
-		var vname: String = village.village_name if (village.get("village_name") as String) != "" else village.name
-		eco_village_label.text = (
-			"[%s]  Pop %d — households %d, farmers %d, bakers %d\nFields %d of %d"
-			% [vname, pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
-			   pop.get("bakers", 0), pop.get("fields", 0), pop.get("max_fields", 10)]
-		)
-
-	# MARKET
-	if eco_market_label:
-		var wc: String = _eco_cap_display(snap.get("wheat_cap", 999999999))
-		var bc: String = _eco_cap_display(snap.get("bread_cap", 999999999))
-		eco_market_label.text = (
-			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
-				snap.get("wheat", 0), wc, snap.get("wheat_price", 0.0),
-				snap.get("bread", 0), bc, snap.get("bread_price", 0.0)
-			]
-		)
-
-	# PROSPERITY
-	if eco_prosperity_label:
-		eco_prosperity_label.text = (
-			"Score %.2f\nWealth %.2f · Food %.2f · Hunger pressure %.2f" % [
-				snap.get("prosperity_score", 0.0),
-				snap.get("prosperity_wealth", 0.0),
-				snap.get("prosperity_food", 0.0),
-				snap.get("prosperity_starvation", 0.0)
-			]
-		)
-
-	# FARMER baseline
-	if eco_farmer_label:
-		var fd: Dictionary = snap.get("baseline_farmer", {})
-		if fd.is_empty():
-			eco_farmer_label.text = "(none)"
-		else:
-			eco_farmer_label.text = (
-				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [fd.get("cash", 0.0), fd.get("seeds", 0), fd.get("wheat", 0), fd.get("bread", 0),
-				   fd.get("hunger_days", 0), fd.get("hunger_max", 5),
-				   fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
-			)
-
-	# WORLD summary — aggregated across all villages
-	if eco_world_label and _world_node and _world_node.has_method("get_world_summary"):
-		var ws: Dictionary = _world_node.get_world_summary()
-		eco_world_label.text = (
-			"World: %d villages · total pop %d (H %d · F %d · B %d) · fields %d"
-			% [ws.get("village_count", 0), ws.get("total_pop", 0),
-			   ws.get("total_households", 0), ws.get("total_farmers", 0),
-			   ws.get("total_bakers", 0), ws.get("total_fields", 0)]
-		)
-
-	# BAKER baseline
-	if eco_baker_label:
-		var bd: Dictionary = snap.get("baseline_baker", {})
-		if bd.is_empty():
-			eco_baker_label.text = "(none)"
-		else:
-			eco_baker_label.text = (
-				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [bd.get("cash", 0.0), bd.get("wheat", 0), bd.get("flour", 0), bd.get("bread", 0),
-				   bd.get("hunger_days", 0), bd.get("hunger_max", 5),
-				   bd.get("status", ""), bd.get("inv_total", 0), bd.get("inv_max", 0)]
-			)
-
-
-# ── Pop Inspector ──────────────────────────────────────────────────────────────
-
-func _inspector_field_count_for_dock() -> int:
-	if village == null or not is_instance_valid(village):
-		return 0
-	return village.get_population_summary().get("fields", 0)
-
-
-func _on_pop_inspector_dismiss() -> void:
-	selected_pop = null
-
-
-func select_pop(pop: Node) -> void:
-	if not is_instance_valid(pop):
-		return
-	selected_pop = pop
-	update_inspector()
-
-
-func update_inspector() -> void:
-	if pop_inspector == null:
-		return
-	if selected_pop == null or not is_instance_valid(selected_pop):
-		selected_pop = null
-	pop_inspector.refresh(selected_pop)
+	if _hud_ctrl != null:
+		_hud_ctrl.update_display(village)
+	_inspector_ctrl.refresh()
 
 
 # ── Spawn info bar ─────────────────────────────────────────────────────────────
@@ -707,32 +482,7 @@ func _build_spawn_toolbar() -> void:
 
 	# ── Village navigation ──
 	hbox.add_child(VSeparator.new())
-
-	_village_nav_btns.clear()
-	if _world_node and _world_node.get("villages") != null:
-		for i in range(_world_node.villages.size()):
-			var v: Village = _world_node.villages[i]
-			if v == null:
-				continue
-			var vbtn := Button.new()
-			var vdisplay: String = v.village_name if v.get("village_name") and v.village_name != "" else v.name
-			vbtn.text = vdisplay
-			vbtn.tooltip_text = "Center camera on %s" % vdisplay
-			vbtn.custom_minimum_size = Vector2(80, 34)
-			var captured_v: Village = v
-			vbtn.pressed.connect(func(): _center_on_village(captured_v))
-			hbox.add_child(vbtn)
-			_village_nav_btns.append(vbtn)
-
-	var zoom_world_btn := Button.new()
-	zoom_world_btn.text = "World"
-	zoom_world_btn.tooltip_text = "Zoom out to see all villages"
-	zoom_world_btn.custom_minimum_size = Vector2(70, 34)
-	zoom_world_btn.pressed.connect(_zoom_to_world_overview)
-	hbox.add_child(zoom_world_btn)
-
-	# Highlight the initially-selected village button.
-	_refresh_village_nav_highlights(0)
+	_village_nav_ctrl.build_nav_buttons(hbox, _zoom_to_world_overview)
 
 	# ── Trade toggle button ──
 	hbox.add_child(VSeparator.new())
@@ -771,97 +521,6 @@ func _build_spawn_toolbar() -> void:
 	placement_cursor.visible = false
 	placement_cursor.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	world_spacer.add_child(placement_cursor)
-
-
-func _build_economy_bar() -> void:
-	var bar := PanelContainer.new()
-	bar.name = "EcoBar"
-
-	var bar_style := StyleBoxFlat.new()
-	bar_style.bg_color = Color(0.07, 0.07, 0.10, 0.93)
-	bar_style.border_color = Color(0.28, 0.28, 0.42, 0.85)
-	bar_style.set_border_width_all(1)
-	bar_style.set_corner_radius_all(5)
-	bar_style.content_margin_left   = 10
-	bar_style.content_margin_right  = 10
-	bar_style.content_margin_top    = 6
-	bar_style.content_margin_bottom = 6
-	bar.add_theme_stylebox_override("panel", bar_style)
-	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var outer := VBoxContainer.new()
-	outer.add_theme_constant_override("separation", 4)
-	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(outer)
-
-	var row1 := HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 0)
-	row1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row1)
-
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 0)
-	row2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row2)
-
-	eco_sim_label        = _add_eco_section(row1, "SIM",        Color(0.65, 0.75, 1.00), true)
-	eco_village_label    = _add_eco_section(row1, "VILLAGE",    Color(0.40, 0.90, 0.50), true)
-	eco_market_label     = _add_eco_section(row1, "MARKET",     Color(0.95, 0.65, 0.25), true)
-	eco_prosperity_label = _add_eco_section(row1, "PROSPERITY", Color(1.00, 0.85, 0.25), true)
-	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
-	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
-
-	# Row 3 — world-level summary (totals across all villages)
-	var row3 := HBoxContainer.new()
-	row3.add_theme_constant_override("separation", 0)
-	row3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	outer.add_child(row3)
-	eco_world_label = _add_eco_section(row3, "WORLD", Color(0.55, 0.80, 1.00), true)
-
-	var left_column := get_node("UI/HUDRoot/Layout/LeftColumn")
-	left_column.add_child(bar)
-	left_column.move_child(bar, 1)
-
-
-func _add_eco_section(hbox: HBoxContainer, title_text: String, accent: Color, expand: bool) -> Label:
-	if hbox.get_child_count() > 0:
-		var sep := VSeparator.new()
-		var sep_style := StyleBoxFlat.new()
-		sep_style.bg_color = Color(0.30, 0.30, 0.45, 0.55)
-		sep_style.content_margin_top    = 5
-		sep_style.content_margin_bottom = 5
-		sep.add_theme_stylebox_override("separator", sep_style)
-		hbox.add_child(sep)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left",  10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top",   3)
-	margin.add_theme_constant_override("margin_bottom", 3)
-	if expand:
-		margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(margin)
-
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 1)
-	margin.add_child(vbox)
-
-	var title_lbl := Label.new()
-	title_lbl.text = title_text
-	title_lbl.add_theme_font_size_override("font_size", 14)
-	title_lbl.add_theme_color_override("font_color", accent)
-	title_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(title_lbl)
-
-	var content_lbl := Label.new()
-	content_lbl.text = "..."
-	content_lbl.add_theme_font_size_override("font_size", 15)
-	content_lbl.add_theme_color_override("font_color", Color(0.93, 0.93, 0.93))
-	content_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content_lbl.custom_minimum_size = Vector2(32, 0)
-	vbox.add_child(content_lbl)
-
-	return content_lbl
 
 
 func _create_toolbar_button(text: String, color: Color, tooltip: String) -> Button:

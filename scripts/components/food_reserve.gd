@@ -81,11 +81,11 @@ func check_survival_mode() -> bool:
 					reason = "only %d bread saved for emergencies (wants %d)" % [current_food, min_reserve_units]
 				else:
 					reason = "hunger is critical (%d of %d days fed)" % [hunger.hunger_days, hunger.hunger_max_days]
-				event_bus.log(
+				event_bus.emit_log(
 					"Tick %d: %s is scrambling for food — %s." % [current_tick, agent_name, reason]
 				)
 			else:
-				event_bus.log(
+				event_bus.emit_log(
 					"Tick %d: %s is no longer in survival mode (bread reserve %d of %d, hunger %d of %d)." %
 					[current_tick, agent_name, current_food, min_reserve_units, hunger.hunger_days, hunger.hunger_max_days]
 				)
@@ -119,10 +119,10 @@ func update_survival_override() -> void:
 		
 		if event_bus:
 			if survival_override_active:
-				event_bus.log("Tick %d: %s SURVIVAL OVERRIDE ON (market food unavailable)" % [current_tick, agent_name])
+				event_bus.emit_log("Tick %d: %s SURVIVAL OVERRIDE ON (market food unavailable)" % [current_tick, agent_name])
 			else:
 				var reason: String = "food reserve restored" if not is_survival_mode else "market supply available"
-				event_bus.log("Tick %d: %s SURVIVAL OVERRIDE OFF (%s)" % [current_tick, agent_name, reason])
+				event_bus.emit_log("Tick %d: %s SURVIVAL OVERRIDE OFF (%s)" % [current_tick, agent_name, reason])
 	else:
 		survival_override_active = should_override
 
@@ -167,7 +167,7 @@ func attempt_survival_purchase() -> int:
 	if bought > 0:
 		inv.add(food_good, bought)
 		if event_bus:
-			event_bus.log("Tick %d: %s survival purchase: bought %d %s (reserve now %d/%d)" % [current_tick, agent_name, bought, food_good, inv.get_qty(food_good), min_reserve_units])
+			event_bus.emit_log("Tick %d: %s survival purchase: bought %d %s (reserve now %d/%d)" % [current_tick, agent_name, bought, food_good, inv.get_qty(food_good), min_reserve_units])
 	
 	return bought
 

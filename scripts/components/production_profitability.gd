@@ -60,9 +60,9 @@ func is_production_profitable(recipe: Dictionary) -> bool:
 		
 		if event_bus:
 			if profitable:
-				event_bus.log("Tick %d: %s production RESUMED: profitable (bid $%.2f >= cost $%.2f)" % [current_tick, producer_name, current_output_price, min_price])
+				event_bus.emit_log("Tick %d: %s production RESUMED: profitable (bid $%.2f >= cost $%.2f)" % [current_tick, producer_name, current_output_price, min_price])
 			else:
-				event_bus.log("Tick %d: %s production PAUSED: unprofitable (bid $%.2f < cost $%.2f)" % [current_tick, producer_name, current_output_price, min_price])
+				event_bus.emit_log("Tick %d: %s production PAUSED: unprofitable (bid $%.2f < cost $%.2f)" % [current_tick, producer_name, current_output_price, min_price])
 	
 	last_profitability_check_tick = current_tick
 	return profitable
@@ -106,7 +106,7 @@ func get_market_price(good: String) -> float:
 			return market.SEED_PRICE
 		_:
 			if event_bus:
-				event_bus.log("ERROR: ProductionProfitability attempted to look up price for non-market good '%s'" % good)
+				event_bus.emit_log("ERROR: ProductionProfitability attempted to look up price for non-market good '%s'" % good)
 			return 0.0
 
 

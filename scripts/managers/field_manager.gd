@@ -39,10 +39,10 @@ func register_field(field_node: Node2D, field_plot) -> void:
 
 
 func unregister_field(field_node: Node2D) -> void:
-	var fi := all_field_nodes.find(field_node)
+	var fi: int = all_field_nodes.find(field_node)
 	if fi != -1:
 		all_field_nodes.remove_at(fi)
-	var fai := all_fields.find(field_node)
+	var fai: int = all_fields.find(field_node)
 	if fai != -1:
 		all_fields.remove_at(fai)
 	field_assignment_map.erase(field_node)
@@ -57,7 +57,7 @@ func assign_field(field_node: Node2D, new_farmer) -> void:
 		new_farmer.add_field(field_node, field_node)
 	if event_bus:
 		var fname: String = new_farmer.name if new_farmer else "(none)"
-		event_bus.log("ASSIGNED: %s → %s" % [field_node.name, fname])
+		event_bus.emit_log("ASSIGNED: %s → %s" % [field_node.name, fname])
 
 
 func release_fields_for_agent(agent: Node) -> void:

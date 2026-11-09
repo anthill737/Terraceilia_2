@@ -63,7 +63,7 @@ func set_target(t: Node2D) -> void:
 		var from_pos = actor.global_position if actor else Vector2.ZERO
 		var to_pos = t.global_position
 		var distance = from_pos.distance_to(to_pos)
-		event_bus.log("Tick %d: %s started travel to %s (distance: %.1f, travel_id=%d)" % [current_tick, agent_name, t.name, distance, active_travel_id])
+		event_bus.emit_log("Tick %d: %s started travel to %s (distance: %.1f, travel_id=%d)" % [current_tick, agent_name, t.name, distance, active_travel_id])
 
 
 func wait(seconds: float) -> void:
@@ -113,7 +113,7 @@ func _physics_process(delta: float) -> void:
 		var elapsed = (Time.get_ticks_msec() / 1000.0) - travel_start_time
 		if elapsed > max_travel_time:
 			if event_bus:
-				event_bus.log("Tick %d: %s travel TIMEOUT to %s (%.1fs elapsed, max %.1fs, travel_id=%d)" % [current_tick, agent_name, target.name, elapsed, max_travel_time, active_travel_id])
+				event_bus.emit_log("Tick %d: %s travel TIMEOUT to %s (%.1fs elapsed, max %.1fs, travel_id=%d)" % [current_tick, agent_name, target.name, elapsed, max_travel_time, active_travel_id])
 			var timed_out_target = target
 			is_traveling = false
 			arrival_handled = true  # Prevent arrival after timeout
@@ -139,7 +139,7 @@ func _physics_process(delta: float) -> void:
 		# Log arrival
 		if event_bus:
 			var elapsed = (Time.get_ticks_msec() / 1000.0) - travel_start_time
-			event_bus.log("Tick %d: %s arrived at %s (travel time: %.1fs, travel_id=%d)" % [current_tick, agent_name, target.name, elapsed, active_travel_id])
+			event_bus.emit_log("Tick %d: %s arrived at %s (travel time: %.1fs, travel_id=%d)" % [current_tick, agent_name, target.name, elapsed, active_travel_id])
 		
 		# Clear travel state BEFORE emitting signal (prevents re-entry)
 		var arrived_target = target

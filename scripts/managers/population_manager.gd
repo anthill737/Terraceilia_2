@@ -69,7 +69,7 @@ func register_household(h: Node) -> void:
 
 
 func unregister_household(h: Node) -> void:
-	var idx := households.find(h)
+	var idx: int = households.find(h)
 	if idx != -1:
 		households.remove_at(idx)
 
@@ -79,7 +79,7 @@ func register_farmer(f: Node) -> void:
 
 
 func unregister_farmer(f: Node) -> void:
-	var idx := all_farmers.find(f)
+	var idx: int = all_farmers.find(f)
 	if idx != -1:
 		all_farmers.remove_at(idx)
 
@@ -89,7 +89,7 @@ func register_baker(b: Node) -> void:
 
 
 func unregister_baker(b: Node) -> void:
-	var idx := all_bakers.find(b)
+	var idx: int = all_bakers.find(b)
 	if idx != -1:
 		all_bakers.remove_at(idx)
 

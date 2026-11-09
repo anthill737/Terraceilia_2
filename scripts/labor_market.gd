@@ -34,7 +34,6 @@ const MIGRATION_SURVIVAL_DAYS: int = 5    # Days in survival mode → migrate
 ## A producer only leaves when the losing streak has also left them broke: less than this many
 ## days of upkeep, or than BROKE_LOAVES loaves of bread at today's price. A working market drives
 ## profit towards zero; breaking even is not failure (docs/ECONOMY_BATCH1.md).
-const BIRTH_CASH: float = 100.0   # batch 2: a newcomer's purse, taken from the market
 const BROKE_UPKEEP_DAYS: float = 8.0
 const BROKE_LOAVES: float = 3.0
 
@@ -213,7 +212,7 @@ func update_daily(day: int) -> void:
 			if p and is_instance_valid(p):
 				_evaluate_producer_switch(p, day)
 
-	# Hands and wages (wages mode): pay today's wages, then hire or let go.
+	# Hands and wages: pay today's wages, then hire or let go.
 	# Batch 2: hiring hands is how households earn, so it runs in both modes; the modes now
 	# differ only in whether farmers and bakers may change trade.
 	_update_hands(day)
@@ -713,7 +712,7 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 	role_switch_requested.emit(p, best_role.to_lower())
 
 
-# ─── Hands and wages (wages mode) ────────────────────────────────────────────
+# ─── Hands and wages (both modes since batch 2) ──────────────────────────────────────
 
 ## Daily: each employer pays each hand HAND_WAGE_LOAVES loaves' worth (money moves from one
 ## wallet to the other; none is made or destroyed). An employer lets a hand go when it cannot
@@ -721,19 +720,6 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 ## HIRE_CASH_DAYS of wages in hand and the hand's extra output (HAND_OUTPUT_BOOST of its own,
 ## valued at today's prices) is worth more than the wage. Households without an employer are
 ## the labour pool.
-## Batch 2: founders (spawned before the village is marked founded) start with STARTING_CASH; anyone who arrives later brings no new
-## money. Their purse (at most BIRTH_CASH) is paid out of the village market's coins.
-static func starting_purse(job, full: float) -> void:
-	if job.wallet == null or job.wallet.money > 0.0:
-		return
-	if job.market == null or not job.market.founded:
-		job.wallet.credit(full)
-		return
-	var amt: float = minf(LaborMarket.BIRTH_CASH, maxf(0.0, job.market.money))
-	job.market.money -= amt
-	job.wallet.credit(amt)
-
-
 func _update_hands(day: int) -> void:
 	var wage: float = HAND_WAGE_LOAVES * (market.bread_price if market else 2.5)
 	var paid: float = 0.0
@@ -829,7 +815,24 @@ func _release_hands(p: Node, why: String) -> void:
 	p.set_meta("hands", [])
 
 
-## Hands an employer has today (0 outside wages mode).
+## Batch 2 (docs/ECONOMY_BATCH2.md): a newcomer's purse, taken from the market's coins.
+const BIRTH_CASH: float = 100.0
+
+## Founders (spawned before the village is marked founded) start with STARTING_CASH; anyone
+## who arrives later, or takes a job with an empty wallet, brings no new money: their purse
+## (at most BIRTH_CASH) is paid out of the village market's coins.
+static func starting_purse(job, full: float) -> void:
+	if job.wallet == null or job.wallet.money > 0.0:
+		return
+	if job.market == null or not job.market.founded:
+		job.wallet.credit(full)
+		return
+	var amt: float = minf(LaborMarket.BIRTH_CASH, maxf(0.0, job.market.money))
+	job.market.money -= amt
+	job.wallet.credit(amt)
+
+
+## Hands an employer has today.
 static func hands_of(p: Node) -> int:
 	if p == null or not p.has_meta("hands"):
 		return 0

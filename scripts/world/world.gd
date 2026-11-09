@@ -57,6 +57,12 @@ func _add_village(scene: PackedScene, idx: int, display_name: String, seed: int)
 	v.village_name = display_name
 	add_child(v)
 	v.initialize(seed, {})
+	# Batch 2: the villages differ, so trade has a reason. Village 1 has bigger ovens,
+	# village 2 better soil.
+	if v.market:
+		v.market.founded = true
+		v.market.oven_mult = 1.5 if idx == 0 else 1.0
+		v.market.soil_mult = 1.5 if idx == 1 else 1.0
 	if v.event_bus:
 		v.event_bus.village_label = "[%s]" % display_name
 	villages.append(v)

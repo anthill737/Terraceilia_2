@@ -71,8 +71,7 @@ func get_job_inspector_data() -> Dictionary:
 const STARTING_CASH: float = 500.0
 
 func activate() -> void:
-	if wallet and wallet.money <= 0.0:
-		wallet.credit(STARTING_CASH)
+	LaborMarket.starting_purse(self, STARTING_CASH)
 	if inv:
 		inv.items = {"bread": 0}
 	agent._health_bar_y = -24.0

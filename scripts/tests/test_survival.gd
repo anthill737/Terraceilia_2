@@ -66,7 +66,7 @@ class Probe extends Node:
 			_sample(v, day)
 		if finished >= world.villages.size() and world.villages.size() > 0:
 			_finish()
-		elif Time.get_ticks_msec() - started_ms > (days * 4 + 120) * 1000:
+		elif Time.get_ticks_msec() - started_ms > (days * 8 + 120) * 1000:
 			print("[SURVIVAL] timed out")
 			_finish()
 

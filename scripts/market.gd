@@ -7,13 +7,21 @@ class_name Market
 #   "insufficient_funds", "storage_full", "walk_away", "capped", "zero_request"
 var last_trade_result: Dictionary = {}
 
-var money: float = 100000.0
+# Batch 2 (docs/ECONOMY_BATCH2.md): a market with limits. It starts with a few thousand coins,
+# holds at most twice its stock target and can only buy what it can pay for.
+const START_MONEY: float = 3000.0
+const STOCK_LIMIT_X_TARGET: int = 2
+var money: float = START_MONEY
 var seeds: int = 100000
 var wheat: int = 0
 var bread: int = 0
 
-var wheat_capacity: int = 999999999
-var bread_capacity: int = 999999999
+var wheat_capacity: int = 90    # STOCK_LIMIT_X_TARGET x wheat_target
+var bread_capacity: int = 100   # STOCK_LIMIT_X_TARGET x bread_target
+# Villages differ (batch 2): set by World per village.
+var founded: bool = false   # set once the founders exist; later arrivals bring no new money
+var soil_mult: float = 1.0   # wheat per harvest
+var oven_mult: float = 1.0   # loaves per oven day
 
 const SEED_PRICE: float = 0.5
 const WHEAT_PRICE_CEILING: float = 5.00

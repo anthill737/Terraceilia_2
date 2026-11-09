@@ -11,12 +11,12 @@ if (-not (Test-Path -LiteralPath $Godot)) {
 }
 
 function Invoke-GodotHeadlessScene {
-    param([string]$SceneResPath)
-    $p = Start-Process -FilePath $Godot -ArgumentList @(
+    param([string]$SceneResPath, [string[]]$ExtraArgs = @())
+    $p = Start-Process -FilePath $Godot -ArgumentList (@(
         "--headless",
         "--path", $ProjectRoot,
         $SceneResPath
-    ) -Wait -PassThru -NoNewWindow
+    ) + $ExtraArgs) -Wait -PassThru -NoNewWindow
     return $p.ExitCode
 }
 
@@ -42,13 +42,23 @@ foreach ($f in $gdFiles) {
 if (-not $failed) { Write-Host "All $($gdFiles.Count) scripts OK." -ForegroundColor Green }
 
 Write-Host ""
-Write-Host "=== Headless TestCareer.tscn ===" -ForegroundColor Cyan
-$ec = Invoke-GodotHeadlessScene "res://scenes/TestCareer.tscn"
+Write-Host "=== Headless TestTradeMigration.tscn ===" -ForegroundColor Cyan
+$ec = Invoke-GodotHeadlessScene "res://scenes/TestTradeMigration.tscn"
 if ($ec -ne 0) {
-    Write-Host "TestCareer FAILED (exit $ec)" -ForegroundColor Red
+    Write-Host "TestTradeMigration FAILED (exit $ec)" -ForegroundColor Red
     $failed = $true
 } else {
-    Write-Host "TestCareer OK." -ForegroundColor Green
+    Write-Host "TestTradeMigration OK." -ForegroundColor Green
+}
+
+Write-Host ""
+Write-Host "=== Headless TestSurvival.tscn (30 days, real game at 10x) ===" -ForegroundColor Cyan
+$ec = Invoke-GodotHeadlessScene "res://scenes/TestSurvival.tscn" @("--", "--days=30")
+if ($ec -ne 0) {
+    Write-Host "TestSurvival FAILED (exit $ec)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestSurvival OK." -ForegroundColor Green
 }
 
 Write-Host ""

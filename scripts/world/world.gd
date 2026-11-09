@@ -38,8 +38,15 @@ func spawn_initial_villages() -> void:
 		push_error("WorldManager: could not load Village.tscn — ensure T3 is complete")
 		return
 
-	_add_village(village_scene, 0, "Village 1", 12345)
-	_add_village(village_scene, 1, "Village 2", 66666)
+	# Tests can give the villages other seeds: --village-seeds=a,b after "--".
+	var seeds := [12345, 66666]
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--village-seeds="):
+			var parts := arg.substr(16).split(",")
+			if parts.size() >= 2:
+				seeds = [int(parts[0]), int(parts[1])]
+	_add_village(village_scene, 0, "Village 1", seeds[0])
+	_add_village(village_scene, 1, "Village 2", seeds[1])
 
 
 func _add_village(scene: PackedScene, idx: int, display_name: String, seed: int) -> void:

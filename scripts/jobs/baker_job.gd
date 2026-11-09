@@ -179,6 +179,17 @@ func set_tick(t: int) -> void:
 
 const STARTING_CASH: float = 500.0
 
+
+## Hired hands (wages mode) add oven time and bigger batches, never bread from nothing: the same
+## flour makes the same bread, a busy bakery just gets through more of it in a day.
+func _oven_capacity() -> int:
+	return roundi(float(oven_capacity_per_day) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
+
+
+func _hand_batch(base: int) -> int:
+	return roundi(float(base) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
+
+
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(STARTING_CASH)
@@ -511,7 +522,7 @@ func process_grinding(delta: float) -> void:
 				agent.pending_target = market_location
 			route.wait(WAIT_TIME)
 			return
-		var target_batch: int = GRIND_BATCH_SIZE
+		var target_batch: int = _hand_batch(GRIND_BATCH_SIZE)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)
 		var units: int = prod.compute_batch(target_batch, "wheat", "flour", FLOUR_PER_WHEAT)
@@ -620,7 +631,7 @@ func process_baking(delta: float) -> void:
 				agent.pending_target = market_location
 			route.wait(WAIT_TIME)
 			return
-		if bread_produced_today >= oven_capacity_per_day:
+		if bread_produced_today >= _oven_capacity():
 			if event_bus:
 				event_bus.emit_log("Tick %d: Baker [CAP] oven capacity reached (%d/%d) - going to sell" % [
 					agent.current_tick, bread_produced_today, oven_capacity_per_day])
@@ -630,7 +641,7 @@ func process_baking(delta: float) -> void:
 				agent.pending_target = market_location
 			route.wait(WAIT_TIME)
 			return
-		var target_batch: int = BAKE_BATCH_SIZE
+		var target_batch: int = _hand_batch(BAKE_BATCH_SIZE)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)
 		var units: int = prod.compute_batch(target_batch, "flour", "bread", BREAD_PER_FLOUR)
@@ -721,7 +732,9 @@ func on_day_changed(_day: int) -> void:
 	)
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:
-		if cur_money <= day_money_start:
+		# Only a day that lost money is a strike; breaking even is the healthy state of a
+		# working market (docs/ECONOMY_BATCH1.md). It was <=, which counted it as a loss.
+		if cur_money < day_money_start - 0.001:
 			consecutive_days_negative_cashflow += 1
 		else:
 			consecutive_days_negative_cashflow = 0
@@ -729,6 +742,8 @@ func on_day_changed(_day: int) -> void:
 		wallet.debit(maintenance_cost_per_day)
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
+	set_meta("output_ema", 0.3 * float(bread_produced_today) + 0.7 * float(get_meta("output_ema", float(bread_produced_today))))
+	set_meta("wheat_per_bread", 1.0 / float(FLOUR_PER_WHEAT * BREAD_PER_FLOUR))
 	bread_produced_today = 0
 
 

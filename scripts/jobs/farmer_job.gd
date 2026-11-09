@@ -142,6 +142,7 @@ func set_tick(t: int) -> void:
 
 
 const STARTING_CASH: float = 500.0
+var wheat_harvested_today: int = 0
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
@@ -315,7 +316,10 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 	if field.is_mature():
 		var harvest_result = field.harvest()
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
-		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult))
+		# Hired hands (wages mode) work the field with the farmer: more labour, more yield.
+		var _hand_mult: float = 1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)
+		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult))
+		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
 		inv.add("wheat", actual_wheat)
 		inv.add("seeds", actual_seeds)
@@ -394,7 +398,9 @@ func on_day_changed(_day: int) -> void:
 	)
 	var cur_money: float = wallet.money if wallet else 0.0
 	if day_money_start >= 0.0:
-		if cur_money <= day_money_start:
+		# Only a day that lost money is a strike; breaking even is the healthy state of a
+		# working market (docs/ECONOMY_BATCH1.md). It was <=, which counted it as a loss.
+		if cur_money < day_money_start - 0.001:
 			consecutive_days_negative_cashflow += 1
 		else:
 			consecutive_days_negative_cashflow = 0
@@ -402,6 +408,8 @@ func on_day_changed(_day: int) -> void:
 		wallet.debit(maintenance_cost_per_day)
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
+	set_meta("output_ema", 0.3 * float(wheat_harvested_today) + 0.7 * float(get_meta("output_ema", float(wheat_harvested_today))))
+	wheat_harvested_today = 0
 	fields_worked_today = 0
 	warned_no_field_today = false
 

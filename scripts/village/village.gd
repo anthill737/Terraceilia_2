@@ -283,6 +283,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.all_farmers = all_farmers
 	labor_market.all_bakers = all_bakers
 	labor_market.all_households = households
+	labor_market.free_field_count = func() -> int: return _free_fields().size()
 	# ── Labor service ──
 	_labor_svc = LaborService.new()
 	_labor_svc.name = "LaborService"
@@ -616,7 +617,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 	var from_role: String = household.current_role if household.get("current_role") else "?"
 	var pop_id: String = household.person_name if household.get("person_name") and household.person_name != "" else household.name
 
-	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS:
+	if role == "farmer" and all_field_nodes.size() >= MAX_FIELDS and _free_fields().is_empty():
 		var block_line := "[CONVERT] pop=%s from=%s to=%s allowed=0 block=land_cap fields=%d/%d" % [
 			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
 		if event_bus: event_bus.emit_log(block_line)
@@ -647,6 +648,21 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		var h_idx: int = households.find(ag)
 		if h_idx != -1:
 			households.remove_at(h_idx)
+		if ag.has_meta("employer"):
+			ag.remove_meta("employer")
+		# A farmer or baker changing trade (docs/ECONOMY_BATCH1.md): leave the old trade's list,
+		# give up the fields (another farmer can take them over), and keep what they own.
+		var kept_items: Dictionary = {}
+		if all_farmers.has(ag) or all_bakers.has(ag):
+			if ag.inv:
+				kept_items = ag.inv.items.duplicate()
+			if all_farmers.has(ag):
+				all_farmers.erase(ag)
+				for fn in all_field_nodes:
+					if is_instance_valid(fn) and field_assignment_map.get(fn, null) == ag:
+						field_assignment_map[fn] = null
+				ag.clear_fields_for_removal()
+			all_bakers.erase(ag)
 		if ag.agent_died.is_connected(_on_household_died):
 			ag.agent_died.disconnect(_on_household_died)
 		# Ensure converted agent retains the correct home village.
@@ -656,7 +672,9 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			# Use village-local spawn helper so the new field stays inside the
 			# correct village territory regardless of world offset.
 			var field_pos := get_spawn_point_for_role("farmer")
-			var pre_field := spawn_field_at(field_pos, null, true)
+			# Take over a field nobody works before ploughing a new one.
+			var free_fields := _free_fields()
+			var pre_field: Node2D = free_fields[0] if not free_fields.is_empty() else spawn_field_at(field_pos, null, true)
 			if pre_field == null:
 				households.append(ag)
 				if not ag.agent_died.is_connected(_on_household_died):
@@ -666,6 +684,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 				return
 
 			ag.set_role("Farmer")
+			_restore_items(ag, kept_items)
 			ag.name = "Farmer_%d" % next_farmer_id
 			next_farmer_id += 1
 			_fixup_node_name(ag, "Farmer")
@@ -699,6 +718,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 		elif role == "baker":
 			ag.set_role("Baker")
+			_restore_items(ag, kept_items)
 			ag.name = "Baker_%d" % next_baker_id
 			next_baker_id += 1
 			_fixup_node_name(ag, "Baker")
@@ -724,6 +744,30 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			ag.set_locations(bakery_spot, market_node)
 			all_bakers.append(ag)
+
+
+## Fields with no farmer assigned.
+func _free_fields() -> Array:
+	var out: Array = []
+	for fn in all_field_nodes:
+		if is_instance_valid(fn) and field_assignment_map.get(fn, null) == null:
+			out.append(fn)
+	return out
+
+
+## After a farmer or baker changes trade the new job's starting kit replaces their stock; give
+## them back what they owned instead. A farmer keeps the kit's seeds if they had none (seeds
+## are still the market's bottomless supply, see docs/ECONOMY_BATCH1.md).
+func _restore_items(ag: Agent, kept: Dictionary) -> void:
+	if kept.is_empty() or ag.inv == null:
+		return
+	var kit: Dictionary = ag.inv.items.duplicate()
+	ag.inv.items = kept.duplicate()
+	for k in kit:
+		if not ag.inv.items.has(k):
+			ag.inv.items[k] = 0
+	if kit.has("seeds") and int(ag.inv.items.get("seeds", 0)) < 5:
+		ag.inv.items["seeds"] = kit["seeds"]
 
 
 # ============================================================================

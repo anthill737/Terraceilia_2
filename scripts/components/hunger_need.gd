@@ -30,8 +30,10 @@ func bind(_agent_name: String, inventory: Inventory, event_bus: EventBus, cal: C
 	inv = inventory
 	bus = event_bus
 	calendar = cal
+	if calendar != null and calendar.day_changed.is_connected(_on_day_changed):
+		return   # already bound (a job change): keep today's hunger, no second connection
 	hunger_days = hunger_max_days
-	
+
 	if calendar != null:
 		calendar.day_changed.connect(_on_day_changed)
 

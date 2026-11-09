@@ -13,7 +13,8 @@ Terraceilia is a Godot 4.5 GDScript economic simulation game. There are no exter
   - Vulkan is unavailable in the VM; Godot automatically falls back to OpenGL (llvmpipe software renderer). ALSA audio is also unavailable; Godot falls back to a dummy audio driver. Both fallbacks are harmless.
 
 - **Headless tests (exit 0 = pass, 1 = fail):**
-  - **Career / log cadence:** `godot --headless --path /workspace res://scenes/TestCareer.tscn` — 36-day career log validation (partial pass if town goes extinct early).
+  - **Survival (real game at 10x):** `godot --headless --path /workspace res://scenes/TestSurvival.tscn -- --days=100` — fails if a village dies out, goes 5 days without a farmer or baker, or has people starving while its market has bread. Args after `--`: `--days=N`, `--labor-mode=switching|wages`, `--village-seeds=a,b`, `--trade` (turns inter-village trade on), `--result=file.json`. See docs/ECONOMY_BATCH1.md.
+  - **Trade migration:** `godot --headless --path /workspace res://scenes/TestTradeMigration.tscn` — six scenarios (trade off, trade on, return home, determinism, identical prices, arrival state).
   - **Economy invariants:** `godot --headless --path /workspace res://scenes/TestEconomy.tscn` — runs **three** RNG seeds per process (`42`, `99999`, `1337`); each run checks market + every pop each tick (up to 60 days or `sim_failed`). Optional args after `--`: `--min-survival-days N` (fail if extinction before calendar day `N`), `--max-days N`, `--seeds 1,2,3` or `--seeds=1,2,3`.
 
 - **Windows full suite:** `powershell -ExecutionPolicy Bypass -File tools/run_all_tests.ps1` (set `$env:GODOT` if the engine is not at the default path in the script).

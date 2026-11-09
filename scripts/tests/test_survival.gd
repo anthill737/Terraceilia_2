@@ -27,12 +27,14 @@ class Probe extends Node:
 	var log_rows := []
 	var stats := {}             # village id -> counters
 	var done := false
+	var trade := false
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
 		for arg in OS.get_cmdline_user_args():
 			if arg.begins_with("--days="): days = int(arg.substr(7))
 			if arg.begins_with("--result="): result_path = arg.substr(9)
+			if arg == "--trade": trade = true
 		started_ms = Time.get_ticks_msec()
 
 	func _process(_d: float) -> void:
@@ -47,6 +49,9 @@ class Probe extends Node:
 		var world := main.get_node_or_null("World")
 		if world == null:
 			return
+		if trade and not world.trade_enabled:
+			world.trade_enabled = true
+			print("[SURVIVAL] trade on")
 		var finished := 0
 		for v in world.villages:
 			if v == null or v.calendar == null:

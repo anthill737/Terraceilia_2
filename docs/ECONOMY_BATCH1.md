@@ -28,7 +28,9 @@ branch's base (80dd117). Anthony asked for batch 1, plus a run comparing job swi
   fast-forward broke travel and passed while the town died). It fails if, after day 10, a
   village dies out, has no farmer or no baker for 5 days running, or has someone starving on
   more than 5% of days while its market had bread. Money is summed daily and reported.
-  `--days=N --labor-mode=... --village-seeds=a,b --result=file.json`.
+  `--days=N --labor-mode=... --village-seeds=a,b --trade --result=file.json` (`--trade` turns
+  inter-village trade on). The old career log test (TestCareer) was removed: it drove the
+  single-village game, had not loaded since PR 7, and this test covers what it was for.
 - `test_economy_invariants.gd`: the type-inference parse error under Godot 4.6.
 
 ## Hired hands with wages ("wages" mode)

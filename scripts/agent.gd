@@ -151,6 +151,18 @@ func _ready() -> void:
 	career_eval.name = "CareerEvaluator"
 	add_child(career_eval)
 
+	# Starving is death, whatever the person does for a living (before, only households
+	# died; a farmer or baker froze in place for good, holding wheat and coins).
+	if hunger:
+		hunger.starved.connect(_on_starved)
+
+
+func _on_starved(_agent_name: String) -> void:
+	log_event("Died of starvation.")
+	if event_bus:
+		event_bus.emit_log("STARVATION: %s died (hunger at 0, no bread)" % name)
+	agent_died.emit(self)
+
 
 # ==============================================================================
 #  Role management

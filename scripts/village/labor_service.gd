@@ -31,7 +31,8 @@ func bind(pop_mgr: PopulationManager, field_mgr: FieldManager, event_bus: EventB
 func handle_migrate_requested(agent: Node, reason: String) -> void:
 	if not is_instance_valid(agent):
 		return
-	if _event_bus:
+	var died: bool = reason == "starved"
+	if _event_bus and not died:
 		_event_bus.emit_log("[MIGRATION] %s leaving (reason: %s)" % [agent.name, reason])
 
 	if _pop_mgr:
@@ -60,7 +61,7 @@ func handle_migrate_requested(agent: Node, reason: String) -> void:
 		func(e): return is_instance_valid(e["household"]) and e["household"] != agent
 	)
 
-	if agent.has_method("log_event"):
+	if agent.has_method("log_event") and not died:
 		agent.log_event("Left town — %s." % reason)
 	var _migrated_name: String = agent.name
 	agent.queue_free()

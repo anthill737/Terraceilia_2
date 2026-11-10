@@ -7,25 +7,30 @@ work, went broke in about 12 days and left. Houses now limit arrivals, the way S
 
 - Every person lives in a house. Each village starts with one house per person plus 2 empty.
 - A newcomer only arrives when an empty house is free, on top of the old food and prosperity rules.
+- One price runs everything. A house is worth what it costs to build one today: 20 logs at
+  the market's firewood price plus 5 days of a worker's wage. Buying an empty house from the
+  town costs exactly that. Rent is that value spread over 120 days (about 0.5 coins a day at
+  current prices), so rent, sale price and build cost all move together with prices.
+- Whoever buys or builds needs the same money: the house's value plus 10 days of bread and
+  firewood kept back. There is no separate, bigger reserve for the rich.
 - A newcomer, or anyone without a home, takes an empty house. They buy it from the town if they
-  can pay the price and keep 60 coins; otherwise they rent it.
-- Rent is 0.5 coins a day, paid to the owner, or to the town purse for houses the town owns.
-  A household that can't pay rent for 4 days leaves town.
-- Anyone who can afford the wood builds a house and works on it themselves: 20 logs bought from
-  the market's firewood pile, then 5 days of work. Builders only buy wood above half the pile's
-  target, so heating comes first.
-- Who builds: first a renter who can pay for the wood and keep 60 coins (they move into their own
-  house when it is done); otherwise, when no house is empty and the town is doing well, the
-  richest person with the wood cost plus 150 coins builds one to rent out. At most 2 houses go
-  up at once in a village, and one starts per day.
-- The town sells its houses at the wood cost times 1.5.
+  can afford it; otherwise they rent it. A household that can't pay rent for 4 days leaves town.
+- Building: the builder buys the 20 logs a bit at a time from the market's firewood pile (only
+  what is above its full target, so heating comes first), then 5 days of work. Each work day the builder
+  pays a day's wage to someone in town who is out of work. If nobody is free, the builder does
+  it and keeps the wage.
+- Who builds: first a renter who can afford a house (they move in when it is done, freeing their
+  rental for a newcomer). Otherwise, when no house is empty and the town is doing well, the
+  richest person who can afford one builds a house to rent out. At most 2 houses go up at once
+  in a village, and one starts per day.
 - When someone leaves, their house stays. If they owned it, it passes to the town. A half-built
   house is given up.
 
 ## Shortcuts
 
 - Houses are numbers only. They have no place on the map; everyone still walks to the one House spot.
-- There are no families yet, so the builder works alone. In SAELIG the whole household helps.
+- There are no families yet, so a hired worker or the builder alone does the work. In SAELIG
+  the whole household helps. Builders and hired workers don't leave their usual work to build.
 - Logs for houses come from the firewood pile; there is no separate lumber good.
 - Business owners who can't pay rent are not put out; their rent just goes unpaid.
 

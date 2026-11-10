@@ -1,6 +1,8 @@
 extends Node
 class_name HungerNeed
 
+## Hunger reaching 0 with no bread to eat is death. Nobody lingers "starving": they die,
+## and the village removes them (Agent turns this into agent_died).
 signal starved(agent_name: String)
 
 # Configuration
@@ -56,7 +58,12 @@ func _on_day_changed(day: int) -> void:
 		if calendar != null:
 			try_auto_eat(calendar.tick)
 	
-	# Check for starvation AFTER auto-eat attempt
+	# Last chance: anyone holding bread eats it before going hungry to the end.
+	if hunger_days <= 0 and inv != null and inv.remove(food_item, 1):
+		hunger_days = eat_restore_days
+		ate_today = true
+		last_auto_eat_day = day
+	# No bread and hunger at 0: dead.
 	if hunger_days <= 0:
 		is_starving = true
 		if bus:

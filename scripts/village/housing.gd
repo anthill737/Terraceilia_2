@@ -1,9 +1,15 @@
 extends RefCounted
 class_name Housing
 ## Houses. Every person lives in one. A newcomer only arrives when a house stands empty.
-## Anyone who can afford the wood builds a house and works on it themselves. Someone who
-## can't afford to buy rents from whoever owns a spare house; the town owns houses nobody
-## else does (the starting spares and those left behind) and sells or rents them.
+##
+## One price runs everything: a house is worth what it costs to put one up, 20 logs at the
+## market's firewood price plus 5 days of a worker's wage. Buying an empty house costs that.
+## Building one costs the same: the builder buys the logs and pays a day's wage to someone
+## out of work for each of the 5 days (if nobody is free, the builder does it and keeps the
+## wage). Rent is that same value spread over RENT_PAYBACK_DAYS. Whoever buys or builds,
+## a renter for themselves or a richer person to let out, needs the same amount: the
+## house's value plus CUSHION_DAYS of bread and firewood left over.
+## The town owns houses nobody else does (the starting spares and those left behind).
 ##
 ## Each house has a spot on the map (a grid south-east of the market) and the people living
 ## in it walk home to it. People with no house sleep at the shelter (the old shared home).
@@ -11,13 +17,11 @@ class_name Housing
 const START_SPARE: int = 2            # empty houses each village starts with
 const HOUSE_WOOD: int = 20            # logs a house takes, bought from the market's firewood pile
 const BUILD_DAYS: int = 5             # days of the builder's own work once the wood is in
-const RENT_PER_DAY: float = 0.5
-const SALE_MARKUP: float = 1.5        # the town sells an empty house at wood cost x this
-const OWN_RESERVE: float = 60.0       # a renter buys or builds only if this much is left after
-const INVEST_RESERVE: float = 150.0   # someone building a house to rent keeps this much
+const RENT_PAYBACK_DAYS: float = 120.0  # rent a day = house value / this
+const CUSHION_DAYS: float = 10.0       # buyers and builders keep this many days of bread + firewood
 const RENT_DAYS_TO_LEAVE: int = 4     # a household that can't pay rent this long leaves town
 const MAX_BUILDS: int = 2             # houses going up at once in one village
-const WOOD_PILE_KEEP: float = 0.5     # builders leave this share of the firewood target for heating
+const WOOD_PILE_KEEP: float = 1.0     # builders only buy firewood above the full target: heating first
 const HOUSE_ORIGIN := Vector2(440, 400)  # village-local spot of the first house
 const HOUSE_COLS: int = 5
 const HOUSE_DX: float = 44.0
@@ -29,7 +33,7 @@ var event_bus = null
 var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid, pos, node}
 var next_id: int = 1
 var initialized: bool = false
-var stats := {"built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
+var stats := {"wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
 
 
 func _people() -> Array:
@@ -64,8 +68,31 @@ func wood_cost() -> float:
 	return float(HOUSE_WOOD) * (market.firewood_price if market else 1.0)
 
 
+## A worker's wages for the days it takes to build.
+func labour_cost() -> float:
+	return float(BUILD_DAYS) * LaborMarket.daily_wage(market)
+
+
+## What a house is worth: what it costs to build one today.
+func house_value() -> float:
+	return wood_cost() + labour_cost()
+
+
 func sale_price() -> float:
-	return wood_cost() * SALE_MARKUP
+	return house_value()
+
+
+func rent_per_day() -> float:
+	return house_value() / RENT_PAYBACK_DAYS
+
+
+## Money a buyer or builder keeps back for food and heat.
+func cushion() -> float:
+	return CUSHION_DAYS * (market.bread_price + market.firewood_price)
+
+
+func can_afford_house(a) -> bool:
+	return a != null and a.wallet != null and a.wallet.money >= house_value() + cushion()
 
 
 func _home_of(a) -> Dictionary:
@@ -164,7 +191,7 @@ func on_day(day: int) -> void:
 				break
 		h.occupant = a
 		h.unpaid = 0
-		if h.owner == null and a.wallet and a.wallet.money >= sale_price() + OWN_RESERVE:
+		if h.owner == null and can_afford_house(a):
 			var price: float = sale_price()
 			_pay(a, null, price)
 			h.owner = a
@@ -177,11 +204,12 @@ func on_day(day: int) -> void:
 
 	# Rent. A household that can't pay for RENT_DAYS_TO_LEAVE days leaves town. Owners in
 	# business are not put out; their unpaid rent just isn't collected.
+	var rent: float = rent_per_day()
 	for h in houses:
 		if not h.done or h.occupant == null or h.occupant == h.owner:
 			continue
-		if _pay(h.occupant, h.owner, RENT_PER_DAY):
-			stats.rent_paid += RENT_PER_DAY
+		if _pay(h.occupant, h.owner, rent):
+			stats.rent_paid += rent
 			h.unpaid = 0
 			continue
 		h.unpaid += 1
@@ -193,7 +221,10 @@ func on_day(day: int) -> void:
 			h.unpaid = 0
 			village.labor_market.migrate_requested.emit(a, "no_rent")
 
-	# Building: buy the wood a bit at a time from what heating doesn't need, then work.
+	# Building: buy the wood a bit at a time from what heating doesn't need, then 5 days of
+	# work. Each work day the builder pays a day's wage to someone out of work.
+	var wage: float = LaborMarket.daily_wage(market)
+	var hired_today: Array = []
 	for h in houses:
 		if h.done:
 			continue
@@ -204,6 +235,17 @@ func on_day(day: int) -> void:
 			if want > 0:
 				h.wood += market.sell_firewood_to_agent(b, want)
 			continue
+		var worker = village.labor_market._free_hand() if village.labor_market else null
+		if worker != null and worker != b and not hired_today.has(worker) and b.wallet and b.wallet.money >= wage:
+			b.wallet.debit(wage)
+			worker.wallet.credit(wage)
+			b.cashflow_today_expense += wage
+			worker.cashflow_today_income += wage
+			hired_today.append(worker)
+			stats.wages_paid += wage
+			h.worker = str(worker.name)
+		else:
+			h.worker = ""
 		h.work += 1
 		if h.work < BUILD_DAYS:
 			continue
@@ -231,13 +273,13 @@ func on_day(day: int) -> void:
 			var home: Dictionary = _home_of(a)
 			if home.is_empty() or home.owner == a or _building_by(a):
 				continue
-			if a.wallet and a.wallet.money >= wood_cost() + OWN_RESERVE:
+			if can_afford_house(a):
 				builder = a
 				why = "a home of their own"
 				break
 		var pm = village.prosperity_meter
 		if builder == null and _vacant().is_empty() and pm and pm.prosperity_score >= pm.PROSPERITY_THRESHOLD_TO_GROW:
-			var best: float = wood_cost() + INVEST_RESERVE
+			var best: float = house_value() + cushion()
 			for a in people:
 				if a.wallet and a.wallet.money >= best and not _building_by(a):
 					best = a.wallet.money
@@ -303,17 +345,19 @@ func describe(a) -> String:
 	elif home.owner == a:
 		parts.append("Owns house %d." % home.id)
 	elif home.owner == null:
-		parts.append("Rents house %d from the town ($%.2f a day)." % [home.id, RENT_PER_DAY])
+		parts.append("Rents house %d from the town ($%.2f a day)." % [home.id, rent_per_day()])
 	else:
-		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, RENT_PER_DAY])
+		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, rent_per_day()])
 	if not home.is_empty() and int(home.unpaid) > 0:
 		parts.append("[color=#ff8844]%d day(s) behind on rent.[/color]" % home.unpaid)
 	var let_out := 0
 	for h in houses:
 		if not h.done and h.owner == a:
-			parts.append("Building house %d: wood %d/%d, work %d/%d days." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS])
+			parts.append("Building house %d: wood %d/%d, work %d/%d days%s." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS,
+				(", hired " + str(h.get("worker", ""))) if str(h.get("worker", "")) != "" else ""])
 		elif h.done and h.owner == a and h.occupant != a:
 			let_out += 1
 	if let_out > 0:
 		parts.append("Lets out %d house(s)." % let_out)
+	parts.append("A house is worth $%.0f (wood $%.0f + 5 days' wages $%.0f)." % [house_value(), wood_cost(), labour_cost()])
 	return " ".join(parts)

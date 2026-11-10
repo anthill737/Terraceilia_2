@@ -502,7 +502,7 @@ func _check_idle_guard() -> void:
 
 func get_status_text() -> String:
 	if hunger.is_starving:
-		return "STARVING (inactive)"
+		return "Starved"
 	if trade_route_active and trade_target_village != null:
 		return "Trading→" + trade_target_village.village_name
 	if route.target == house_node:

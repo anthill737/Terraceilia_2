@@ -64,6 +64,7 @@ Failure
 - A household that opens a bakery keeps what it owns and no longer gets a free starter kit. It
   buys its first oven firewood on its first market trip.
 - An owner whose business closes leaves the old trade's stock behind (seeds, wheat, flour).
+- (Later: starving is now death for everyone; see docs/STARVATION.md.)
 - The survival test now counts "starving with bread in the market" only for people who could
   pay for a loaf. Being broke and hungry is recorded separately. It also counts businesses
   opened and closed apart from trade switches.

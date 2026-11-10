@@ -35,4 +35,6 @@ firewood, home (owns or rents, from whom, days behind on rent), and hands they e
 
 - Houses are drawn in a grid; there is no building animation, only the progress bar.
 - Farmer hands work by multiplying the harvest, so you won't see them in the fields.
-- Bread prices still run high in small towns (the market aims for a fixed 50-loaf pile).
+- Lots of newcomers still go broke and leave (about 30 per village over 120 days of testing):
+  there isn't enough paid work yet.
+- Wheat still aims for a fixed 45 pile, so it sits at its 1.00 floor with a big pile.

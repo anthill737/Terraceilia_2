@@ -145,7 +145,8 @@ const STARTING_CASH: float = 500.0
 var wheat_harvested_today: int = 0
 
 func activate() -> void:
-	LaborMarket.starting_purse(self, STARTING_CASH)
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability

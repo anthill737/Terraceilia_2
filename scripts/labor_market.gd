@@ -42,7 +42,7 @@ const BROKE_LOAVES: float = 3.0
 ## "wages": producers keep their trade; one with more work than hands hires households as
 ## farm or bakery hands and pays them a daily wage out of their own wallet.
 ## Set by config ("labor": {"mode": ...}) or --labor-mode=<mode> after "--".
-var labor_mode: String = "switching"
+var labor_mode: String = "wages"   # hiring (batch 2 default); "switching" lets producers change trade
 const HAND_WAGE_LOAVES: float = 2.0       # a day's wage, in loaves at today's bread price
 const HAND_OUTPUT_BOOST: float = 0.5      # each hand adds this share of the employer's own output
 const MAX_HANDS: int = 2
@@ -813,23 +813,6 @@ func _release_hands(p: Node, why: String) -> void:
 			if h.has_method("log_event"):
 				h.log_event("Out of work: %s." % why)
 	p.set_meta("hands", [])
-
-
-## Batch 2 (docs/ECONOMY_BATCH2.md): a newcomer's purse, taken from the market's coins.
-const BIRTH_CASH: float = 100.0
-
-## Founders (spawned before the village is marked founded) start with STARTING_CASH; anyone
-## who arrives later, or takes a job with an empty wallet, brings no new money: their purse
-## (at most BIRTH_CASH) is paid out of the village market's coins.
-static func starting_purse(job, full: float) -> void:
-	if job.wallet == null or job.wallet.money > 0.0:
-		return
-	if job.market == null or not job.market.founded:
-		job.wallet.credit(full)
-		return
-	var amt: float = minf(LaborMarket.BIRTH_CASH, maxf(0.0, job.market.money))
-	job.market.money -= amt
-	job.wallet.credit(amt)
 
 
 ## Hands an employer has today.

@@ -34,7 +34,8 @@ var logged_staying_home: bool = false
 var switch_cooldown_days: int = 0
 var training_days_remaining: int = 0
 var days_in_survival_mode: int = 0
-var consecutive_failed_food_days: int = 0
+var consecutive_failed_food_days: int = 0   # days in a row with a failed bread trip (batch 2: days, not trips)
+var _last_failed_food_day: int = -1
 
 const SPEED: float = 100.0
 const ARRIVAL_DISTANCE: float = 5.0
@@ -71,7 +72,8 @@ func get_job_inspector_data() -> Dictionary:
 const STARTING_CASH: float = 500.0
 
 func activate() -> void:
-	LaborMarket.starting_purse(self, STARTING_CASH)
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"bread": 0}
 	agent._health_bar_y = -24.0
@@ -203,7 +205,11 @@ func attempt_buy_bread() -> void:
 				[qty_bought, desired, tr.get("price", 0.0), tr.get("reason", "?")]
 			)
 		else:
-			consecutive_failed_food_days += 1
+			# Count each day once: several failed trips in one day are one bad day (batch 2).
+			var today: int = hunger.calendar.day_index if hunger and hunger.calendar else -2
+			if today != _last_failed_food_day or today == -2:
+				consecutive_failed_food_days += 1
+				_last_failed_food_day = today
 			if event_bus:
 				event_bus.emit_log("Tick %d: %s tried to buy %d bread, bought 0 (market empty, fail_streak=%d)" % [agent.current_tick, agent.name, desired, consecutive_failed_food_days])
 			agent.log_event(

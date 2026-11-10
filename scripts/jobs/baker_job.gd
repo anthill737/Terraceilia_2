@@ -191,7 +191,8 @@ func _hand_batch(base: int) -> int:
 
 
 func activate() -> void:
-	LaborMarket.starting_purse(self, STARTING_CASH)
+	if wallet and wallet.money <= 0.0:
+		wallet.credit(STARTING_CASH)
 	if inv:
 		inv.items = {"wheat": 0, "flour": 0, "bread": 5}
 	prod = agent.get_node_or_null("ProductionBatch") as ProductionBatch

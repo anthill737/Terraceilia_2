@@ -4,6 +4,7 @@ extends Node
 ## harness broke travel), and samples both villages once per game day.
 ##
 ## It fails when, after the first 10 days, a village:
+##   - loses more than a quarter of its people (3 or more) in one day, or
 ##   - dies out, or
 ##   - has no farmer or no baker for 5 days in a row, or
 ##   - has someone starving on more than 5% of days while its market still had bread.
@@ -16,6 +17,10 @@ extends Node
 const GRACE_DAYS := 10
 const NO_ROLE_DAYS := 5
 const STARVE_WITH_FOOD_SHARE := 0.05
+## Batch 2: a village may not lose more than this share of its people (and at least
+## EXODUS_MIN_PEOPLE) in a single day, by death or by leaving town.
+const EXODUS_SHARE := 0.25
+const EXODUS_MIN_PEOPLE := 3
 
 
 class Probe extends Node:
@@ -73,7 +78,8 @@ class Probe extends Node:
 	func _sample(v, day: int) -> void:
 		var vid: int = v.village_id
 		var s: Dictionary = stats.get(vid, {"no_farmer_run": 0, "no_baker_run": 0, "worst_no_farmer": 0, "worst_no_baker": 0,
-			"starve_with_food_days": 0, "days": 0, "switches": 0, "left": 0, "extinct_day": -1, "first_money": -1.0})
+			"starve_with_food_days": 0, "days": 0, "switches": 0, "left": 0, "extinct_day": -1, "first_money": -1.0,
+			"exodus_days": 0, "worst_day_loss": 0})
 		var m = v.market
 		var roles := {"Farmer": 0, "Baker": 0, "Household": 0}
 		var cash: Array = []
@@ -91,9 +97,11 @@ class Probe extends Node:
 					starving += 1
 				hands += LaborMarket.hands_of(a)
 		var prev: Dictionary = people.get(vid, {})
+		var lost_today := 0
 		for k in prev:
 			if not now.has(k):
 				s.left += 1
+				lost_today += 1
 			elif now[k] != prev[k] and prev[k] != "Household":
 				s.switches += 1     # a farmer or baker who changed trade
 		people[vid] = now
@@ -110,6 +118,9 @@ class Probe extends Node:
 			s.worst_no_baker = maxi(s.worst_no_baker, s.no_baker_run)
 			if starving > 0 and m.bread > 0:
 				s.starve_with_food_days += 1
+			s.worst_day_loss = maxi(s.worst_day_loss, lost_today)
+			if lost_today >= EXODUS_MIN_PEOPLE and float(lost_today) > EXODUS_SHARE * float(prev.size()):
+				s.exodus_days += 1
 		if cash.is_empty() and s.extinct_day < 0:
 			s.extinct_day = day
 		stats[vid] = s
@@ -135,6 +146,8 @@ class Probe extends Node:
 				["village %d never without a baker for %d days" % [vid, NO_ROLE_DAYS], s.worst_no_baker < NO_ROLE_DAYS, "longest %d days" % s.worst_no_baker],
 				["village %d starving with bread in the market on at most %d%% of days" % [vid, int(STARVE_WITH_FOOD_SHARE * 100)],
 					float(s.starve_with_food_days) <= STARVE_WITH_FOOD_SHARE * maxf(1.0, float(s.days)), "%d of %d days" % [s.starve_with_food_days, s.days]],
+				["village %d never lost over %d%% of its people in one day" % [vid, int(EXODUS_SHARE * 100)], s.exodus_days == 0,
+					"%d such days, most lost in a day %d" % [s.exodus_days, s.worst_day_loss]],
 			]
 			for l in lines:
 				checks += 1

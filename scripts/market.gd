@@ -19,7 +19,6 @@ var bread: int = 0
 var wheat_capacity: int = 90    # 2 x wheat_target
 var bread_capacity: int = 100   # 2 x bread_target
 # Villages differ (batch 2): set by World per village.
-var founded: bool = false   # set once the founders exist; later arrivals bring no new money
 var soil_mult: float = 1.0   # wheat per harvest
 var oven_mult: float = 1.0   # loaves per oven day
 

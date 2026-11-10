@@ -5,7 +5,8 @@ class_name Housing
 ## can't afford to buy rents from whoever owns a spare house; the town owns houses nobody
 ## else does (the starting spares and those left behind) and sells or rents them.
 ##
-## Data only: houses have no map position yet and everyone still walks to the one House spot.
+## Each house has a spot on the map (a grid south-east of the market) and the people living
+## in it walk home to it. People with no house sleep at the shelter (the old shared home).
 
 const START_SPARE: int = 2            # empty houses each village starts with
 const HOUSE_WOOD: int = 20            # logs a house takes, bought from the market's firewood pile
@@ -17,11 +18,15 @@ const INVEST_RESERVE: float = 150.0   # someone building a house to rent keeps t
 const RENT_DAYS_TO_LEAVE: int = 4     # a household that can't pay rent this long leaves town
 const MAX_BUILDS: int = 2             # houses going up at once in one village
 const WOOD_PILE_KEEP: float = 0.5     # builders leave this share of the firewood target for heating
+const HOUSE_ORIGIN := Vector2(440, 400)  # village-local spot of the first house
+const HOUSE_COLS: int = 5
+const HOUSE_DX: float = 44.0
+const HOUSE_DY: float = 48.0
 
 var village = null
 var market = null
 var event_bus = null
-var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid}
+var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid, pos, node}
 var next_id: int = 1
 var initialized: bool = false
 var stats := {"built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
@@ -41,6 +46,15 @@ func _people() -> Array:
 func _new_house(owner, occupant, done: bool) -> Dictionary:
 	var h := {"id": next_id, "owner": owner, "occupant": occupant, "wood": HOUSE_WOOD if done else 0,
 		"work": BUILD_DAYS if done else 0, "done": done, "unpaid": 0}
+	var slot: int = next_id - 1
+	h.pos = HOUSE_ORIGIN + Vector2((slot % HOUSE_COLS) * HOUSE_DX, (slot / HOUSE_COLS) * HOUSE_DY)
+	if village != null:
+		var spot := Node2D.new()
+		spot.name = "Home%d" % h.id
+		spot.position = h.pos
+		spot.set_meta("village_id", village.village_id)
+		village.add_child(spot)
+		h.node = spot
 	next_id += 1
 	houses.append(h)
 	return h
@@ -116,6 +130,7 @@ func on_day(day: int) -> void:
 			_new_house(null, null, true)
 		initialized = true
 		_log("[HOUSING] day=%d started with %d houses for %d people" % [day, houses.size(), people.size()])
+		_sync_homes()
 		return
 
 	# Whoever left town no longer lives in or owns anything here. Half-built houses of
@@ -128,6 +143,8 @@ func on_day(day: int) -> void:
 			if h.done:
 				h.owner = null
 			else:
+				if h.get("node") != null and is_instance_valid(h.node):
+					h.node.queue_free()
 				houses.erase(h)
 
 	# People without a home take an empty one: buy it from the town if they can afford it
@@ -231,6 +248,8 @@ func on_day(day: int) -> void:
 			stats.started += 1
 			_log("[HOUSING] day=%d %s starts a house %s ($%.1f)" % [day, builder.name, why, builder.get_cash()])
 
+	_sync_homes()
+
 	if day % 5 == 0:
 		var line := "[HOUSING] day=%d houses=%d empty=%d building=%d renters=%d homeless=%d built=%d evicted=%d" % [
 			day, summary().houses, summary().empty, summary().building, summary().renters, homeless, stats.built, stats.evicted]
@@ -253,3 +272,48 @@ func summary() -> Dictionary:
 		elif h.occupant != h.owner:
 			renters += 1
 	return {"houses": done, "empty": empty, "building": building, "renters": renters}
+
+
+## Point each resident's walk home at their own house. Someone already on the way to, or
+## waiting at, the old home is redirected.
+func _sync_homes() -> void:
+	for h in houses:
+		if h.done and h.occupant != null and is_instance_valid(h.occupant) and h.get("node") != null:
+			_set_home(h.occupant, h.node)
+
+
+func _set_home(a, spot: Node2D) -> void:
+	var j = a.current_job
+	if not (j is HouseholdJob) or j.home_location == spot:
+		return
+	var old: Node2D = j.home_location
+	j.home_location = spot
+	if a.pending_target == old:
+		a.pending_target = spot
+	if j.route != null and j.route.target == old:
+		j.route.set_target(spot)
+
+
+## One line for the person inspector.
+func describe(a) -> String:
+	var parts: Array = []
+	var home: Dictionary = _home_of(a)
+	if home.is_empty():
+		parts.append("No house; sleeps at the shelter.")
+	elif home.owner == a:
+		parts.append("Owns house %d." % home.id)
+	elif home.owner == null:
+		parts.append("Rents house %d from the town ($%.2f a day)." % [home.id, RENT_PER_DAY])
+	else:
+		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, RENT_PER_DAY])
+	if not home.is_empty() and int(home.unpaid) > 0:
+		parts.append("[color=#ff8844]%d day(s) behind on rent.[/color]" % home.unpaid)
+	var let_out := 0
+	for h in houses:
+		if not h.done and h.owner == a:
+			parts.append("Building house %d: wood %d/%d, work %d/%d days." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS])
+		elif h.done and h.owner == a and h.occupant != a:
+			let_out += 1
+	if let_out > 0:
+		parts.append("Lets out %d house(s)." % let_out)
+	return " ".join(parts)

@@ -119,7 +119,17 @@ var firewood_sold_ema: float = 6.0
 
 # PART 3: Targets aligned with actual throughput
 var wheat_target: int = 45  # Reduced from 60 to match production capacity
-var bread_target: int = 50  # Reduced from 80 to match consumption
+## How much bread the market aims to hold: a few days of what people actually want. It
+## follows demand instead of a fixed number, so the baker's ramp up / ease off and the
+## price both answer to how much the town really eats.
+var bread_target: int = 18
+const BREAD_DAYS_OF_STOCK: float = 3.0
+const BREAD_TARGET_MIN: int = 3          # only so the ratios never divide by zero
+## Demand = loaves people bought + loaves they wanted but the shelf was empty. People who
+## couldn't afford a loaf are not counted: that is a money problem, not demand.
+var bread_bought_by_people_today: int = 0
+var bread_short_today: int = 0
+var bread_demand_ema: float = 6.0
 
 # Previous day inventory tracking for recovery detection
 var wheat_prev: int = 0
@@ -812,6 +822,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	bread_requested_today += requested
 	
 	if bread <= 0:
+		bread_short_today += requested
 		if event_bus:
 			event_bus.emit_log("[BREAD EMPTY] day=%d tick=%d buyer=%s wanted=%d inv=0" % [current_day, current_tick, _agent_label(h), requested])
 		_set_result(0, "empty", "bread", bread_price)
@@ -819,6 +830,9 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	var h_wallet: Wallet = get_wallet(h)
 	var max_by_inventory: int = min(requested, bread)
+	var shelf_short: int = requested - max_by_inventory
+	if shelf_short > 0 and h_wallet.money >= float(requested) * bread_price:
+		bread_short_today += shelf_short
 	var max_affordable: int = int(floor(h_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
 	
@@ -832,6 +846,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	h_wallet.debit(cost)
 	money += cost
 	bread -= qty
+	bread_bought_by_people_today += qty
 	
 	var reason: String = "success" if qty >= requested else "partial"
 	_set_result(qty, reason, "bread", bread_price)
@@ -860,6 +875,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 			return 0
 	
 	if bread <= 0:
+		bread_short_today += requested
 		if event_bus:
 			event_bus.emit_log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
 		_set_result(0, "empty", "bread", bread_price)
@@ -867,6 +883,9 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	
 	var agent_wallet: Wallet = get_wallet(agent)
 	var max_by_inventory: int = min(requested, bread)
+	var shelf_short: int = requested - max_by_inventory
+	if shelf_short > 0 and agent_wallet.money >= float(requested) * bread_price:
+		bread_short_today += shelf_short
 	var max_affordable: int = int(floor(agent_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
 	
@@ -880,6 +899,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	agent_wallet.debit(cost)
 	money += cost
 	bread -= qty
+	bread_bought_by_people_today += qty
 	
 	var reason: String = "success" if qty >= requested else "partial"
 	_set_result(qty, reason, "bread", bread_price)
@@ -916,6 +936,15 @@ func _get_sell_pressure_ratio(good: String) -> float:
 
 # ==================== DAILY PRICE ADJUSTMENT ======================================
 
+func _update_bread_target() -> void:
+	var wanted: int = bread_bought_by_people_today + bread_short_today
+	bread_demand_ema = 0.3 * float(wanted) + 0.7 * bread_demand_ema
+	bread_target = maxi(BREAD_TARGET_MIN, roundi(BREAD_DAYS_OF_STOCK * bread_demand_ema))
+	if event_bus:
+		event_bus.emit_log("[BREAD DEMAND] day=%d bought=%d short=%d avg=%.1f target=%d stock=%d" % [
+			current_day, bread_bought_by_people_today, bread_short_today, bread_demand_ema, bread_target, bread])
+
+
 func on_day_changed(day: int) -> void:
 	"""Called by Calendar when a new day starts. Adjusts prices based on inventory vs target."""
 	current_day = day
@@ -923,6 +952,7 @@ func on_day_changed(day: int) -> void:
 	# Apply inventory decay first (before price adjustments)
 	_apply_inventory_decay(day)
 	
+	_update_bread_target()
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
 	_adjust_firewood_price()
@@ -951,6 +981,8 @@ func on_day_changed(day: int) -> void:
 	wheat_requested_today = 0
 	bread_sold_today = 0
 	bread_requested_today = 0
+	bread_bought_by_people_today = 0
+	bread_short_today = 0
 	
 	# Reset market-side hysteresis tracking
 	wheat_market_buy_blocked = false

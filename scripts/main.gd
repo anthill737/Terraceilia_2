@@ -75,6 +75,8 @@ func _ready() -> void:
 	add_child(cam)
 	cam.make_current()
 	_camera = cam
+	# Open on the selected village, framed clear of the panels.
+	get_tree().create_timer(0.3).timeout.connect(_recenter_camera)
 
 	# ── Resolve village references (World._ready() has already run) ──
 	# World node spawns all villages in its own _ready() via spawn_initial_villages().
@@ -257,7 +259,10 @@ func _on_village_nav_selected(v: Node) -> void:
 		center = _world_node.get_village_center(v)
 	else:
 		center = (v as Node2D).global_position + Vector2(400.0, 300.0)
-	_camera.fly_to(center, _camera.zoom.x)
+	# The stats panel covers the top ~290 px and the event log the right 300 px, so aim the
+	# camera up and right of the village centre to show the village in the open part.
+	var z: float = maxf(_camera.zoom.x, 0.1)
+	_camera.fly_to(center + Vector2(150.0, -150.0) / z, _camera.zoom.x)
 
 
 ## Zoom camera out so both villages are visible simultaneously.

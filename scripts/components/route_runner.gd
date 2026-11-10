@@ -151,5 +151,11 @@ func _physics_process(delta: float) -> void:
 		emit_signal("arrived", arrived_target)
 		return
 	
-	actor.velocity = to_target.normalized() * speed
+	# Never step past the target. At high game speed one physics step covers more ground
+	# than the arrival distance, and people used to hop back and forth past the door forever.
+	var step: float = speed * delta
+	if delta > 0.0 and to_target.length() < step:
+		actor.velocity = to_target / delta
+	else:
+		actor.velocity = to_target.normalized() * speed
 	actor.move_and_slide()

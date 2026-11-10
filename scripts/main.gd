@@ -146,7 +146,7 @@ func _update_camera() -> void:
 	# Auto-follow / centroid tracking is intentionally disabled — camera moves
 	# only when the user presses a village-nav or World button explicitly.
 	var all_entities: Array = []
-	for group_name: String in ["farmers", "bakers", "households"]:
+	for group_name: String in ["farmers", "bakers", "woodworkers", "households"]:
 		for pop: Node in get_tree().get_nodes_in_group(group_name):
 			if is_instance_valid(pop) and pop is Node2D:
 				all_entities.append(pop)
@@ -197,7 +197,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		var best_pop: Node = null
 		var best_d2: float = INF
-		for group_name: String in ["farmers", "bakers", "households"]:
+		for group_name: String in ["farmers", "bakers", "woodworkers", "households"]:
 			for pop: Node in get_tree().get_nodes_in_group(group_name):
 				if not is_instance_valid(pop):
 					continue

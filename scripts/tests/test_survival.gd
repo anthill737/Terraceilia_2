@@ -79,14 +79,16 @@ class Probe extends Node:
 		var vid: int = v.village_id
 		var s: Dictionary = stats.get(vid, {"no_farmer_run": 0, "no_baker_run": 0, "worst_no_farmer": 0, "worst_no_baker": 0,
 			"starve_with_food_days": 0, "days": 0, "switches": 0, "left": 0, "extinct_day": -1, "first_money": -1.0,
-			"exodus_days": 0, "worst_day_loss": 0})
+			"exodus_days": 0, "worst_day_loss": 0, "closed": 0, "opened": 0})
 		var m = v.market
-		var roles := {"Farmer": 0, "Baker": 0, "Household": 0}
+		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0}
+		var starving_can_pay := 0
+		var cold := 0
 		var cash: Array = []
 		var starving := 0
 		var hands := 0
 		var now := {}
-		for group in [v.all_farmers, v.all_bakers, v.households]:
+		for group in [v.all_farmers, v.all_bakers, v.all_woodworkers, v.households]:
 			for a in group:
 				if a == null or not is_instance_valid(a):
 					continue
@@ -95,6 +97,10 @@ class Probe extends Node:
 				cash.append(a.get_cash())
 				if a.hunger and a.hunger.is_starving:
 					starving += 1
+					if a.get_cash() >= m.bread_price:
+						starving_can_pay += 1
+				if int(a.get_meta("cold_days", 0)) > 0:
+					cold += 1
 				hands += LaborMarket.hands_of(a)
 		var prev: Dictionary = people.get(vid, {})
 		var lost_today := 0
@@ -102,8 +108,13 @@ class Probe extends Node:
 			if not now.has(k):
 				s.left += 1
 				lost_today += 1
-			elif now[k] != prev[k] and prev[k] != "Household":
-				s.switches += 1     # a farmer or baker who changed trade
+			elif now[k] != prev[k]:
+				if now[k] == "Household":
+					s.closed += 1       # a business that failed; its owner stays as a household
+				elif prev[k] == "Household":
+					s.opened += 1       # a household that opened a business
+				else:
+					s.switches += 1     # an owner who changed trade
 		people[vid] = now
 		cash.sort()
 		var people_money := 0.0
@@ -116,7 +127,8 @@ class Probe extends Node:
 			s.no_baker_run = s.no_baker_run + 1 if roles.Baker == 0 else 0
 			s.worst_no_farmer = maxi(s.worst_no_farmer, s.no_farmer_run)
 			s.worst_no_baker = maxi(s.worst_no_baker, s.no_baker_run)
-			if starving > 0 and m.bread > 0:
+			# Batch 3: only people who could pay for a loaf count; being broke is a different problem.
+			if starving_can_pay > 0 and m.bread > 0:
 				s.starve_with_food_days += 1
 			s.worst_day_loss = maxi(s.worst_day_loss, lost_today)
 			if lost_today >= EXODUS_MIN_PEOPLE and float(lost_today) > EXODUS_SHARE * float(prev.size()):
@@ -125,11 +137,11 @@ class Probe extends Node:
 			s.extinct_day = day
 		stats[vid] = s
 		var n := cash.size()
-		var row := {"v": vid, "day": day, "pop": n, "farmers": roles.Farmer, "bakers": roles.Baker, "households": roles.Household,
+		var row := {"v": vid, "day": day, "pop": n, "farmers": roles.Farmer, "bakers": roles.Baker, "households": roles.Household, "woodworkers": roles.Woodworker,
 			"hands": hands, "wheat_p": snappedf(m.wheat_price, 0.01), "bread_p": snappedf(m.bread_price, 0.01),
-			"m_wheat": m.wheat, "m_bread": m.bread, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
+			"m_wheat": m.wheat, "m_bread": m.bread, "fw_p": snappedf(m.firewood_price, 0.01), "m_fw": m.firewood, "cold": cold, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
 			"cash_min": snappedf(cash[0], 0.1) if n else 0.0, "cash_med": snappedf(cash[n / 2], 0.1) if n else 0.0,
-			"starving": starving, "switches": s.switches, "left": s.left}
+			"starving": starving, "starving_can_pay": starving_can_pay, "switches": s.switches, "closed": s.closed, "opened": s.opened, "left": s.left}
 		log_rows.append(row)
 		print("[SURVIVAL] " + JSON.stringify(row))
 
@@ -144,7 +156,7 @@ class Probe extends Node:
 				["village %d did not die out" % vid, s.extinct_day < 0, "extinct on day %d" % s.extinct_day],
 				["village %d never without a farmer for %d days" % [vid, NO_ROLE_DAYS], s.worst_no_farmer < NO_ROLE_DAYS, "longest %d days" % s.worst_no_farmer],
 				["village %d never without a baker for %d days" % [vid, NO_ROLE_DAYS], s.worst_no_baker < NO_ROLE_DAYS, "longest %d days" % s.worst_no_baker],
-				["village %d starving with bread in the market on at most %d%% of days" % [vid, int(STARVE_WITH_FOOD_SHARE * 100)],
+				["village %d starving with coins for a loaf and bread in the market on at most %d%% of days" % [vid, int(STARVE_WITH_FOOD_SHARE * 100)],
 					float(s.starve_with_food_days) <= STARVE_WITH_FOOD_SHARE * maxf(1.0, float(s.days)), "%d of %d days" % [s.starve_with_food_days, s.days]],
 				["village %d never lost over %d%% of its people in one day" % [vid, int(EXODUS_SHARE * 100)], s.exodus_days == 0,
 					"%d such days, most lost in a day %d" % [s.exodus_days, s.worst_day_loss]],

@@ -34,6 +34,8 @@ var all_farmers: Array:
 	get: return pop_mgr.all_farmers if pop_mgr else []
 var all_bakers: Array:
 	get: return pop_mgr.all_bakers if pop_mgr else []
+var all_woodworkers: Array:
+	get: return pop_mgr.all_woodworkers if pop_mgr else []
 var households: Array:
 	get: return pop_mgr.households if pop_mgr else []
 var all_fields: Array:
@@ -57,6 +59,7 @@ var trade_service: VillageTradeService = null
 var spawn_service: VillageSpawnService = null
 ## Positional node used as market routing destination (Node2D in scene).
 var market_node: Node2D = null
+var lumber_yard: Node2D = null   # batch 3: where woodworkers cut firewood
 ## Calendar reference for HungerNeed binding during spawns.
 var calendar = null      # Calendar
 ## ProsperityMeter reference for spawn log messages.
@@ -283,6 +286,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.all_farmers = all_farmers
 	labor_market.all_bakers = all_bakers
 	labor_market.all_households = households
+	labor_market.all_woodworkers = all_woodworkers
 	labor_market.free_field_count = func() -> int: return _free_fields().size()
 	# ── Labor service ──
 	_labor_svc = LaborService.new()
@@ -291,9 +295,14 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	_labor_svc.bind(pop_mgr, field_mgr, bus)
 	labor_market.migrate_requested.connect(_labor_svc.handle_migrate_requested)
 	labor_market.role_switch_requested.connect(_labor_svc.handle_role_switch_requested)
+	labor_market.business_failed.connect(_on_business_failed)
 
 	# Bind econ_stats to per-village arrays
 	econ_stats.bind_agents(pop_mgr.all_farmers, pop_mgr.all_bakers, pop_mgr.households)
+	econ_stats.bind_woodworkers(pop_mgr.all_woodworkers)
+	# Batch 3: a lumber yard and the town's first woodworker.
+	_build_lumber_yard()
+	_spawn_first_woodworker()
 
 	# Assign persistent identities
 	_assign_new_identity(farmer)
@@ -332,6 +341,9 @@ func receive_tick(tick: int) -> void:
 	for b in all_bakers:
 		if b and is_instance_valid(b):
 			b.set_tick(tick)
+	for w in all_woodworkers:
+		if w and is_instance_valid(w):
+			w.set_tick(tick)
 	for h in households:
 		if h and is_instance_valid(h):
 			h.set_tick(tick)
@@ -407,6 +419,7 @@ func get_population_summary() -> Dictionary:
 	return {
 		"farmers":    all_farmers.size(),
 		"bakers":     all_bakers.size(),
+		"woodworkers": all_woodworkers.size(),
 		"households": households.size(),
 		"total":      pop_mgr.count() if pop_mgr else 0,
 		"fields":     all_field_nodes.size(),
@@ -560,6 +573,9 @@ func spawn_household_at(pos: Vector2) -> Node:
 
 
 func _on_household_died(agent_node: Node) -> void:
+	all_woodworkers.erase(agent_node)
+	if agent_node.is_in_group("woodworkers"):
+		agent_node.remove_from_group("woodworkers")
 	var idx: int = households.find(agent_node)
 	if idx != -1:
 		households.remove_at(idx)
@@ -582,9 +598,9 @@ func _on_calendar_day_changed(day: int) -> void:
 
 	if event_bus:
 		event_bus.emit_log("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
-		event_bus.emit_log("[POP STATUS] total=%d/%d (H=%d F=%d B=%d)" % [
+		event_bus.emit_log("[POP STATUS] total=%d/%d (H=%d F=%d B=%d W=%d)" % [
 			pop_mgr.count(), MAX_TOTAL_POP,
-			households.size(), all_farmers.size(), all_bakers.size()])
+			households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()])
 
 	if labor_market:
 		labor_market.update_daily(day)
@@ -595,6 +611,9 @@ func _on_calendar_day_changed(day: int) -> void:
 	for b in all_bakers:
 		if b and is_instance_valid(b):
 			b.on_day_changed(day)
+	for w in all_woodworkers:
+		if w and is_instance_valid(w):
+			w.on_day_changed(day)
 	for h in households:
 		if h and is_instance_valid(h):
 			h.on_day_changed(day)
@@ -610,7 +629,7 @@ func _on_calendar_day_changed(day: int) -> void:
 		_labor_svc.tick_day(Callable(self, "_perform_role_conversion"))
 
 
-func _perform_role_conversion(household: Node, role: String) -> void:
+func _perform_role_conversion(household: Node, role: String, free: bool = false) -> void:
 	if not is_instance_valid(household):
 		return
 
@@ -622,6 +641,15 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			pop_id, from_role, role, all_field_nodes.size(), MAX_FIELDS]
 		if event_bus: event_bus.emit_log(block_line)
 		return
+
+	# Batch 3: opening a business costs STARTUP_COST coins, paid to the town market.
+	if role != "household" and not free and market != null:
+		var purse: Wallet = household.get_node_or_null("Wallet") as Wallet
+		if purse == null or purse.money < LaborMarket.STARTUP_COST:
+			if event_bus:
+				event_bus.emit_log("[CONVERT] pop=%s from=%s to=%s allowed=0 block=startup_cost cash=%.1f" % [
+					pop_id, from_role, role, purse.money if purse else 0.0])
+			return
 
 	var pos: Vector2 = household.global_position
 	var wallet_money: float = 0.0
@@ -652,10 +680,10 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 			ag.remove_meta("employer")
 		# A farmer or baker changing trade (docs/ECONOMY_BATCH1.md): leave the old trade's list,
 		# give up the fields (another farmer can take them over), and keep what they own.
-		var kept_items: Dictionary = {}
+		# Batch 3: everyone keeps what they own when they change what they do.
+		var kept_items: Dictionary = ag.inv.items.duplicate() if ag.inv else {}
+		all_woodworkers.erase(ag)
 		if all_farmers.has(ag) or all_bakers.has(ag):
-			if ag.inv:
-				kept_items = ag.inv.items.duplicate()
 			if all_farmers.has(ag):
 				all_farmers.erase(ag)
 				for fn in all_field_nodes:
@@ -685,6 +713,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			ag.set_role("Farmer")
 			_restore_items(ag, kept_items)
+			_pay_startup(ag, free)
 			ag.name = "Farmer_%d" % next_farmer_id
 			next_farmer_id += 1
 			_fixup_node_name(ag, "Farmer")
@@ -719,6 +748,7 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 		elif role == "baker":
 			ag.set_role("Baker")
 			_restore_items(ag, kept_items)
+			_pay_startup(ag, free)
 			ag.name = "Baker_%d" % next_baker_id
 			next_baker_id += 1
 			_fixup_node_name(ag, "Baker")
@@ -744,6 +774,107 @@ func _perform_role_conversion(household: Node, role: String) -> void:
 
 			ag.set_locations(bakery_spot, market_node)
 			all_bakers.append(ag)
+
+		elif role == "woodworker":
+			ag.set_role("Woodworker")
+			_restore_items(ag, kept_items)
+			_pay_startup(ag, free)
+			ag.name = "Woodworker_%d" % pop_mgr.next_woodworker_id
+			pop_mgr.next_woodworker_id += 1
+			_fixup_node_name(ag, "Woodworker")
+			_rebind_needs(ag)
+			var w_home := _make_spot(ag.name + "_Home", pos, Color(0.6, 0.4, 0.2, 0.6))
+			if ag.current_job is WoodworkerJob:
+				(ag.current_job as WoodworkerJob).yard_location = lumber_yard
+			ag.set_locations(w_home, market_node)
+			all_woodworkers.append(ag)
+			if not ag.agent_died.is_connected(_on_household_died):
+				ag.agent_died.connect(_on_household_died)
+
+		elif role == "household":
+			# Batch 3: a business that failed. Its owner stays in town as a household looking
+			# for work, with their coins, bread and firewood. The stock of the old trade
+			# (seeds, wheat, flour) is left behind. They may open a business again at once.
+			ag.set_role("Household")
+			_restore_items(ag, kept_items)
+			if ag.inv:
+				for k in ["seeds", "wheat", "flour"]:
+					ag.inv.items.erase(k)
+			ag.name = "Household_%d" % pop_mgr.next_household_id
+			pop_mgr.next_household_id += 1
+			_fixup_node_name(ag, "Household")
+			_rebind_needs(ag)
+			var h_home := _make_spot(ag.name + "_Home", pos, Color(0.2, 0.5, 1, 0.6))
+			ag.set_locations(h_home, market_node)
+			households.append(ag)
+			if not ag.agent_died.is_connected(_on_household_died):
+				ag.agent_died.connect(_on_household_died)
+			ag.switch_cooldown_days = 0
+			ag.days_in_role = LaborMarket.MIN_TENURE_DAYS
+
+
+## Batch 3: the opening fee, from the new owner's purse to the town market's.
+func _pay_startup(ag: Agent, free: bool) -> void:
+	if free or market == null or ag.wallet == null:
+		return
+	var fee: float = minf(LaborMarket.STARTUP_COST, ag.wallet.money)
+	ag.wallet.debit(fee)
+	market.money += fee
+	ag.log_event("Paid $%.0f to the town market to open the business." % fee)
+	if event_bus:
+		event_bus.emit_log("[STARTUP] %s paid $%.0f to the market to open a business" % [ag.name, fee])
+
+
+func _rebind_needs(ag: Agent) -> void:
+	if ag.hunger and ag.inv:
+		ag.hunger.bind(ag.name, ag.inv, event_bus, calendar)
+	if ag.food_reserve:
+		ag.food_reserve.bind(ag.inv, ag.hunger, market, ag.wallet, event_bus, ag.name)
+
+
+func _make_spot(spot_name: String, global_pos: Vector2, colour: Color, half: float = 12.0) -> Node2D:
+	var spot := Node2D.new()
+	spot.name = spot_name
+	spot.position = to_local(global_pos)
+	spot.set_meta("village_id", village_id)
+	var marker := ColorRect.new()
+	marker.name = "Marker"
+	marker.offset_left = -half
+	marker.offset_top = -half
+	marker.offset_right = half
+	marker.offset_bottom = half
+	marker.color = colour
+	spot.add_child(marker)
+	add_child(spot)
+	return spot
+
+
+## Batch 3: one lumber yard per village, a short walk from the market. Its wood never runs out.
+func _build_lumber_yard() -> void:
+	if lumber_yard != null or market_node == null:
+		return
+	lumber_yard = _make_spot("LumberYard", market_node.global_position + Vector2(140, -120), Color(0.35, 0.22, 0.1, 0.8), 20.0)
+
+
+## Batch 3: the town starts with one woodworker, the way it starts with one farmer and one
+## baker. They arrive as a household and are set up with an owner's purse.
+func _spawn_first_woodworker() -> void:
+	if spawn_service == null:
+		return
+	var h = await spawn_household_at(get_spawn_point_for_role("household"))
+	if h == null or not is_instance_valid(h):
+		return
+	_perform_role_conversion(h, "woodworker", true)
+	if h.wallet and h.wallet.money < WoodworkerJob.OWNER_CASH:
+		h.wallet.credit(WoodworkerJob.OWNER_CASH - h.wallet.money)
+	if h.inv:
+		h.inv.items["bread"] = maxi(2, h.inv.get_qty("bread"))
+		h.inv.items["firewood"] = maxi(6, h.inv.get_qty("firewood"))
+
+
+## Batch 3: a business closed (broke after a losing streak). Its owner becomes a household.
+func _on_business_failed(p: Node) -> void:
+	_perform_role_conversion(p, "household", true)
 
 
 ## Fields with no farmer assigned.
@@ -775,8 +906,8 @@ func _restore_items(ag: Agent, kept: Dictionary) -> void:
 # ============================================================================
 
 func log_population_snapshot() -> void:
-	var line := "[POP SNAPSHOT] H=%d F=%d B=%d Total=%d" % [
-		households.size(), all_farmers.size(), all_bakers.size(),
+	var line := "[POP SNAPSHOT] H=%d F=%d B=%d W=%d Total=%d" % [
+		households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size(),
 		pop_mgr.count() if pop_mgr else 0]
 	print("[%s] %s" % [name, line])
 	if event_bus:

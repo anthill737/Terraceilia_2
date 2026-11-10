@@ -102,7 +102,20 @@ const PRODUCER_HYSTERESIS_CONFIG: Dictionary = {
 }
 
 var wheat_price: float = 1.0
-var bread_price: float = 2.5
+var bread_price: float = 3.2   # batch 3: a loaf now takes 2 wheat and oven firewood (was 2.5)
+
+# Firewood (batch 3). Woodworkers sell it here; every hearth and every oven buys it here.
+const FIREWOOD_PRICE_FLOOR: float = 0.50
+const FIREWOOD_PRICE_CEILING: float = 5.00
+var firewood: int = 30
+var firewood_price: float = 1.5
+var firewood_target: int = 30
+var firewood_capacity: int = 80
+var firewood_sold_today: int = 0
+var firewood_bought_today: int = 0
+var firewood_requested_today: int = 0
+var firewood_short_today: int = 0
+var firewood_sold_ema: float = 6.0
 
 # PART 3: Targets aligned with actual throughput
 var wheat_target: int = 45  # Reduced from 60 to match production capacity
@@ -912,6 +925,7 @@ func on_day_changed(day: int) -> void:
 	
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
+	_adjust_firewood_price()
 	
 	# Store current inventory for next day's recovery detection
 	wheat_prev = wheat
@@ -1260,3 +1274,84 @@ func _adjust_bread_price(day: int) -> void:
 				day, bread, lower_band, bread_target, upper_band, bid_mult, max_buy,
 				old_price, bread_price, update_reason
 			])
+
+
+# ─── Firewood (batch 3) ───────────────────────────────────────────────────────
+
+## What the market pays a woodworker today: the price, less when the pile is over its target
+## band and a little more when it is under (the same banding wheat and bread use).
+func firewood_bid() -> float:
+	var t: float = float(maxi(1, firewood_target))
+	var bid: float = firewood_price
+	if float(firewood) > t * (1.0 + TARGET_BAND_PCT):
+		bid *= BAND_UPPER_BID_MULTIPLIER
+	elif float(firewood) < t * (1.0 - TARGET_BAND_PCT):
+		bid *= BAND_LOWER_BID_MULTIPLIER
+	return maxf(FIREWOOD_PRICE_FLOOR, bid)
+
+
+## A woodworker sells firewood to the market. Coins move from the market's purse to the
+## seller's; nothing is sold below `min_acceptable_price`. Returns the amount bought.
+func buy_firewood_from_agent(agent, amount_offered: int, min_acceptable_price: float = 0.0) -> int:
+	if agent == null or amount_offered <= 0:
+		return 0
+	var bid: float = firewood_bid()
+	if bid < min_acceptable_price:
+		return 0
+	var a_inv = get_inv(agent)
+	var a_wallet = get_wallet(agent)
+	if a_inv == null or a_wallet == null:
+		return 0
+	var qty: int = mini(amount_offered, a_inv.get_qty("firewood"))
+	qty = mini(qty, firewood_capacity - firewood)
+	qty = mini(qty, int(floor(money / bid)))
+	if qty <= 0:
+		return 0
+	var pay: float = float(qty) * bid
+	a_inv.items["firewood"] = a_inv.get_qty("firewood") - qty
+	a_wallet.credit(pay)
+	money -= pay
+	firewood += qty
+	firewood_bought_today += qty
+	return qty
+
+
+## Anyone buys firewood at today's price. Coins move from the buyer to the market's purse.
+## Returns the amount sold; the caller puts it in the buyer's inventory.
+func sell_firewood_to_agent(agent, requested: int) -> int:
+	if agent == null or requested <= 0:
+		return 0
+	var a_wallet = get_wallet(agent)
+	if a_wallet == null:
+		return 0
+	firewood_requested_today += requested
+	var qty: int = mini(requested, firewood)
+	if qty < requested:
+		firewood_short_today += requested - qty   # the pile ran short (not: the buyer was poor)
+	qty = mini(qty, int(floor(a_wallet.money / firewood_price)))
+	if qty <= 0:
+		return 0
+	var cost: float = float(qty) * firewood_price
+	a_wallet.debit(cost)
+	money += cost
+	firewood -= qty
+	firewood_sold_today += qty
+	return qty
+
+
+## Daily: firewood gets dearer when the pile is low or ran short, cheaper when it is piling
+## up, by at most MAX_DAILY_PRICE_CHANGE. The target pile follows about two days of sales.
+func _adjust_firewood_price() -> void:
+	var t: float = float(maxi(1, firewood_target))
+	if float(firewood) < t * (1.0 - TARGET_BAND_PCT) or firewood_short_today > 0:
+		firewood_price *= 1.0 + MAX_DAILY_PRICE_CHANGE * clampf(1.0 - float(firewood) / t, 0.2, 1.0)
+	elif float(firewood) > t * (1.0 + TARGET_BAND_PCT):
+		firewood_price *= 1.0 - MAX_DAILY_PRICE_CHANGE * clampf(float(firewood) / t - 1.0, 0.2, 1.0)
+	firewood_price = clampf(firewood_price, FIREWOOD_PRICE_FLOOR, FIREWOOD_PRICE_CEILING)
+	firewood_sold_ema = 0.3 * float(firewood_sold_today) + 0.7 * firewood_sold_ema
+	firewood_target = maxi(30, roundi(2.0 * firewood_sold_ema))
+	firewood_capacity = maxi(80, firewood_target * 2)
+	firewood_sold_today = 0
+	firewood_bought_today = 0
+	firewood_requested_today = 0
+	firewood_short_today = 0

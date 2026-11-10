@@ -8,7 +8,9 @@ class_name MarginCompression
 ## Uses recipe-driven logic - works for any producer with any recipe structure.
 
 # Configuration
-var compression_threshold: float = 0.90  # Throttle when input_cost >= output_price * threshold
+var compression_threshold: float = 0.75  # Throttle when cost >= output_price * threshold (batch 3; was 0.90)
+## Cost per unit made beyond the recipe inputs: wages, upkeep, fuel. Set daily by the job.
+var overhead_per_unit: float = 0.0
 var enabled: bool = true
 
 # State tracking (for state-change-only logging)
@@ -79,12 +81,12 @@ func check_margin_compression(recipe: Dictionary) -> bool:
 			has_valid_input_prices = true
 			total_input_cost += input_price * input_qty
 	
-	if not has_valid_input_prices:
+	if not has_valid_input_prices and overhead_per_unit <= 0.0:
 		# No valid input prices - cannot calculate compression
 		return false
 	
 	# Calculate cost per unit of output
-	var cost_per_output: float = total_input_cost / float(output_quantity)
+	var cost_per_output: float = total_input_cost / float(output_quantity) + overhead_per_unit
 	
 	# Check compression: if input cost >= output price * threshold
 	var compression_price_point: float = output_price * compression_threshold

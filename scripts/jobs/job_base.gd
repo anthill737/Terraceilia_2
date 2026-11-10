@@ -74,3 +74,19 @@ func get_display_name() -> String:
 
 func get_status_text() -> String:
 	return "idle"
+
+
+## Buy firewood at the market up to `target` in hand (batch 3: every hearth burns one a day).
+func buy_firewood_to(target: int) -> int:
+	if market == null or inv == null or wallet == null:
+		return 0
+	var need: int = target - inv.get_qty("firewood")
+	if need <= 0:
+		return 0
+	var price: float = market.firewood_price
+	var got: int = market.sell_firewood_to_agent(agent, need)
+	if got > 0:
+		inv.items["firewood"] = inv.get_qty("firewood") + got
+		agent.cashflow_today_expense += float(got) * price
+		agent.log_event("Bought %d firewood at $%.2f each." % [got, price])
+	return got

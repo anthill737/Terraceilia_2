@@ -371,7 +371,7 @@ func refresh(selected_pop: Node) -> void:
 		var g_ftarget: int = int(d.get("gate_food_target", 3))
 		var g_freq: int = int(ceil(g_ftarget * (2.0 / 3.0)))
 		var need_tenure: int = LaborMarket.MIN_TENURE_DAYS
-		var need_savings: float = LaborMarket.SAVINGS_BUFFER_REQUIRED
+		var need_savings: float = Tuning.f("shop_savings_needed", LaborMarket.SAVINGS_BUFFER_REQUIRED)
 		var tenure_col: String = "#55cc88" if g_tenure >= need_tenure else "#cc5555"
 		var cd_col: String = "#55cc88" if g_cooldown == 0 else "#cc5555"
 		var sav_col: String = "#55cc88" if g_cash >= need_savings else "#cc5555"

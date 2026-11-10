@@ -16,7 +16,8 @@ const MIN_MARGIN: float = 0.25
 
 var yard_location: Node2D = null
 var firewood_made_today: int = 0
-var maintenance_cost_per_day: float = 0.2
+var maintenance_cost_per_day: float:
+	get: return Tuning.f("upkeep_woodworker", 0.2)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 var cost_per_unit: float = 0.7
@@ -37,7 +38,7 @@ func get_job_inspector_data() -> Dictionary:
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
-		wallet.credit(OWNER_CASH)
+		wallet.credit(Tuning.f("owner_start_coins", OWNER_CASH))
 	super.activate()
 	if inv:
 		inv.items = {"bread": 2, "firewood": 6}
@@ -45,7 +46,7 @@ func activate() -> void:
 
 
 func _capacity() -> int:
-	return roundi(float(FIREWOOD_PER_DAY) * LaborMarket.hand_mult(agent))
+	return roundi(float(Tuning.i("woodworker_logs_per_day", FIREWOOD_PER_DAY)) * LaborMarket.hand_mult(agent))
 
 
 ## Firewood beyond what the woodworker keeps for its own hearth.

@@ -130,12 +130,13 @@ func update_prosperity(day: int) -> void:
 func should_spawn_household(day: int) -> bool:
 	"""Check if prosperity conditions allow household spawning."""
 	# Check cooldown
-	if GROWTH_COOLDOWN_DAYS > 0:
-		if day - last_spawn_day < GROWTH_COOLDOWN_DAYS:
+	var wait_days: int = Tuning.i("arrival_wait_days", GROWTH_COOLDOWN_DAYS)
+	if wait_days > 0:
+		if day - last_spawn_day < wait_days:
 			return false
 	
 	# Check prosperity threshold with hysteresis
-	if prosperity_score >= PROSPERITY_THRESHOLD_TO_GROW:
+	if prosperity_score >= Tuning.f("arrival_prosperity_bar", PROSPERITY_THRESHOLD_TO_GROW):
 		return true
 	
 	return false

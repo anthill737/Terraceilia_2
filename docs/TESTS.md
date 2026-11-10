@@ -28,6 +28,14 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   village 2 on day 15, and checks (9 checks) that the price of the hit good rose or its stock
   fell hard, the trouble ended, the price settled back within 25%, nobody starved, the village
   held, and a merchant carried goods between the villages.
+- `res://scenes/TestDevMode.tscn`: dev mode (docs/DEV_MODE.md). Checks every built-in value in the
+  settings table against the code; one check per input that, once set, it reaches the code that
+  uses it (clock, oven, yard, farm, wages, upkeep, fees, savings, price limits, newcomer rules,
+  house costs, switches); then starts a town through the dev menu's restart and compares the
+  people, coins, market stock, prices and prosperity number by number, that everyone has a
+  house on the first morning, that each switch holds for 12 days, the menu's rows, readout and
+  reset, and that scenario files save and load. Any game test also takes `--scenario=name` and
+  `--set key=value` after `--`.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

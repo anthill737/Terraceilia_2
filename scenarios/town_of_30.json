@@ -1,0 +1,10 @@
+{
+  "name": "Town of 30",
+  "inputs": {},
+  "start": {
+    "people": 30,
+    "market_wheat": 85,
+    "market_bread": 90,
+    "market_firewood": 75
+  }
+}

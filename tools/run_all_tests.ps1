@@ -92,6 +92,16 @@ if ($ec4 -ne 0) {
 }
 
 Write-Host ""
+Write-Host "=== Headless TestDevMode.tscn (dev mode: settings, starting town, menu) ===" -ForegroundColor Cyan
+$ec5 = Invoke-GodotHeadlessScene "res://scenes/TestDevMode.tscn"
+if ($ec5 -ne 0) {
+    Write-Host "TestDevMode FAILED (exit $ec5)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestDevMode OK." -ForegroundColor Green
+}
+
+Write-Host ""
 if ($failed) {
     Write-Host "SUITE: FAIL" -ForegroundColor Red
     exit 1

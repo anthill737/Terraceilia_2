@@ -79,7 +79,7 @@ const HOME_FIREWOOD: int = 3         # firewood kept for the hearth
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0 and not agent.has_meta("purse_given"):
-		wallet.credit(STARTING_CASH)
+		wallet.credit(Tuning.f("household_start_coins", STARTING_CASH))
 	agent.set_meta("purse_given", true)
 	if inv:
 		inv.items = {"bread": 0, "firewood": 3}

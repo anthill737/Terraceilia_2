@@ -28,12 +28,18 @@ func _ready() -> void:
 	set_speed(speed_multiplier)
 
 
+## Game seconds in one tick now (dev mode can change the length of a day).
+func tick_seconds() -> float:
+	return Tuning.f("day_seconds", TICK_SECONDS * 10.0) / 10.0
+
+
 func _physics_process(delta: float) -> void:
 	if not running:
 		return
 	_acc += delta   # game time: the physics step already includes Engine.time_scale
-	while _acc >= TICK_SECONDS:
-		_acc -= TICK_SECONDS
+	var step: float = tick_seconds()
+	while _acc >= step:
+		_acc -= step
 		tick += 1
 		ticked.emit(tick)
 

@@ -51,6 +51,7 @@ var _inspector_ctrl: InspectorController = null
 
 # ── Event log ─────────────────────────────────────────────────────────────────
 var _log_panel_ctrl: LogPanelController = null
+var _dev_menu: DevMenu = null
 var sim_speed_label: Label = null
 
 
@@ -67,6 +68,8 @@ func _ready() -> void:
 	add_child(clock)
 	clock.process_mode = Node.PROCESS_MODE_PAUSABLE
 	clock.speed_changed.connect(_on_speed_changed)
+	if Tuning.has_start():
+		clock.running = false   # dev mode builds the starting town first (DevStart switches it on)
 
 	# Wire clock ticks to World → forwarded to all villages
 	_world_node = get_node_or_null("World")
@@ -118,6 +121,11 @@ func _ready() -> void:
 		for v in _world_node.villages:
 			if v and is_instance_valid(v) and v.get("event_bus") != null:
 				_log_panel_ctrl.connect_village_bus(v.event_bus)
+
+	_dev_menu = DevMenu.new()
+	_dev_menu.name = "DevMenu"
+	add_child(_dev_menu)
+	_dev_menu.setup(self)
 
 	_hud_ctrl = HudController.new()
 	_hud_ctrl.name = "HudController"
@@ -187,6 +195,9 @@ func _input(event: InputEvent) -> void:
 			_cancel_placement()
 			get_viewport().set_input_as_handled()
 			return
+
+	if _dev_menu != null and _dev_menu.is_open():
+		return   # typing in the dev menu must not pause the game or open panels
 
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_L and not event.ctrl_pressed and not event.alt_pressed and _log_panel_ctrl != null:

@@ -83,7 +83,7 @@ var inner_spawn_radius: float = 60.0
 var MAX_FIELDS: int:
 	get: return field_mgr.MAX_FIELDS if field_mgr else 10
 var MAX_TOTAL_POP: int:
-	get: return pop_mgr.MAX_TOTAL_POP if pop_mgr else 50
+	get: return Tuning.i("town_size_limit", pop_mgr.MAX_TOTAL_POP if pop_mgr else 50)
 var field_assignment_map: Dictionary:
 	get: return field_mgr.field_assignment_map if field_mgr else {}
 var next_farmer_id: int:
@@ -404,7 +404,7 @@ func receive_tick(tick: int) -> void:
 			])
 
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn \
-				and (housing == null or housing.free_slots() > 0) and room_for_newcomer():
+				and (housing == null or housing.free_slots() > 0 or not Tuning.on("arrival_needs_free_house", true)) and room_for_newcomer():
 			var spawn_pos := get_spawn_point_for_role("household")
 			spawn_household_at(spawn_pos)
 			prosperity_meter.record_spawn(calendar.day_index)
@@ -422,7 +422,7 @@ var _prosperity_day: int = -1
 func room_for_newcomer() -> bool:
 	if labor_market == null:
 		return true
-	return labor_market.idle_count <= MAX_IDLE_FOR_ARRIVAL
+	return labor_market.idle_count <= Tuning.i("arrival_max_idle", MAX_IDLE_FOR_ARRIVAL)
 
 
 func get_market() -> Market:
@@ -720,7 +720,7 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 	# Batch 3: opening a business costs STARTUP_COST coins, paid to the town market.
 	if role != "household" and not free and market != null:
 		var purse: Wallet = household.get_node_or_null("Wallet") as Wallet
-		if purse == null or purse.money < LaborMarket.STARTUP_COST:
+		if purse == null or purse.money < Tuning.f("shop_opening_fee", LaborMarket.STARTUP_COST):
 			if event_bus:
 				event_bus.emit_log("[CONVERT] pop=%s from=%s to=%s allowed=0 block=startup_cost cash=%.1f" % [
 					pop_id, from_role, role, purse.money if purse else 0.0])
@@ -909,7 +909,7 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 func _pay_startup(ag: Agent, free: bool) -> void:
 	if free or market == null or ag.wallet == null:
 		return
-	var fee: float = minf(LaborMarket.STARTUP_COST, ag.wallet.money)
+	var fee: float = minf(Tuning.f("shop_opening_fee", LaborMarket.STARTUP_COST), ag.wallet.money)
 	ag.wallet.debit(fee)
 	market.money += fee
 	ag.log_event("Paid $%.0f to the town market to open the business." % fee)
@@ -957,8 +957,9 @@ func _spawn_first_woodworker() -> void:
 	if h == null or not is_instance_valid(h):
 		return
 	_perform_role_conversion(h, "woodworker", true)
-	if h.wallet and h.wallet.money < WoodworkerJob.OWNER_CASH:
-		h.wallet.credit(WoodworkerJob.OWNER_CASH - h.wallet.money)
+	var owner_purse: float = Tuning.f("owner_start_coins", WoodworkerJob.OWNER_CASH)
+	if h.wallet and h.wallet.money < owner_purse:
+		h.wallet.credit(owner_purse - h.wallet.money)
 	if h.inv:
 		h.inv.items["bread"] = maxi(2, h.inv.get_qty("bread"))
 		h.inv.items["firewood"] = maxi(6, h.inv.get_qty("firewood"))
@@ -969,7 +970,7 @@ var trade_stats := {"trips": 0, "units": 0, "profit": 0.0}
 var shocks: Shocks = null
 
 func _spawn_merchant() -> void:
-	if spawn_service == null:
+	if spawn_service == null or not Tuning.on("merchants", true):
 		return
 	var h = await spawn_household_at(get_spawn_point_for_role("household"))
 	if h == null or not is_instance_valid(h):

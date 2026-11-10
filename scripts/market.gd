@@ -11,7 +11,7 @@ var last_trade_result: Dictionary = {}
 # holds at most twice its stock target (wheat_target 45, bread_target 50) and can only buy what
 # it can pay for.
 const START_MONEY: float = 3000.0
-var money: float = START_MONEY
+var money: float = Tuning.f("market_start_coins", START_MONEY)
 var seeds: int = 100000
 var wheat: int = 0
 var bread: int = 0
@@ -252,7 +252,7 @@ func set_tick(t: int) -> void:
 	
 	# Enforce price floors and ceilings
 	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
-	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, Tuning.f("bread_price_ceiling", BREAD_PRICE_CEILING))
 	
 	# Update producer hysteresis state based on inventory bands
 	_update_producer_hysteresis("wheat", wheat, wheat_target)
@@ -1230,7 +1230,7 @@ func _adjust_wheat_price(day: int) -> void:
 			update_reason = "low-trades cap"
 	
 	# Change 3: Apply hard daily price movement cap (±5%)
-	var max_change: float = old_price * MAX_DAILY_PRICE_CHANGE
+	var max_change: float = old_price * Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE)
 	if new_price > old_price + max_change:
 		new_price = old_price + max_change
 	elif new_price < old_price - max_change:
@@ -1337,14 +1337,14 @@ func _adjust_bread_price(day: int) -> void:
 			update_reason = "low-trades cap"
 	
 	# Change 3: Apply hard daily price movement cap (±5%)
-	var max_change: float = old_price * MAX_DAILY_PRICE_CHANGE
+	var max_change: float = old_price * Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE)
 	if new_price > old_price + max_change:
 		new_price = old_price + max_change
 	elif new_price < old_price - max_change:
 		new_price = old_price - max_change
 	
 	# Apply floor and ceiling
-	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, BREAD_PRICE_CEILING)
+	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, Tuning.f("bread_price_ceiling", BREAD_PRICE_CEILING))
 	
 	# Calculate band status for logging
 	var bid_mult: float = get_bid_price("bread") / bread_price if bread_price > 0 else 1.0
@@ -1436,9 +1436,9 @@ func _adjust_firewood_price() -> void:
 	var t: float = float(maxi(1, firewood_target))
 	if float(firewood) < t * (1.0 - TARGET_BAND_PCT) or firewood_short_today > 0:
 		# An empty pile bids up fast (12% a day); it crept 5% a day while hearths went cold.
-		firewood_price *= 1.0 + (0.12 if firewood <= 0 else MAX_DAILY_PRICE_CHANGE * clampf(1.0 - float(firewood) / t, 0.2, 1.0))
+		firewood_price *= 1.0 + (0.12 if firewood <= 0 else Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE) * clampf(1.0 - float(firewood) / t, 0.2, 1.0))
 	elif float(firewood) > t * (1.0 + TARGET_BAND_PCT):
-		firewood_price *= 1.0 - MAX_DAILY_PRICE_CHANGE * clampf(float(firewood) / t - 1.0, 0.2, 1.0)
+		firewood_price *= 1.0 - Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE) * clampf(float(firewood) / t - 1.0, 0.2, 1.0)
 	firewood_price = clampf(firewood_price, FIREWOOD_PRICE_FLOOR, FIREWOOD_PRICE_CEILING)
 	firewood_sold_ema = 0.3 * float(firewood_sold_today) + 0.7 * firewood_sold_ema
 	firewood_target = maxi(30, roundi(2.0 * firewood_sold_ema))

@@ -1,0 +1,10 @@
+{
+  "name": "Day twice as long, production down 15%",
+  "inputs": {
+    "day_seconds": 53.33,
+    "baker_loaves_per_day": 10,
+    "woodworker_logs_per_day": 10,
+    "farmer_harvest_percent": 85.0
+  },
+  "start": {}
+}

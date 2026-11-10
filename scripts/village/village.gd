@@ -22,6 +22,7 @@ var household_agent: Agent = null
 # ── Simulation systems ─────────────────────────────────────────────────────────
 var audit = null          # EconomyAudit
 var labor_market = null   # LaborMarket
+var housing: Housing = null   # houses: newcomers need an empty one
 
 # ── Managers ──────────────────────────────────────────────────────────────────
 var pop_mgr:    PopulationManager    = null
@@ -303,6 +304,11 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Batch 3: a lumber yard and the town's first woodworker.
 	_build_lumber_yard()
 	_spawn_first_woodworker()
+	# Houses: newcomers arrive only into an empty one; people build, buy and rent them.
+	housing = Housing.new()
+	housing.village = self
+	housing.market = market
+	housing.event_bus = event_bus
 
 	# Assign persistent identities
 	_assign_new_identity(farmer)
@@ -366,7 +372,8 @@ func receive_tick(tick: int) -> void:
 				households.size()
 			])
 
-		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn:
+		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn \
+				and (housing == null or housing.free_slots() > 0):
 			var spawn_pos := get_spawn_point_for_role("household")
 			spawn_household_at(spawn_pos)
 			prosperity_meter.record_spawn(calendar.day_index)
@@ -619,6 +626,9 @@ func _on_calendar_day_changed(day: int) -> void:
 			h.on_day_changed(day)
 
 	_roll_global_cashflow()
+
+	if housing:
+		housing.on_day(day)
 
 	if not sim_failed and pop_mgr.count() == 0 and day > (labor_market.STARTUP_GRACE_DAYS if labor_market else 5):
 		sim_failed = true

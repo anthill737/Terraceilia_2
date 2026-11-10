@@ -223,6 +223,15 @@ func refresh(selected_pop: Node) -> void:
 		extras.append("[color=#ff8844]Losing money for %d day(s) in a row.[/color]" % d.get("neg_cashflow_days"))
 	if int(d.get("failed_food_days", 0)) > 0:
 		extras.append("[color=#ff8844]Could not buy food for %d day(s) in a row.[/color]" % d.get("failed_food_days"))
+	if selected_pop.get("inv") != null:
+		var cold_days: int = int(selected_pop.get_meta("cold_days", 0))
+		extras.append("Firewood at home: %d.%s" % [selected_pop.inv.get_qty("firewood"),
+			(" [color=#ff8844]Cold for %d day(s).[/color]" % cold_days) if cold_days > 0 else ""])
+	var home_village = selected_pop.get("current_village_ref")
+	if home_village != null and is_instance_valid(home_village) and home_village.get("housing") != null:
+		extras.append(home_village.housing.describe(selected_pop))
+	if LaborMarket.hands_of(selected_pop) > 0:
+		extras.append("Employs %d hand(s)." % LaborMarket.hands_of(selected_pop))
 	if d.has("training_days"):
 		extras.append("[color=#88ccff]Training for a new job — %d day(s) left.[/color]" % d.get("training_days"))
 

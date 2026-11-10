@@ -85,10 +85,12 @@ func _update_eco_bar(village: Node) -> void:
 	# VILLAGE — prefix with selected village name so player always knows which village
 	if eco_village_label:
 		var vname: String = village.village_name if (village.get("village_name") as String) != "" else village.name
+		var hs: Dictionary = village.housing.summary() if village.get("housing") != null else {}
 		eco_village_label.text = (
-			"[%s]  Pop %d — households %d, farmers %d, bakers %d\nFields %d of %d"
+			"[%s]  Pop %d: households %d, farmers %d, bakers %d, woodworkers %d\nFields %d of %d · Houses %d (%d empty, %d rented, %d being built)"
 			% [vname, pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
-			   pop.get("bakers", 0), pop.get("fields", 0), pop.get("max_fields", 10)]
+			   pop.get("bakers", 0), village.all_woodworkers.size(), pop.get("fields", 0), pop.get("max_fields", 10),
+			   hs.get("houses", 0), hs.get("empty", 0), hs.get("renters", 0), hs.get("building", 0)]
 		)
 
 	# MARKET
@@ -96,9 +98,10 @@ func _update_eco_bar(village: Node) -> void:
 		var wc: String = _eco_cap_display(snap.get("wheat_cap", 999999999))
 		var bc: String = _eco_cap_display(snap.get("bread_cap", 999999999))
 		eco_market_label.text = (
-			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f" % [
+			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f\nFirewood %d @ $%.2f · Town purse $%.0f" % [
 				snap.get("wheat", 0), wc, snap.get("wheat_price", 0.0),
-				snap.get("bread", 0), bc, snap.get("bread_price", 0.0)
+				snap.get("bread", 0), bc, snap.get("bread_price", 0.0),
+				village.market.firewood, village.market.firewood_price, village.market.money
 			]
 		)
 

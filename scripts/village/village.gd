@@ -309,6 +309,20 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	housing.village = self
 	housing.market = market
 	housing.event_bus = event_bus
+	# Drawing: ground, roads, buildings and houses under the people.
+	var art := VillageArt.new()
+	art.name = "VillageArt"
+	art.village = self
+	art.z_index = -1
+	add_child(art)
+	move_child(art, 0)
+	for marker_path in ["MarketNode/MarketMarker", "Bakery/BakeryMarker", "House/HouseMarker",
+			"HouseholdHome/HouseholdHomeMarker", "Field1/Field1Marker", "Field2/Field2Marker"]:
+		var mk = get_node_or_null(marker_path)
+		if mk:
+			mk.visible = false
+	if lumber_yard and lumber_yard.get_node_or_null("Marker"):
+		lumber_yard.get_node("Marker").visible = false
 
 	# Assign persistent identities
 	_assign_new_identity(farmer)
@@ -355,6 +369,15 @@ func receive_tick(tick: int) -> void:
 			h.set_tick(tick)
 
 	if prosperity_meter:
+		# Count everyone, not just households. With households only, a village whose
+		# households had all left read as "nobody has food saved", scored about 0.58 against
+		# the 0.60 growth bar, and could never get a newcomer again.
+		var everyone: Array = []
+		for grp in [households, all_farmers, all_bakers, all_woodworkers]:
+			for a in grp:
+				if a != null and is_instance_valid(a):
+					everyone.append(a)
+		prosperity_meter.households = everyone
 		prosperity_meter.update_prosperity(calendar.day_index)
 
 		var suppress_spawn: bool = (
@@ -1029,16 +1052,7 @@ func _draw() -> void:
 
 	var local_center := to_local(village_center)
 
-	# Outer spawn-radius boundary (faint blue)
-	draw_arc(local_center, spawn_radius, 0.0, TAU, 72, Color(0.35, 0.65, 1.0, 0.22), 2.0)
-	# Inner exclusion zone (even fainter)
-	draw_arc(local_center, inner_spawn_radius, 0.0, TAU, 36, Color(0.35, 0.65, 1.0, 0.12), 1.5)
-	# Centre marker cross
-	var cs := 10.0
-	draw_line(local_center + Vector2(-cs, 0), local_center + Vector2(cs, 0),
-		Color(0.5, 0.80, 1.0, 0.55), 2.0)
-	draw_line(local_center + Vector2(0, -cs), local_center + Vector2(0, cs),
-		Color(0.5, 0.80, 1.0, 0.55), 2.0)
+	# The ground, roads and buildings are drawn by VillageArt; only the name is drawn here.
 	# Village name label above the radius circle
 	var font := ThemeDB.fallback_font
 	if font:

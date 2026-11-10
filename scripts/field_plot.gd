@@ -16,10 +16,19 @@ func _ready() -> void:
 
 
 func _draw() -> void:
-	# Draw field as a colored square
-	var color = Color.BROWN if state == State.EMPTY else (Color.YELLOW if ticks_to_mature > 0 else Color.GREEN)
-	draw_rect(Rect2(-15, -15, 30, 30), color)
-	draw_rect(Rect2(-15, -15, 30, 30), Color.BLACK, false, 2)  # Border
+	var soil := Color(0.40, 0.27, 0.15)
+	draw_rect(Rect2(-17, -17, 34, 34), soil)
+	for i in 5:
+		draw_line(Vector2(-15, -13 + i * 6.5), Vector2(15, -13 + i * 6.5), soil.darkened(0.3), 1.5)
+	if state == State.PLANTED:
+		var ripe := ticks_to_mature <= 0
+		var col := Color(0.92, 0.78, 0.30) if ripe else Color(0.35, 0.75, 0.30)
+		var hgt := 7.0 if ripe else 3.5
+		for i in 5:
+			for k in 6:
+				var p := Vector2(-13 + k * 5.2, -13 + i * 6.5)
+				draw_line(p, p + Vector2(0, -hgt), col, 2.0)
+	draw_rect(Rect2(-17, -17, 34, 34), Color(0.20, 0.13, 0.07), false, 2)
 
 
 func plant() -> bool:

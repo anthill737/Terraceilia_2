@@ -12,6 +12,9 @@ var _dragging: bool = false
 ## Set to true only when legacy single-village follow is intentionally enabled.
 var _auto_follow: bool = false
 var _target_position: Vector2 = Vector2.ZERO
+## True while fly_to is gliding the camera to a spot. Before this, fly_to switched off the
+## only code that moved the camera, so the Center and village buttons did nothing.
+var _flying: bool = false
 # Default bounds span two villages (Village2 ends at ~x=2800); updated at runtime.
 var _world_min: Vector2 = Vector2(-500, -500)
 var _world_max: Vector2 = Vector2(4500, 1500)
@@ -25,8 +28,10 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	zoom = Vector2.ONE * lerpf(zoom.x, _target_zoom, SMOOTH_SPEED * delta)
-	if _auto_follow:
-		global_position = global_position.lerp(_target_position, SMOOTH_SPEED * delta)
+	if _auto_follow or _flying:
+		global_position = global_position.lerp(_target_position, minf(1.0, SMOOTH_SPEED * delta))
+		if _flying and global_position.distance_to(_target_position) < 1.0:
+			_flying = false
 	global_position = global_position.clamp(_world_min, _world_max)
 	_target_position = _target_position.clamp(_world_min, _world_max)
 
@@ -45,6 +50,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dragging = event.pressed
 			if event.pressed:
 				_auto_follow = false
+				_flying = false
 			get_viewport().set_input_as_handled()
 
 	if event is InputEventMouseMotion and _dragging:
@@ -94,6 +100,7 @@ func update_bounds(all_entities: Array) -> void:
 ## Disables auto-follow so the camera stays put until the user or another call moves it.
 func fly_to(target_pos: Vector2, target_zoom: float) -> void:
 	_auto_follow = false
+	_flying = true
 	_target_position = target_pos
 	_target_zoom = clampf(target_zoom, ZOOM_MIN, ZOOM_MAX)
 

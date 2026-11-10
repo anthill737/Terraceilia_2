@@ -189,6 +189,10 @@ func _input(event: InputEvent) -> void:
 			return
 
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_L and not event.ctrl_pressed and not event.alt_pressed and _log_panel_ctrl != null:
+			_log_panel_ctrl.toggle_everything()
+			get_viewport().set_input_as_handled()
+			return
 		if event.keycode == KEY_M and not event.ctrl_pressed and not event.alt_pressed:
 			_trade_panel_open = not _trade_panel_open
 			_sync_trade_ui()

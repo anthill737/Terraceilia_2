@@ -6,6 +6,11 @@ var event_log: RichTextLabel = null
 var export_log_button: Button = null
 var jump_to_bottom_button: Button = null
 var log_lines: Array[String] = []
+## Town news: the lines a player cares about (who was hired, what was built, who arrived or
+## left, what the merchants sold, what trouble struck), in plain words. The panel shows these
+## by default; L switches to everything (the full debug log, which is also what Export saves).
+var news_lines: Array[String] = []
+var show_everything: bool = false
 var log_buffer: Array[String] = []
 var user_at_bottom: bool = true
 const MAX_LOG_LINES: int = 200
@@ -54,6 +59,11 @@ func connect_village_bus(event_bus: Node) -> void:
 func _on_event_logged(msg: String) -> void:
 	log_lines.append(msg)
 	log_buffer.append(msg)
+	var news: String = news_line(msg)
+	if news != "":
+		news_lines.append(news)
+		while news_lines.size() > MAX_LOG_LINES:
+			news_lines.pop_front()
 
 	while log_lines.size() > MAX_LOG_LINES:
 		log_lines.pop_front()
@@ -71,9 +81,78 @@ func _process(_delta: float) -> void:
 	if event_log == null:
 		return
 	event_log.clear()
-	event_log.append_text("\n".join(log_lines) + "\n")
+	if show_everything:
+		event_log.append_text("Everything (press L for town news)\n\n" + "\n".join(log_lines) + "\n")
+	else:
+		event_log.append_text("Town news (press L for everything)\n\n" + "\n".join(news_lines) + "\n")
 	if user_at_bottom:
 		event_log.scroll_to_line(event_log.get_line_count())
+
+
+## Switch the panel between town news and the full log.
+func toggle_everything() -> void:
+	show_everything = not show_everything
+	user_at_bottom = true
+	_log_dirty = true
+
+
+## "[TAG] day=12 text" -> "Day 12: text".
+static func _day_line(rest: String, tag: String) -> String:
+	var body: String = rest.substr(tag.length())
+	var sp: int = body.find(" ")
+	if not body.begins_with("day=") or sp < 0:
+		return body
+	return "Day %s: %s" % [body.substr(4, sp - 4), body.substr(sp + 1)]
+
+
+## The plain-words version of a log message if it is town news, else "".
+static func news_line(msg: String) -> String:
+	var label: String = ""
+	var rest: String = msg
+	if msg.begins_with("[Village"):
+		var i: int = msg.find("] ")
+		if i > 0:
+			label = msg.substr(1, i - 1)
+			rest = msg.substr(i + 2)
+	var out: String = ""
+	if rest.begins_with("[HOUSING] day="):
+		if rest.contains(" houses=") or rest.contains("started with"):
+			return ""
+		out = _day_line(rest, "[HOUSING] ")
+	elif rest.begins_with("[HANDS] day="):
+		if rest.contains(" employed="):
+			return ""
+		out = _day_line(rest, "[HANDS] ")
+	elif rest.begins_with("[SERVANT] day="):
+		out = _day_line(rest, "[SERVANT] ")
+	elif rest.begins_with("[SHOCK] day="):
+		out = _day_line(rest, "[SHOCK] ")
+	elif rest.begins_with("[DEATH] day="):
+		out = _day_line(rest, "[DEATH] ")
+	elif rest.begins_with("[MERCHANT] "):
+		out = rest.substr(11)
+	elif rest.begins_with("POP GROWTH: spawning "):
+		out = "A newcomer arrives: " + rest.substr(21).get_slice(" ", 0)
+	elif rest.begins_with("[MIGRATION] ") and rest.contains(" leaving (reason: "):
+		out = rest.substr(12).replace(" leaving (reason: ", " leaves town (")
+		for pair in [["no_food", "no food"], ["no_rent", "rent unpaid"], ["no_firewood", "no firewood"], ["survival", "no food"]]:
+			out = out.replace(pair[0], pair[1])
+	elif rest.begins_with("[LaborMkt] ") and rest.contains("closing shop"):
+		out = rest.substr(11)
+	elif rest.begins_with("[MOBILITY] ") and rest.contains("conversion to "):
+		var who: String = rest.substr(11).get_slice(" ", 0)
+		var role: String = rest.get_slice("conversion to ", 1).get_slice(" ", 0)
+		if role == "household":
+			out = "%s gives up the business and looks for work" % who
+		else:
+			out = "%s sets up as a %s" % [who, role]
+	elif rest.contains("bought a loaf and ate it"):
+		out = rest
+	if out == "":
+		return ""
+	if label != "":
+		return "%s: %s" % [label, out]
+	return out
 
 
 func _on_log_scroll(_value: float) -> void:

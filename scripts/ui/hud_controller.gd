@@ -13,6 +13,7 @@ var eco_market_label:     Label = null
 var eco_prosperity_label: Label = null
 var eco_farmer_label:     Label = null
 var eco_baker_label:      Label = null
+var eco_woodworker_label: Label = null
 var eco_world_label:      Label = null
 
 # ── Runtime state ──────────────────────────────────────────────────────────
@@ -86,12 +87,24 @@ func _update_eco_bar(village: Node) -> void:
 	if eco_village_label:
 		var vname: String = village.village_name if (village.get("village_name") as String) != "" else village.name
 		var hs: Dictionary = village.housing.summary() if village.get("housing") != null else {}
-		eco_village_label.text = (
+		var village_text: String = (
 			"[%s]  Pop %d: households %d, farmers %d, bakers %d, woodworkers %d\nFields %d of %d · Houses %d (%d empty, %d rented, %d being built)"
 			% [vname, pop.get("total", 0), pop.get("households", 0), pop.get("farmers", 0),
 			   pop.get("bakers", 0), village.all_woodworkers.size(), pop.get("fields", 0), pop.get("max_fields", 10),
 			   hs.get("houses", 0), hs.get("empty", 0), hs.get("renters", 0), hs.get("building", 0)]
 		)
+		# People without work, and employers who found nobody free (LaborMarket).
+		var lm = village.get("labor_market")
+		if lm != null and is_instance_valid(lm) and lm.get("idle_count") != null:
+			var idle_line: String = "Idle: %d" % int(lm.get("idle_count"))
+			if lm.get("open_jobs") != null:
+				idle_line += " · Open jobs: %d" % int(lm.get("open_jobs"))
+			village_text += "\n" + idle_line
+		# Troubles such as a bad harvest, when the village has any.
+		var trouble: String = _village_trouble(village)
+		if trouble != "":
+			village_text += "\nTrouble: " + trouble
+		eco_village_label.text = village_text
 
 	# MARKET
 	if eco_market_label:
@@ -116,41 +129,128 @@ func _update_eco_bar(village: Node) -> void:
 			]
 		)
 
-	# FARMER baseline
+	# FARMER: the first living farmer in the village. (It used to follow one fixed person
+	# even after they changed trade or died.)
 	if eco_farmer_label:
-		var fd: Dictionary = snap.get("baseline_farmer", {})
-		if fd.is_empty():
+		var fa: Node = _first_live(village.all_farmers)
+		if fa == null:
 			eco_farmer_label.text = "(none)"
 		else:
+			var fd: Dictionary = _agent_facts(fa)
 			eco_farmer_label.text = (
-				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [fd.get("cash", 0.0), fd.get("seeds", 0), fd.get("wheat", 0), fd.get("bread", 0),
+				"Cash $%.0f · Seeds %d · Wheat %d · Bread %d · Hunger %d/%d\n%s: %s · Inventory %d/%d"
+				% [fd.get("cash", 0.0), _qty_of(fa, "seeds"), _qty_of(fa, "wheat"), _qty_of(fa, "bread"),
 				   fd.get("hunger_days", 0), fd.get("hunger_max", 5),
-				   fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
+				   fd.get("name", "?"), fd.get("status", ""), fd.get("inv_total", 0), fd.get("inv_max", 0)]
 			)
 
 	# WORLD summary — aggregated across all villages
 	if eco_world_label and _world_node and _world_node.has_method("get_world_summary"):
 		var ws: Dictionary = _world_node.get_world_summary()
 		eco_world_label.text = (
-			"World: %d villages · total pop %d (H %d · F %d · B %d) · fields %d"
+			"World: %d villages · total pop %d (H %d · F %d · B %d · W %d) · fields %d"
 			% [ws.get("village_count", 0), ws.get("total_pop", 0),
 			   ws.get("total_households", 0), ws.get("total_farmers", 0),
-			   ws.get("total_bakers", 0), ws.get("total_fields", 0)]
+			   ws.get("total_bakers", 0), ws.get("total_woodworkers", 0), ws.get("total_fields", 0)]
 		)
 
-	# BAKER baseline
+	# BAKER: the first living baker in the village.
 	if eco_baker_label:
-		var bd: Dictionary = snap.get("baseline_baker", {})
-		if bd.is_empty():
+		var ba: Node = _first_live(village.all_bakers)
+		if ba == null:
 			eco_baker_label.text = "(none)"
 		else:
+			var bd: Dictionary = _agent_facts(ba)
 			eco_baker_label.text = (
-				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s · Inventory %d/%d"
-				% [bd.get("cash", 0.0), bd.get("wheat", 0), bd.get("flour", 0), bd.get("bread", 0),
+				"Cash $%.0f · Wheat %d · Flour %d · Bread %d · Hunger %d/%d\n%s: %s · Inventory %d/%d"
+				% [bd.get("cash", 0.0), _qty_of(ba, "wheat"), _qty_of(ba, "flour"), _qty_of(ba, "bread"),
 				   bd.get("hunger_days", 0), bd.get("hunger_max", 5),
-				   bd.get("status", ""), bd.get("inv_total", 0), bd.get("inv_max", 0)]
+				   bd.get("name", "?"), bd.get("status", ""), bd.get("inv_total", 0), bd.get("inv_max", 0)]
 			)
+
+	# WOODWORKER: the first living woodworker in the village.
+	if eco_woodworker_label:
+		var wa: Node = _first_live(village.all_woodworkers)
+		if wa == null:
+			eco_woodworker_label.text = "(none)"
+		else:
+			var wd: Dictionary = _agent_facts(wa)
+			var made_today: int = 0
+			var wjob = wa.get("current_job")
+			if wjob != null and is_instance_valid(wjob) and wjob.get("firewood_made_today") != null:
+				made_today = int(wjob.get("firewood_made_today"))
+			eco_woodworker_label.text = (
+				"Cash $%.0f · Firewood %d (made today %d) · Bread %d · Hunger %d/%d\n%s: %s"
+				% [wd.get("cash", 0.0), _qty_of(wa, "firewood"), made_today, _qty_of(wa, "bread"),
+				   wd.get("hunger_days", 0), wd.get("hunger_max", 5),
+				   wd.get("name", "?"), wd.get("status", "")]
+			)
+
+
+## First living person in a list: skips freed nodes and anyone who has already died.
+func _first_live(people) -> Node:
+	if not (people is Array):
+		return null
+	for a in people:
+		if a == null or not is_instance_valid(a) or a.is_queued_for_deletion():
+			continue
+		var h = a.get("hunger")
+		if h != null and is_instance_valid(h) and h.get("is_starving"):
+			continue
+		return a as Node
+	return null
+
+
+## Name, cash, hunger, what they are doing and how loaded they are, read from the person.
+func _agent_facts(a: Node) -> Dictionary:
+	var out: Dictionary = {
+		"name": "?", "cash": 0.0, "hunger_days": 0, "hunger_max": 5,
+		"status": "", "inv_total": 0, "inv_max": 0,
+	}
+	if a == null or not is_instance_valid(a):
+		return out
+	var pn = a.get("person_name")
+	out["name"] = str(pn) if (pn != null and str(pn) != "") else str(a.name)
+	var w = a.get("wallet")
+	if w != null and is_instance_valid(w) and w.get("money") != null:
+		out["cash"] = float(w.get("money"))
+	var h = a.get("hunger")
+	if h != null and is_instance_valid(h):
+		if h.get("hunger_days") != null:
+			out["hunger_days"] = int(h.get("hunger_days"))
+		if h.get("hunger_max_days") != null:
+			out["hunger_max"] = int(h.get("hunger_max_days"))
+	# Status text is asked for only once the person's job is fully set up (it reads the
+	# job's route and hunger).
+	var job = a.get("current_job")
+	if job != null and is_instance_valid(job) and job.get("route") != null and job.get("hunger") != null \
+			and a.has_method("get_status_text"):
+		out["status"] = str(a.get_status_text())
+	var cap = a.get_node_or_null("InventoryCapacity")
+	if cap != null and cap.has_method("current_total"):
+		out["inv_total"] = int(cap.current_total())
+		if cap.get("max_items") != null:
+			out["inv_max"] = int(cap.get("max_items"))
+	return out
+
+
+## How many of one good a person is carrying.
+func _qty_of(a: Node, good: String) -> int:
+	if a == null or not is_instance_valid(a):
+		return 0
+	var inv = a.get("inv")
+	if inv == null or not is_instance_valid(inv) or not inv.has_method("get_qty"):
+		return 0
+	return int(inv.get_qty(good))
+
+
+## Troubles the village is under (a bad harvest and the like), in words. Empty when all is
+## well or the village keeps no such record.
+func _village_trouble(village: Node) -> String:
+	var shocks = village.get("shocks")
+	if typeof(shocks) != TYPE_OBJECT or not is_instance_valid(shocks) or not shocks.has_method("describe"):
+		return ""
+	return str(shocks.describe())
 
 
 func _eco_cap_display(cap: int) -> String:
@@ -203,6 +303,7 @@ func _build_economy_bar(container: Node) -> void:
 	eco_prosperity_label = _add_eco_section(row1, "PROSPERITY", Color(1.00, 0.85, 0.25), true)
 	eco_farmer_label     = _add_eco_section(row2, "FARMER",     Color(0.20, 1.00, 0.20), true)
 	eco_baker_label      = _add_eco_section(row2, "BAKER",      Color(1.00, 0.75, 0.20), true)
+	eco_woodworker_label = _add_eco_section(row2, "WOODWORKER", Color(0.78, 0.55, 0.30), true)
 
 	# Row 3 — world-level summary (totals across all villages)
 	var row3 := HBoxContainer.new()

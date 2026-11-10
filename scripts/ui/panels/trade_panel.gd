@@ -19,6 +19,9 @@ var world_node: Node = null
 const UPDATE_INTERVAL_SEC: float = 0.5
 var _time_since_update: float    = 0.0
 
+## Groups scanned for people away from their home village (merchants live in "households").
+const ROUTE_GROUPS: Array[String] = ["farmers", "bakers", "woodworkers", "households"]
+
 const PANEL_WIDTH:  float = 320.0
 const PANEL_HEIGHT: float = 340.0
 
@@ -90,7 +93,7 @@ func _build_layout() -> void:
 
 	# ── Trade Profit section ──
 	var profit_title := Label.new()
-	profit_title.text = "Trade Profit"
+	profit_title.text = "Merchants"
 	profit_title.add_theme_font_size_override("font_size", 13)
 	profit_title.add_theme_color_override("font_color", Color(0.65, 1.0, 0.45))
 	vbox.add_child(profit_title)
@@ -145,14 +148,14 @@ func update_display(world: Node) -> void:
 
 	_refresh_routes()
 	_refresh_flows(world)
-	_refresh_profit()
+	_refresh_merchants(world)
 
 
 # ── Section refreshers ────────────────────────────────────────────────────────
 
 func _refresh_routes() -> void:
 	var lines: Array[String] = []
-	for group in ["farmers", "bakers"]:
+	for group in ROUTE_GROUPS:
 		for agent in get_tree().get_nodes_in_group(group):
 			if not is_instance_valid(agent):
 				continue
@@ -168,7 +171,7 @@ func _refresh_routes() -> void:
 			var home_name: String = _village_name(home)
 			var cur_name:  String = _village_name(cur)
 			var cargo: String     = _agent_cargo(agent)
-			var role: String      = "Farmer" if group == "farmers" else "Baker"
+			var role: String      = _role_label(agent, group)
 			lines.append("%s [b]%s[/b]: %s → %s  [color=#aaffaa]%s[/color]" % [
 				role, agent.name, home_name, cur_name, cargo
 			])
@@ -208,7 +211,7 @@ func _refresh_flows(world: Node) -> void:
 			bread_stock = snap.get("bread_qty", 0)
 
 		# Scan agents to count goods currently carried away from this village
-		for group in ["farmers", "bakers"]:
+		for group in ROUTE_GROUPS:
 			for agent in get_tree().get_nodes_in_group(group):
 				if not is_instance_valid(agent):
 					continue
@@ -220,11 +223,12 @@ func _refresh_flows(world: Node) -> void:
 					continue
 				if home == v and cur != v:
 					var inv = agent.get("inv")
-					if inv != null:
-						if group == "farmers":
-							wheat_away += inv.get_qty("wheat") if inv.has_method("get_qty") else 0
-						else:
-							bread_away += inv.get_qty("bread") if inv.has_method("get_qty") else 0
+					if inv != null and inv.has_method("get_qty"):
+						var merchant: bool = _is_merchant(agent)
+						if group == "farmers" or merchant:
+							wheat_away += inv.get_qty("wheat")
+						if group == "bakers" or merchant:
+							bread_away += inv.get_qty("bread")
 
 		lines.append("[b]%s[/b]  stock wheat %d bread %d  away wheat %d bread %d" % [
 			vname, wheat_stock, bread_stock, wheat_away, bread_away
@@ -236,43 +240,106 @@ func _refresh_flows(world: Node) -> void:
 		_set_rtl(_flows_label, "\n".join(lines))
 
 
-func _refresh_profit() -> void:
+## Travelling merchants: every person in any village's households carrying the "merchant"
+## meta. Name, home village, trips made, total profit and the last deal come from the metas
+## the trade code keeps on the merchant ("trade_trips", "trade_profit_total", "trade_last").
+func _refresh_merchants(world: Node) -> void:
 	var lines: Array[String] = []
-	var route_agg: Dictionary = {}  # "V1→V2" → float
-
-	for group in ["farmers", "bakers"]:
-		for agent in get_tree().get_nodes_in_group(group):
-			if not is_instance_valid(agent):
+	var seen: Dictionary = {}
+	var villages_arr: Array = _villages_of(world)
+	for v in villages_arr:
+		if not (v and is_instance_valid(v)):
+			continue
+		var people = v.get("households")
+		if not (people is Array):
+			continue
+		for agent in people:
+			if agent == null or not is_instance_valid(agent) or not _is_merchant(agent):
 				continue
-			# trade_profit_total is set by FarmerJob/BakerJob on each completed trade sale (T2/T3)
-			var profit = agent.get("trade_profit_total")
-			if profit == null:
+			var key: int = agent.get_instance_id()
+			if seen.has(key):
 				continue
-			var home = agent.get("home_village_ref")
-			var cur  = agent.get("current_village_ref")
-			var profit_f: float = float(profit)
-			var col: String     = "#aaffaa" if profit_f >= 0.0 else "#ff8888"
-			var role: String    = "Farmer" if group == "farmers" else "Baker"
-			lines.append("%s [b]%s[/b]: [color=%s]$%.1f[/color]" % [
-				role, agent.name, col, profit_f
+			seen[key] = true
+			var home: Node = _home_village_of(agent, villages_arr, v)
+			var trips: int = int(_meta_number(agent, "trade_trips"))
+			var profit: float = _meta_number(agent, "trade_profit_total")
+			var last_deal: String = str(agent.get_meta("trade_last", ""))
+			var col: String = "#aaffaa" if profit >= 0.0 else "#ff8888"
+			lines.append("[b]%s[/b] (%s): %d %s, [color=%s]$%.1f[/color] profit" % [
+				_person_name(agent), _village_name(home), trips,
+				"trip" if trips == 1 else "trips", col, profit
 			])
-			# Aggregate profit by route key
-			if home != null and cur != null and is_instance_valid(home) and is_instance_valid(cur) and home != cur:
-				var key: String = "%s→%s" % [_village_name(home), _village_name(cur)]
-				route_agg[key] = route_agg.get(key, 0.0) + profit_f
-
-	for route_key in route_agg:
-		var total: float = route_agg[route_key]
-		var col: String  = "#aaffaa" if total >= 0.0 else "#ff8888"
-		lines.append("  Route %s: [color=%s]$%.1f[/color]" % [route_key, col, total])
+			lines.append("  [color=#aaaaaa]Last deal: %s[/color]" % [
+				last_deal if last_deal != "" else "none yet"
+			])
 
 	if lines.is_empty():
-		_set_rtl(_profit_label, "[color=#888888](no trade activity)[/color]")
+		_set_rtl(_profit_label, "[color=#888888](no merchants yet)[/color]")
 	else:
 		_set_rtl(_profit_label, "\n".join(lines))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+## All Village nodes of the world (empty when the world is not there yet).
+func _villages_of(world: Node) -> Array:
+	if world == null or not is_instance_valid(world):
+		return []
+	if world.has_method("get_all_villages"):
+		return world.get_all_villages()
+	var arr = world.get("villages")
+	if arr is Array:
+		return arr
+	return []
+
+
+func _is_merchant(agent: Node) -> bool:
+	if agent == null or not is_instance_valid(agent) or not agent.has_meta("merchant"):
+		return false
+	return true if agent.get_meta("merchant", false) else false
+
+
+## A number kept as a meta on a person (0 when it is missing or not a number).
+func _meta_number(agent: Node, key: String) -> float:
+	var val = agent.get_meta(key, 0.0)
+	if val is int or val is float:
+		return float(val)
+	return 0.0
+
+
+## A person's home village: home_village_ref, else the village whose village_id matches
+## home_village_id, else `fallback` (the village whose household list they were found in).
+func _home_village_of(agent: Node, villages_arr: Array, fallback: Node) -> Node:
+	var home = agent.get("home_village_ref")
+	if home != null and is_instance_valid(home):
+		return home as Node
+	var hid = agent.get("home_village_id")
+	if hid is int:
+		for v in villages_arr:
+			if v != null and is_instance_valid(v) and v.get("village_id") == hid:
+				return v as Node
+	return fallback
+
+
+func _person_name(agent: Node) -> String:
+	var pn = agent.get("person_name")
+	if pn != null and str(pn) != "":
+		return str(pn)
+	return str(agent.name)
+
+
+func _role_label(agent: Node, group: String) -> String:
+	if _is_merchant(agent):
+		return "Merchant"
+	match group:
+		"farmers":
+			return "Farmer"
+		"bakers":
+			return "Baker"
+		"woodworkers":
+			return "Woodworker"
+	return "Household"
+
 
 func _set_rtl(rtl: RichTextLabel, text: String) -> void:
 	if rtl:
@@ -293,7 +360,7 @@ func _agent_cargo(agent: Node) -> String:
 	var inv = agent.get("inv")
 	if inv == null:
 		return "(empty)"
-	for good in ["wheat", "flour", "bread"]:
+	for good in ["wheat", "flour", "bread", "firewood"]:
 		if not inv.has_method("get_qty"):
 			break
 		var qty: int = inv.get_qty(good)

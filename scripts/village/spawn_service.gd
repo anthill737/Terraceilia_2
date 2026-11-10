@@ -221,6 +221,8 @@ func spawn_household_at(pos: Vector2) -> Node:
 	h.name = "Household_%d" % _village.pop_mgr.next_household_id
 	_village.pop_mgr.next_household_id += 1
 	h.home_village_id = _village.village_id
+	h.home_village_ref = _village
+	h.current_village_ref = _village
 	h.position = _village.to_local(pos)
 	_village.add_child(h)
 

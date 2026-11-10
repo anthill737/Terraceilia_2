@@ -19,8 +19,12 @@ var place_mode_label: Label = null
 var spawn_info_label: Label = null
 
 # ── Simulation failure state ──────────────────────────────────────────────────
+## True only once every village has died out. One village dying does not stop the game.
 var sim_failed: bool = false
 var _sim_fail_banner: PanelContainer = null
+var _sim_fail_label: Label = null
+## Villages already reported as died out: instance id -> the banner line for that village.
+var _failed_village_lines: Dictionary = {}
 
 # ── HUD controller ────────────────────────────────────────────────────────────
 var _hud_ctrl: HudController = null
@@ -36,6 +40,11 @@ var _village_nav_ctrl: VillageNavController = null
 # ── Trade toggle + telemetry panel ────────────────────────────────────────────
 var _trade_btn: Button = null
 var _trade_panel: TradePanel = null
+## What the Trade button and panel last showed, so a change to World.trade_enabled made
+## anywhere (the button, a test) is picked up.
+var _trade_ui_on: bool = false
+## The merchants panel starts closed (it would cover the event log); M opens and closes it.
+var _trade_panel_open: bool = false
 
 # ── Pop Inspector ─────────────────────────────────────────────────────────────
 var _inspector_ctrl: InspectorController = null
@@ -131,6 +140,9 @@ func _process(_delta: float) -> void:
 	_update_spawn_info()
 	_update_placement_cursor()
 	_update_camera()
+	_check_village_failures()
+	if _trade_panel != null and _is_trade_on() != _trade_ui_on:
+		_sync_trade_ui()
 
 
 func _screen_to_world(screen_pos: Vector2) -> Vector2:
@@ -177,6 +189,11 @@ func _input(event: InputEvent) -> void:
 			return
 
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_M and not event.ctrl_pressed and not event.alt_pressed:
+			_trade_panel_open = not _trade_panel_open
+			_sync_trade_ui()
+			get_viewport().set_input_as_handled()
+			return
 		if event.keycode == KEY_P and not event.ctrl_pressed and not event.alt_pressed:
 			_toggle_pause()
 			get_viewport().set_input_as_handled()
@@ -320,39 +337,92 @@ func _toggle_pause() -> void:
 		sim_speed_label.text = "PAUSED" if _is_paused else "Speed: %.1fx" % _current_speed
 
 
-func _show_sim_fail_banner(day: int) -> void:
-	if _sim_fail_banner != null:
+## Watch for a village dying out (Village.sim_failed). The first time it happens the banner
+## names that village. Nothing is paused: the other village goes on.
+func _check_village_failures() -> void:
+	if _world_node == null or _world_node.get("villages") == null:
 		return
+	var total: int = 0
+	var alive: int = 0
+	var newly_failed: Array = []
+	for v in _world_node.villages:
+		if v == null or not is_instance_valid(v):
+			continue
+		total += 1
+		if not v.get("sim_failed"):
+			alive += 1
+			continue
+		var key: int = v.get_instance_id()
+		if _failed_village_lines.has(key):
+			continue
+		var vname: String = str(v.name)
+		if v.get("village_name") != null and str(v.get("village_name")) != "":
+			vname = str(v.get("village_name"))
+		var cal = v.get("calendar")
+		var day: int = 0
+		if cal != null and is_instance_valid(cal) and cal.get("day_index") != null:
+			day = int(cal.get("day_index"))
+		_failed_village_lines[key] = "%s has died out (day %d)" % [vname, day]
+		newly_failed.append([day, vname])
+	sim_failed = total > 0 and alive == 0
+	for entry in newly_failed:
+		_show_sim_fail_banner(entry[0], entry[1])
+
+
+## Show (or update) the red banner listing every village that has died out.
+func _show_sim_fail_banner(day: int, village_name: String = "") -> void:
 	var ui_node := get_node_or_null("UI")
 	if ui_node == null:
 		return
 
-	_sim_fail_banner = PanelContainer.new()
-	_sim_fail_banner.name = "SimStatusBanner"
+	if _sim_fail_banner == null:
+		_sim_fail_banner = PanelContainer.new()
+		_sim_fail_banner.name = "SimStatusBanner"
 
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.55, 0.05, 0.05, 0.95)
-	style.border_color = Color(1.0, 0.2, 0.2, 1.0)
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(8)
-	style.set_content_margin_all(12)
-	_sim_fail_banner.add_theme_stylebox_override("panel", style)
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.55, 0.05, 0.05, 0.95)
+		style.border_color = Color(1.0, 0.2, 0.2, 1.0)
+		style.set_border_width_all(2)
+		style.set_corner_radius_all(8)
+		style.set_content_margin_all(12)
+		_sim_fail_banner.add_theme_stylebox_override("panel", style)
 
-	var label := Label.new()
-	label.text = "TOWN EXTINCT — Simulation paused  (day %d)" % day
-	label.add_theme_font_size_override("font_size", 28)
-	label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_sim_fail_banner.add_child(label)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 14)
+		_sim_fail_banner.add_child(row)
 
-	_sim_fail_banner.layout_mode = 1
-	_sim_fail_banner.anchors_preset = Control.PRESET_CENTER_TOP
-	_sim_fail_banner.anchor_left = 0.5
-	_sim_fail_banner.anchor_right = 0.5
-	_sim_fail_banner.anchor_top = 0.0
-	_sim_fail_banner.offset_top = 60
-	_sim_fail_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	ui_node.add_child(_sim_fail_banner)
+		_sim_fail_label = Label.new()
+		_sim_fail_label.add_theme_font_size_override("font_size", 24)
+		_sim_fail_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.85))
+		_sim_fail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		row.add_child(_sim_fail_label)
+
+		var close_btn := Button.new()
+		close_btn.text = "OK"
+		close_btn.tooltip_text = "Hide this notice"
+		close_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		close_btn.pressed.connect(_sim_fail_banner.hide)
+		row.add_child(close_btn)
+
+		_sim_fail_banner.layout_mode = 1
+		_sim_fail_banner.anchors_preset = Control.PRESET_CENTER_TOP
+		_sim_fail_banner.anchor_left = 0.5
+		_sim_fail_banner.anchor_right = 0.5
+		_sim_fail_banner.anchor_top = 0.0
+		_sim_fail_banner.offset_top = 60
+		_sim_fail_banner.grow_horizontal = Control.GROW_DIRECTION_BOTH
+		ui_node.add_child(_sim_fail_banner)
+
+	var lines: Array[String] = []
+	for line in _failed_village_lines.values():
+		lines.append(str(line))
+	if lines.is_empty():
+		lines.append("%s has died out (day %d)" % [village_name if village_name != "" else "The town", day])
+	if sim_failed:
+		lines.append("Nobody is left in any village.")
+	if _sim_fail_label != null:
+		_sim_fail_label.text = "\n".join(lines)
+	_sim_fail_banner.show()
 
 
 func get_ui_labels() -> void:
@@ -360,6 +430,7 @@ func get_ui_labels() -> void:
 	_log_panel_ctrl.setup(log_vbox)
 
 	var inspector_dock := get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
+	_inspector_ctrl.set_world(_world_node)
 	_inspector_ctrl.setup(inspector_dock, village)
 
 
@@ -375,11 +446,14 @@ func _update_spawn_info() -> void:
 	if spawn_info_label == null or village == null:
 		return
 	var pop: Dictionary = village.get_population_summary()
+	# Pop is everyone in the village: households, farmers, bakers and woodworkers.
+	var everyone: int = int(pop.get("households", 0)) + int(pop.get("farmers", 0)) \
+			+ int(pop.get("bakers", 0)) + int(pop.get("woodworkers", 0))
 	spawn_info_label.text = "Fields: %d | Farmers: %d | Bakers: %d | Pop: %d" % [
 		pop.get("fields", 0),
 		pop.get("farmers", 0),
 		pop.get("bakers", 0),
-		pop.get("households", 0)
+		everyone
 	]
 
 
@@ -493,10 +567,11 @@ func _build_spawn_toolbar() -> void:
 	hbox.add_child(VSeparator.new())
 
 	_trade_btn = Button.new()
-	_trade_btn.text = "Trade: OFF"
+	var trade_on_now: bool = _is_trade_on()
+	_trade_btn.text = "Trade: ON" if trade_on_now else "Trade: OFF"
 	_trade_btn.tooltip_text = "Toggle inter-village trade on/off"
 	_trade_btn.custom_minimum_size = Vector2(100, 34)
-	_apply_trade_btn_style(false)
+	_apply_trade_btn_style(trade_on_now)
 	_trade_btn.pressed.connect(_on_trade_button_pressed)
 	hbox.add_child(_trade_btn)
 
@@ -608,36 +683,70 @@ func _update_placement_label() -> void:
 			place_mode_label.text = "PLACING HOUSEHOLD - Click world to place. Right-click or Esc to cancel."
 
 
+## The village whose centre is nearest a world position. Falls back to the selected village.
+func _village_nearest(pos: Vector2) -> Village:
+	var best: Village = village
+	if _world_node == null or _world_node.get("villages") == null:
+		return best
+	var best_d2: float = INF
+	for v in _world_node.villages:
+		if v == null or not is_instance_valid(v) or not (v is Village):
+			continue
+		var centre: Vector2 = (v as Node2D).global_position + Vector2(400.0, 300.0)
+		if _world_node.has_method("get_village_center"):
+			centre = _world_node.get_village_center(v)
+		var d2: float = centre.distance_squared_to(pos)
+		if d2 < best_d2:
+			best_d2 = d2
+			best = v as Village
+	return best
+
+
 func _place_entity_at(pos: Vector2) -> void:
-	"""Delegate placement spawns to the active village."""
-	if village == null:
+	## Placement spawns go to the village whose centre is nearest the click, not to
+	## whichever village happens to be selected.
+	var target: Village = _village_nearest(pos)
+	if target == null or not is_instance_valid(target):
 		return
 	match place_mode:
 		PlaceMode.FIELD:
-			village.spawn_field_at(pos)
+			target.spawn_field_at(pos)
 		PlaceMode.FARMER:
-			village.spawn_farmer_at(pos)
+			target.spawn_farmer_at(pos)
 		PlaceMode.BAKER:
-			village.spawn_baker_at(pos)
+			target.spawn_baker_at(pos)
 		PlaceMode.HOUSEHOLD:
-			village.spawn_household_at(pos)
+			target.spawn_household_at(pos)
 	# Stay in placement mode so the user can place multiple of the same type
 
 
 # ── Trade toggle ───────────────────────────────────────────────────────────────
 
 func _on_trade_button_pressed() -> void:
-	"""Toggle trade on the WorldManager and update button label/style."""
+	## Toggle trade on the WorldManager, then update the button and the panel.
 	if _world_node and _world_node.has_method("toggle_trade"):
 		_world_node.toggle_trade()
-	var trade_on: bool = false
-	if _world_node and _world_node.get("trade_enabled") != null:
-		trade_on = _world_node.trade_enabled
+	_sync_trade_ui()
+
+
+func _is_trade_on() -> bool:
+	if _world_node != null and _world_node.get("trade_enabled") != null:
+		return bool(_world_node.get("trade_enabled"))
+	return false
+
+
+## Make the Trade button and the trade panel match World.trade_enabled: the button reads ON
+## or OFF, and the panel shows while trade is on and hides when trade is turned off.
+func _sync_trade_ui() -> void:
+	var trade_on: bool = _is_trade_on()
+	_trade_ui_on = trade_on
 	_apply_trade_btn_style(trade_on)
 	if _trade_btn:
 		_trade_btn.text = "Trade: ON" if trade_on else "Trade: OFF"
-	if _trade_panel and trade_on:
-		_trade_panel.show()
+	if _trade_panel:
+		_trade_panel.visible = trade_on and _trade_panel_open
+		if trade_on and _trade_panel_open:
+			_trade_panel.update_display(_world_node)
 
 
 func _apply_trade_btn_style(trade_on: bool) -> void:
@@ -691,4 +800,4 @@ func _build_trade_panel() -> void:
 	_trade_panel.offset_bottom = -8.0
 
 	ui_node.add_child(_trade_panel)
-	_trade_panel.hide()  # visible only when trade is enabled
+	_sync_trade_ui()  # shown only while trade is on (trade starts on)

@@ -60,3 +60,28 @@ Two 120-day runs (seeds 12345,66666 and 4242,777, hiring, trade on), plus the ot
   231 loaves, people bought 222, $414 paid in wages.
 - TestFeatures: 11 of 11 pass.
 - TestTradeMigration: all pass.
+
+# Second pass, 2026-11-10: a town that works
+
+What changed is in docs/WORKING_TOWN.md; the full list of what was broken is in
+docs/AUDIT_2026-11-10.md.
+
+## Measured results (final build)
+
+Runs use fixed steps (`--fixed-fps 30`), which now give the same town as real time at any speed.
+
+- **Speed.** The same build in fixed steps: 54 loaves bought by day 10 at both 3x and 10x, towns
+  alive and growing at 1x, 3x and 10x. The build before this pass: 9 people at real-time 10x,
+  1 person and 2 starved by day 30 in fixed steps.
+- **Survival, 120 days**, seeds 12345,66666 and 4242,777: 14 of 14 checks in both. Villages 7 to
+  15, 14, 17 and 13. Nobody left, nobody starved. 0 to 2 cold days per village. 10 to 12 houses
+  built per village, 29 to 32 home improvements and 16 to 20 merchant deals per run, 6 to 14
+  troubles per run. (Before: about 25 leavers per village.)
+- **Survival, 300 days**: 14 of 14 in both. Villages end at 17, 14, 26 and 13. Nobody left and
+  nobody starved in 300 days. 0 to 3 cold days per village, 24 to 33 troubles per run.
+- **People without work**: 2 to 5 per village on average (about a quarter to a third). They live
+  off garden plots. This is the open item: more trades.
+- **TestFeatures**: 18 of 18. **TestShocks**: 9 of 9 (bakery fire and rats: bread $3.22 to a
+  peak of $4.20, shelf 15 down to 4, $3.62 by day 48; blight: wheat $1.01 to $1.22 and back,
+  store 57 down to 6; merchants sold 50 units across). **TestEconomy**: pass (village 1 in 30
+  days: 504 wheat sold, 185 loaves bought, $362 in wages). **TestTradeMigration**: all pass.

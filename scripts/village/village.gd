@@ -304,11 +304,19 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	# Batch 3: a lumber yard and the town's first woodworker.
 	_build_lumber_yard()
 	_spawn_first_woodworker()
+	# A travelling merchant carries goods between this village and the other one.
+	_spawn_merchant()
 	# Houses: newcomers arrive only into an empty one; people build, buy and rent them.
 	housing = Housing.new()
 	housing.village = self
 	housing.market = market
 	housing.event_bus = event_bus
+	# Troubles: blight, fire, frost, rats (scripts/village/shocks.gd).
+	shocks = Shocks.new()
+	shocks.village = self
+	shocks.market = market
+	shocks.event_bus = event_bus
+	shocks.rng.seed = (rng.seed if rng else 1) + 7919
 	# Drawing: ground, roads, buildings and houses under the people.
 	var art := VillageArt.new()
 	art.name = "VillageArt"
@@ -347,8 +355,6 @@ func tick(_delta: float) -> void:
 
 func receive_tick(tick: int) -> void:
 	"""Called by the world's SimulationClock for each simulation tick."""
-	if sim_failed:
-		return
 
 	calendar.set_tick(tick)
 	field_mgr.tick_all()
@@ -368,10 +374,12 @@ func receive_tick(tick: int) -> void:
 		if h and is_instance_valid(h):
 			h.set_tick(tick)
 
-	if prosperity_meter:
+	if prosperity_meter and calendar.day_index != _prosperity_day:
+		_prosperity_day = calendar.day_index   # once a day (it ran 10 times a day)
 		# Count everyone, not just households. With households only, a village whose
 		# households had all left read as "nobody has food saved", scored about 0.58 against
-		# the 0.60 growth bar, and could never get a newcomer again.
+		# the growth bar (0.70, from config/economy_config.json), and could never get a
+		# newcomer again.
 		var everyone: Array = []
 		for grp in [households, all_farmers, all_bakers, all_woodworkers]:
 			for a in grp:
@@ -396,13 +404,25 @@ func receive_tick(tick: int) -> void:
 			])
 
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn \
-				and (housing == null or housing.free_slots() > 0):
+				and (housing == null or housing.free_slots() > 0) and room_for_newcomer():
 			var spawn_pos := get_spawn_point_for_role("household")
 			spawn_household_at(spawn_pos)
 			prosperity_meter.record_spawn(calendar.day_index)
 
 	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
 		audit.audit(farmer, baker, market, event_bus, tick)
+
+
+## Newcomers follow work. One comes only while almost nobody in town is idle (at most
+## MAX_IDLE_FOR_ARRIVAL people without work), so the town never fills with people it has
+## nothing for. Before, anyone came whenever food looked fine, found no work and left broke.
+const MAX_IDLE_FOR_ARRIVAL: int = 1
+var _prosperity_day: int = -1
+
+func room_for_newcomer() -> bool:
+	if labor_market == null:
+		return true
+	return labor_market.idle_count <= MAX_IDLE_FOR_ARRIVAL
 
 
 func get_market() -> Market:
@@ -460,8 +480,8 @@ func get_population_summary() -> Dictionary:
 func get_econ_snapshot() -> Dictionary:
 	var snap: Dictionary = {
 		"day":         calendar.day_index if calendar else 0,
-		"wheat_price": market.get_bid_price("wheat") if market else 0.0,
-		"bread_price": market.get_bid_price("bread") if market else 0.0,
+		"wheat_price": market.wheat_price if market else 0.0,   # shelf prices, as firewood shows
+		"bread_price": market.bread_price if market else 0.0,
 		"wheat":       market.wheat if market else 0,
 		"bread":       market.bread if market else 0,
 		"wheat_cap":   market.wheat_capacity if market else 999999999,
@@ -642,8 +662,6 @@ func _listen_for_deaths() -> void:
 # ============================================================================
 
 func _on_calendar_day_changed(day: int) -> void:
-	if sim_failed:
-		return
 
 	if event_bus:
 		event_bus.emit_log("[LAND STATUS] fields=%d/%d" % [all_field_nodes.size(), MAX_FIELDS])
@@ -652,6 +670,8 @@ func _on_calendar_day_changed(day: int) -> void:
 			households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()])
 
 	_listen_for_deaths()
+	if shocks:
+		shocks.on_day(day)
 	if housing:
 		housing.start_new_builds(day)   # before employers hire (housing.gd)
 	if labor_market:
@@ -731,8 +751,13 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 		var h_idx: int = households.find(ag)
 		if h_idx != -1:
 			households.remove_at(h_idx)
-		if ag.has_meta("employer"):
-			ag.remove_meta("employer")
+		for k in ["employer", "servant", "builds_house", "hired_builder", "cottager", "garden"]:
+			if ag.has_meta(k):
+				ag.remove_meta(k)
+		ag.set_meta("purse_given", true)   # they have a purse already; none is minted
+		ag.home_village_ref = self
+		ag.current_village_ref = self
+		ag.market = market
 		# A farmer or baker changing trade (docs/ECONOMY_BATCH1.md): leave the old trade's list,
 		# give up the fields (another farmer can take them over), and keep what they own.
 		# Batch 3: everyone keeps what they own when they change what they do.
@@ -846,6 +871,18 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 			if not ag.agent_died.is_connected(_on_household_died):
 				ag.agent_died.connect(_on_household_died)
 
+		elif role == "merchant":
+			ag.set_role("Merchant")
+			_restore_items(ag, kept_items)
+			ag.name = "Merchant_%d" % village_id
+			_fixup_node_name(ag, "Merchant")
+			_rebind_needs(ag)
+			var m_home := _make_spot(ag.name + "_Home", pos, Color(0.3, 0.7, 1.0, 0.6))
+			ag.set_locations(m_home, market_node)
+			households.append(ag)
+			if not ag.agent_died.is_connected(_on_household_died):
+				ag.agent_died.connect(_on_household_died)
+
 		elif role == "household":
 			# Batch 3: a business that failed. Its owner stays in town as a household looking
 			# for work, with their coins, bread and firewood. The stock of the old trade
@@ -925,6 +962,22 @@ func _spawn_first_woodworker() -> void:
 	if h.inv:
 		h.inv.items["bread"] = maxi(2, h.inv.get_qty("bread"))
 		h.inv.items["firewood"] = maxi(6, h.inv.get_qty("firewood"))
+
+
+## What this village's merchant has done so far (tests and the HUD).
+var trade_stats := {"trips": 0, "units": 0, "profit": 0.0}
+var shocks: Shocks = null
+
+func _spawn_merchant() -> void:
+	if spawn_service == null:
+		return
+	var h = await spawn_household_at(get_spawn_point_for_role("household"))
+	if h == null or not is_instance_valid(h):
+		return
+	_perform_role_conversion(h, "merchant", true)
+	if h.inv:
+		h.inv.items["bread"] = maxi(3, h.inv.get_qty("bread"))
+		h.inv.items["firewood"] = maxi(4, h.inv.get_qty("firewood"))
 
 
 ## Batch 3: a business closed (broke after a losing streak). Its owner becomes a household.

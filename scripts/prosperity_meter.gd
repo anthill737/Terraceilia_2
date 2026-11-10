@@ -244,11 +244,12 @@ func _compute_starvation_pressure() -> float:
 			# Lower hunger = higher score
 			# If avg_hunger < HUNGER_SAFE_RATIO (0.5), full score
 			# If avg_hunger >= 1.0, zero score
-			if avg_hunger <= HUNGER_SAFE_RATIO:
+			# hunger_days counts down from full (ratio 1.0) to dead (0). This used to score a
+			# fully fed town 0 and a starving one 1 (audit 2026-11-10).
+			if avg_hunger >= HUNGER_SAFE_RATIO:
 				hunger_score = 1.0
 			else:
-				hunger_score = 1.0 - ((avg_hunger - HUNGER_SAFE_RATIO) / (1.0 - HUNGER_SAFE_RATIO))
-				hunger_score = max(0.0, hunger_score)
+				hunger_score = clampf(avg_hunger / HUNGER_SAFE_RATIO, 0.0, 1.0)
 	
 	# Blend starvation and hunger scores
 	return (starvation_score + hunger_score) * 0.5

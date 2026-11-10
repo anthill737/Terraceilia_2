@@ -177,13 +177,28 @@ func _draw() -> void:
 			roof = ROOF_OWNED
 		else:
 			roof = ROOF_RENTED
-		_house_shape(c, PLASTER if h.occupant != null else PLASTER.darkened(0.3), roof)
+		var lvl: int = int(h.get("level", 1))
+		# Improved homes grow: a wing for a house, a second wing for a fine house, a tower for a hall.
+		if lvl >= 2:
+			draw_rect(Rect2(c + Vector2(13, -1), Vector2(9, 12)), PLASTER)
+			draw_colored_polygon(PackedVector2Array([c + Vector2(12, -1), c + Vector2(17.5, -8), c + Vector2(23, -1)]), roof)
+		if lvl >= 3:
+			draw_rect(Rect2(c + Vector2(-22, -1), Vector2(9, 12)), PLASTER)
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-23, -1), c + Vector2(-17.5, -8), c + Vector2(-12, -1)]), roof)
+		_house_shape(c, PLASTER if h.occupant != null else PLASTER.darkened(0.3), roof, 1.0 + 0.08 * float(mini(lvl, 6) - 1))
+		if lvl >= 4:
+			draw_rect(Rect2(c + Vector2(-3, -34), Vector2(6, 12)), PLASTER)
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-5, -34), c + Vector2(0, -41), c + Vector2(5, -34)]), roof)
+		if h.get("up") != null:
+			var uf: float = 0.5 * float(h.up.wood) / maxf(1.0, float(h.up.wood_need)) + 0.5 * float(h.up.work) / maxf(1.0, float(h.up.days_need))
+			draw_rect(Rect2(c + Vector2(-14, 13), Vector2(28, 3)), Color(0, 0, 0, 0.5))
+			draw_rect(Rect2(c + Vector2(-14, 13), Vector2(28 * uf, 3)), Color(0.95, 0.80, 0.30))
 		var who: String = tag if tag != "" else _short(h.occupant)
 		_label(c + Vector2(0, 24), who, 9, TEXT_DIM if tag == "" else Color(1.0, 0.85, 0.45))
 
 	# Legend.
 	var lg := centre + Vector2(-r + 40, r - 30)
-	var items := [["Farmer", Color(0.2, 1, 0.2)], ["Baker", Color(0.8, 0.6, 0.2)], ["Woodworker", Color(0.6, 0.4, 0.2)], ["Household", Color(1, 0.4, 1)]]
+	var items := [["Farmer", Color(0.2, 1, 0.2)], ["Baker", Color(0.8, 0.6, 0.2)], ["Woodworker", Color(0.6, 0.4, 0.2)], ["Household", Color(1, 0.4, 1)], ["Merchant", Color(0.3, 0.7, 1.0)]]
 	for i in items.size():
 		draw_rect(Rect2(lg + Vector2(0, i * 14), Vector2(9, 9)), items[i][1])
 		draw_string(ThemeDB.fallback_font, lg + Vector2(14, i * 14 + 9), items[i][0], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, TEXT_DIM)
@@ -197,7 +212,7 @@ func _short(a) -> String:
 	if a == null or not is_instance_valid(a):
 		return ""
 	var s: String = str(a.name)
-	for pre in ["Household", "Woodworker", "Farmer", "Baker"]:
+	for pre in ["Household", "Woodworker", "Farmer", "Baker", "Merchant"]:
 		if s.begins_with(pre):
 			var rest: String = s.substr(pre.length()).replace("_", "").replace("Agent", "")
 			return {"Household": "H", "Woodworker": "Wood"}.get(pre, pre) + rest

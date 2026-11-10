@@ -20,6 +20,10 @@ var wheat_capacity: int = 90    # 2 x wheat_target
 var bread_capacity: int = 100   # 2 x bread_target
 # Villages differ (batch 2): set by World per village.
 var soil_mult: float = 1.0   # wheat per harvest
+## Troubles in force (scripts/village/shocks.gd): blight, an oven fire, a hard frost.
+var shock_harvest_mult: float = 1.0
+var shock_oven_mult: float = 1.0
+var shock_extra_burn: int = 0
 var oven_mult: float = 1.0   # loaves per oven day
 
 const SEED_PRICE: float = 0.5
@@ -137,6 +141,9 @@ const BREAD_TARGET_MIN: int = 3          # only so the ratios never divide by ze
 ## couldn't afford a loaf are not counted: that is a money problem, not demand.
 var bread_bought_by_people_today: int = 0
 var bread_short_today: int = 0
+## Who was turned away today and for how much, so the same person coming back five times
+## is one shortfall, not five (it drove the bread target to 158 loaves after a fire).
+var _short_by: Dictionary = {"bread": {}, "wheat": {}}
 var bread_demand_ema: float = 6.0
 
 # Previous day inventory tracking for recovery detection
@@ -623,7 +630,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	wheat_requested_today += requested
 	
 	if wheat == 0:
-		wheat_short_today += requested
+		_note_short("wheat", baker, requested)
 		if event_bus:
 			event_bus.emit_log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
 		_set_result(0, "empty", "wheat", wheat_price)
@@ -641,7 +648,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	
 	var before_market_wheat: int = wheat
 	if requested > wheat and baker_wallet.money >= float(requested) * wheat_price:
-		wheat_short_today += requested - wheat
+		_note_short("wheat", baker, requested - wheat)
 	var amount_sold: int = min(requested, wheat)
 	amount_sold = min(amount_sold, max_affordable)
 	
@@ -841,7 +848,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	bread_requested_today += requested
 	
 	if bread <= 0:
-		bread_short_today += requested
+		_note_short("bread", h, requested)
 		if event_bus:
 			event_bus.emit_log("[BREAD EMPTY] day=%d tick=%d buyer=%s wanted=%d inv=0" % [current_day, current_tick, _agent_label(h), requested])
 		_set_result(0, "empty", "bread", bread_price)
@@ -851,7 +858,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	var max_by_inventory: int = min(requested, bread)
 	var shelf_short: int = requested - max_by_inventory
 	if shelf_short > 0 and h_wallet.money >= float(requested) * bread_price:
-		bread_short_today += shelf_short
+		_note_short("bread", h, shelf_short)
 	var max_affordable: int = int(floor(h_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
 	
@@ -895,7 +902,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 			return 0
 	
 	if bread <= 0:
-		bread_short_today += requested
+		_note_short("bread", agent, requested)
 		if event_bus:
 			event_bus.emit_log("Tick %d: %s tried to buy %d bread, but market has 0" % [current_tick, _agent_label(agent), requested])
 		_set_result(0, "empty", "bread", bread_price)
@@ -905,7 +912,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	var max_by_inventory: int = min(requested, bread)
 	var shelf_short: int = requested - max_by_inventory
 	if shelf_short > 0 and agent_wallet.money >= float(requested) * bread_price:
-		bread_short_today += shelf_short
+		_note_short("bread", agent, shelf_short)
 	var max_affordable: int = int(floor(agent_wallet.money / bread_price))
 	var qty: int = min(max_by_inventory, max_affordable)
 	
@@ -956,6 +963,20 @@ func _get_sell_pressure_ratio(good: String) -> float:
 
 
 # ==================== DAILY PRICE ADJUSTMENT ======================================
+
+func _note_short(good: String, who, n: int) -> void:
+	if n <= 0 or who == null:
+		return
+	var key: int = who.get_instance_id()
+	var prev: int = int(_short_by[good].get(key, 0))
+	if n <= prev:
+		return
+	_short_by[good][key] = n
+	if good == "bread":
+		bread_short_today += n - prev
+	else:
+		wheat_short_today += n - prev
+
 
 func _update_bread_target() -> void:
 	var wanted: int = bread_bought_by_people_today + bread_short_today
@@ -1016,6 +1037,7 @@ func on_day_changed(day: int) -> void:
 	bread_requested_today = 0
 	bread_bought_by_people_today = 0
 	bread_short_today = 0
+	_short_by = {"bread": {}, "wheat": {}}
 	wheat_bought_by_bakers_today = 0
 	wheat_short_today = 0
 	
@@ -1163,7 +1185,7 @@ func _adjust_wheat_price(day: int) -> void:
 		if wheat > wheat_prev and wheat >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
-			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 			inventory_nudge += recovery_adjustment
 		
 		new_price *= (1.0 + inventory_nudge)
@@ -1270,7 +1292,7 @@ func _adjust_bread_price(day: int) -> void:
 		if bread > bread_prev and bread >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
-			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 			inventory_nudge += recovery_adjustment
 		
 		new_price *= (1.0 + inventory_nudge)
@@ -1413,7 +1435,8 @@ func sell_firewood_to_agent(agent, requested: int) -> int:
 func _adjust_firewood_price() -> void:
 	var t: float = float(maxi(1, firewood_target))
 	if float(firewood) < t * (1.0 - TARGET_BAND_PCT) or firewood_short_today > 0:
-		firewood_price *= 1.0 + MAX_DAILY_PRICE_CHANGE * clampf(1.0 - float(firewood) / t, 0.2, 1.0)
+		# An empty pile bids up fast (12% a day); it crept 5% a day while hearths went cold.
+		firewood_price *= 1.0 + (0.12 if firewood <= 0 else MAX_DAILY_PRICE_CHANGE * clampf(1.0 - float(firewood) / t, 0.2, 1.0))
 	elif float(firewood) > t * (1.0 + TARGET_BAND_PCT):
 		firewood_price *= 1.0 - MAX_DAILY_PRICE_CHANGE * clampf(float(firewood) / t - 1.0, 0.2, 1.0)
 	firewood_price = clampf(firewood_price, FIREWOOD_PRICE_FLOOR, FIREWOOD_PRICE_CEILING)

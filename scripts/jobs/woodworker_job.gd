@@ -11,7 +11,7 @@ class_name WoodworkerJob
 ## margin the other trades ask. Without that, firewood would sit on its price floor.
 
 const OWNER_CASH: float = 150.0      # a business owner's purse
-const FIREWOOD_PER_DAY: int = 12     # one person's day of cutting
+const FIREWOOD_PER_DAY: int = 12     # one person's day of cutting; 18 and 21 with hands
 const MIN_MARGIN: float = 0.25
 
 var yard_location: Node2D = null

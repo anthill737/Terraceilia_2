@@ -13,6 +13,9 @@ const CHAR_LOG_SCROLL_THRESHOLD_PX := 50
 var _econ_stats: EconomyStatsManager = null
 var _max_fields: int = 10
 var _field_count_getter: Callable = Callable()
+## The selected person's home village (where their house is). InspectorController sets it;
+## it is only used when the person's own home_village_ref is not set.
+var _home_village: Node = null
 
 var _record_block: Control = null
 var _dock_divider: Control = null
@@ -47,6 +50,11 @@ func configure(econ: EconomyStatsManager, max_fields: int, field_count_getter: C
 	_econ_stats = econ
 	_max_fields = max_fields
 	_field_count_getter = field_count_getter
+
+
+## The selected person's home village, for the house line. Null when it is not known.
+func set_home_village(v: Node) -> void:
+	_home_village = v
 
 
 func _ready() -> void:
@@ -175,11 +183,20 @@ func refresh(selected_pop: Node) -> void:
 	var cash: float = d.get("cash", 0.0)
 	var bread: int = d.get("bread", 0)
 	var hunger_str: String = str(d.get("hunger", "?"))
-	var starving: bool = d.get("starving", false)
 	var surv: bool = d.get("survival", false)
 	var state: String = str(d.get("state", "?"))
 
-	var starve_tag: String = "  [color=red]☠ STARVING[/color]" if starving else ""
+	# Hunger as days left. Nobody lingers "starving": at 0 days with no bread a person dies.
+	var hunger_text: String = "Hunger: [b]%s[/b]" % hunger_str
+	var hunger_node = selected_pop.get("hunger")
+	if hunger_node != null and is_instance_valid(hunger_node) and hunger_node.get("hunger_days") != null:
+		var days_left: int = int(hunger_node.get("hunger_days"))
+		var days_max: int = days_left
+		if hunger_node.get("hunger_max_days") != null:
+			days_max = int(hunger_node.get("hunger_max_days"))
+		var hunger_col: String = "#ff6644" if days_left <= 1 else ("#e8b800" if days_left <= 2 else "#d0d8e8")
+		hunger_text = "Hunger: [color=%s][b]%d of %d days left[/b][/color]" % [hunger_col, days_left, days_max]
+
 	var surv_tag: String = "  [color=orange][SURVIVAL][/color]" if surv else ""
 
 	var wealth: String = str(d.get("wealth_tier", ""))
@@ -202,8 +219,8 @@ func refresh(selected_pop: Node) -> void:
 		wealth_col, wealth_icon, wealth, surv_tag
 	] if wealth != "" else ""
 
-	var line1: String = "[b]$%.0f[/b]    Bread: [b]%d[/b]    Hunger: [b]%s[/b]%s" % [
-		cash, bread, hunger_str, starve_tag
+	var line1: String = "[b]$%.0f[/b]    Bread: [b]%d[/b]    %s" % [
+		cash, bread, hunger_text
 	]
 	var line2: String = wealth_line
 	var line3: String = "[color=#aaaaaa]%s[/color]" % state
@@ -217,8 +234,8 @@ func refresh(selected_pop: Node) -> void:
 		extras.append("Carrying %d flour." % d.get("flour"))
 	if d.has("fields"):
 		extras.append("Working %d field(s)." % d.get("fields"))
-	if d.has("bread_consumed") and int(d.get("bread_consumed", 0)) > 0:
-		extras.append("Ate %d bread today." % d.get("bread_consumed"))
+	if hunger_node != null and is_instance_valid(hunger_node) and hunger_node.get("ate_today"):
+		extras.append("Has eaten today.")
 	if int(d.get("neg_cashflow_days", 0)) > 0:
 		extras.append("[color=#ff8844]Losing money for %d day(s) in a row.[/color]" % d.get("neg_cashflow_days"))
 	if int(d.get("failed_food_days", 0)) > 0:
@@ -227,13 +244,34 @@ func refresh(selected_pop: Node) -> void:
 		var cold_days: int = int(selected_pop.get_meta("cold_days", 0))
 		extras.append("Firewood at home: %d.%s" % [selected_pop.inv.get_qty("firewood"),
 			(" [color=#ff8844]Cold for %d day(s).[/color]" % cold_days) if cold_days > 0 else ""])
-	var home_village = selected_pop.get("current_village_ref")
+	# The house line comes from the person's home village (where their house is), not from
+	# wherever they happen to be standing.
+	var home_village = selected_pop.get("home_village_ref")
+	if home_village == null or not is_instance_valid(home_village):
+		home_village = _home_village
 	if home_village != null and is_instance_valid(home_village) and home_village.get("housing") != null:
 		extras.append(home_village.housing.describe(selected_pop))
 	if LaborMarket.hands_of(selected_pop) > 0:
 		extras.append("Employs %d hand(s)." % LaborMarket.hands_of(selected_pop))
-	if d.has("training_days"):
-		extras.append("[color=#88ccff]Training for a new job — %d day(s) left.[/color]" % d.get("training_days"))
+
+	# What this person does for a living (metas kept by the labour market and the trade code).
+	var living: String = ""
+	if selected_pop.has_meta("merchant") and selected_pop.get_meta("merchant", false):
+		var trips: int = int(_meta_number(selected_pop, "trade_trips"))
+		var last_deal: String = str(selected_pop.get_meta("trade_last", ""))
+		living = "Travelling merchant: %d %s, $%.1f profit, last: %s" % [
+			trips, "trip" if trips == 1 else "trips",
+			_meta_number(selected_pop, "trade_profit_total"),
+			last_deal if last_deal != "" else "no deal yet"]
+	elif selected_pop.has_meta("employer") and is_instance_valid(selected_pop.get_meta("employer", null)):
+		var boss = selected_pop.get_meta("employer", null)
+		var boss_role: String = str(boss.get("current_role")).to_lower() if boss.get("current_role") != null else ""
+		if selected_pop.has_meta("servant"):
+			living = "Servant in the house of %s, the %s." % [_person_label(boss), boss_role]
+		else:
+			living = "Hired hand: works for %s, the %s." % [_person_label(boss), boss_role]
+	elif selected_pop.has_meta("cottager") and selected_pop.get_meta("cottager", false):
+		living = "No work: lives off a garden plot and gathered firewood."
 
 	var general_lines: Array[String] = []
 	general_lines.append(INSPECTOR_SEC % "Vitals")
@@ -241,6 +279,8 @@ func refresh(selected_pop: Node) -> void:
 	if wealth_line != "":
 		general_lines.append(line2)
 	general_lines.append(line3)
+	if living != "":
+		general_lines.append("[color=#c8e0a8]%s[/color]" % living)
 	if extras.size() > 0:
 		general_lines.append("")
 		general_lines.append(INSPECTOR_SEC % "Belongings & pressure")
@@ -330,16 +370,18 @@ func refresh(selected_pop: Node) -> void:
 		var g_bread: int = int(d.get("gate_food_bread", 0))
 		var g_ftarget: int = int(d.get("gate_food_target", 3))
 		var g_freq: int = int(ceil(g_ftarget * (2.0 / 3.0)))
-		var tenure_col: String = "#55cc88" if g_tenure >= 14 else "#cc5555"
+		var need_tenure: int = LaborMarket.MIN_TENURE_DAYS
+		var need_savings: float = LaborMarket.SAVINGS_BUFFER_REQUIRED
+		var tenure_col: String = "#55cc88" if g_tenure >= need_tenure else "#cc5555"
 		var cd_col: String = "#55cc88" if g_cooldown == 0 else "#cc5555"
-		var sav_col: String = "#55cc88" if g_cash >= 200.0 else "#cc5555"
+		var sav_col: String = "#55cc88" if g_cash >= need_savings else "#cc5555"
 		var food_col: String = "#55cc88" if g_bread >= g_freq else "#cc5555"
 		var fields_now: int = _get_field_count()
 		var lc_col: String = "#55cc88" if fields_now < _max_fields else "#cc5555"
 		career_lines.append(INSPECTOR_SEC % "Switch gates")
 		career_lines.append(
-			"[color=%s]Tenure: %d/14d[/color]  [color=%s]Cooldown: %dd[/color]  [color=%s]Savings: $%.0f/$200[/color]" %
-			[tenure_col, g_tenure, cd_col, g_cooldown, sav_col, g_cash])
+			"[color=%s]Tenure: %d/%dd[/color]  [color=%s]Cooldown: %dd[/color]  [color=%s]Savings: $%.0f/$%.0f[/color]" %
+			[tenure_col, g_tenure, need_tenure, cd_col, g_cooldown, sav_col, g_cash, need_savings])
 		career_lines.append(
 			"[color=%s]Food: %d/%d[/color]  [color=%s]Land: %d/%d[/color]  [color=#556688]Eval day: %d[/color]" %
 			[food_col, g_bread, g_freq, lc_col, fields_now, _max_fields, eval_day_val])
@@ -418,6 +460,24 @@ func refresh(selected_pop: Node) -> void:
 		_wire_life_log_scroll()
 
 	_queue_scroll_sync()
+
+
+## A person's name for a line of text (their given name, else the node name).
+func _person_label(p) -> String:
+	if p == null or not is_instance_valid(p):
+		return "?"
+	var pn = p.get("person_name")
+	if pn != null and str(pn) != "":
+		return str(pn)
+	return str(p.name)
+
+
+## A number kept as a meta on a person (0 when it is missing or not a number).
+func _meta_number(p: Node, key: String) -> float:
+	var val = p.get_meta(key, 0.0)
+	if val is int or val is float:
+		return float(val)
+	return 0.0
 
 
 func _get_field_count() -> int:

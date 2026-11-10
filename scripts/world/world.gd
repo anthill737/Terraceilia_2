@@ -18,7 +18,8 @@ var villages: Array = []
 var _focused_village_idx: int = 0
 
 ## Whether inter-village trade is enabled. Agents check this before evaluating moves.
-var trade_enabled: bool = false
+## Starts on, so merchants trade in a normal game without the toolbar button being pressed.
+var trade_enabled: bool = true
 
 ## Emitted when the player navigates to a different village.
 ## main.gd connects this to move the camera and rebind the economy HUD.
@@ -138,6 +139,7 @@ func get_world_summary() -> Dictionary:
 		"total_pop":        0,
 		"total_farmers":    0,
 		"total_bakers":     0,
+		"total_woodworkers": 0,
 		"total_households": 0,
 		"total_fields":     0,
 	}
@@ -148,6 +150,7 @@ func get_world_summary() -> Dictionary:
 		out["total_pop"]        += pop.get("total",      0)
 		out["total_farmers"]    += pop.get("farmers",    0)
 		out["total_bakers"]     += pop.get("bakers",     0)
+		out["total_woodworkers"] += pop.get("woodworkers", 0)
 		out["total_households"] += pop.get("households", 0)
 		out["total_fields"]     += pop.get("fields",     0)
 	return out

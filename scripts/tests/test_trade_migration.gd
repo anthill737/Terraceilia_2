@@ -196,10 +196,13 @@ func _physics_process(_delta: float) -> void:
 # ── Per-scenario setup ────────────────────────────────────────────────────────
 
 func _setup_scenario() -> void:
-	if _main.clock and _main.clock.timer:
-		_main.clock.timer.stop()
+	if _main.clock:
+		_main.clock.running = false   # this test steps the villages by hand
 	Engine.physics_ticks_per_second = 240
 	_world = _main.get_node_or_null("World")
+	if _world:
+		_world.set_meta("producers_trade", true)   # this test is about producers carrying their own goods
+		_world.set_meta("no_merchants", true)
 
 	# Reposition Village 2 close to Village 1 (250 px) so the ~100-tick trip stays
 	# under MAX_TRAVEL_TICKS=300 without modifying any game code.

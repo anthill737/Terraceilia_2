@@ -339,7 +339,7 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 		elif agent.get("days_in_role") != null and agent.days_in_role < MIN_TENURE_DAYS:
 			allowed = 0
 			block = "tenure"
-		elif cash < SAVINGS_BUFFER_REQUIRED:
+		elif cash < Tuning.f("shop_savings_needed", SAVINGS_BUFFER_REQUIRED):
 			allowed = 0
 			block = "savings"
 		elif bread < food_required:
@@ -553,7 +553,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 
 	# Gate: savings buffer
 	var cash: float = h.get_cash() if h.has_method("get_cash") else 0.0
-	if cash < SAVINGS_BUFFER_REQUIRED:
+	if cash < Tuning.f("shop_savings_needed", SAVINGS_BUFFER_REQUIRED):
 		_log_career_blocked(day, pop_id, "?", "savings", int(cash), h)
 		return
 
@@ -737,7 +737,7 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 		_log_career_blocked(day, pop_id, best_role, "tenure", p.days_in_role, p)
 		return
 	var cash: float = p.get_cash()
-	if cash < SAVINGS_BUFFER_REQUIRED:
+	if cash < Tuning.f("shop_savings_needed", SAVINGS_BUFFER_REQUIRED):
 		_log_career_blocked(day, pop_id, best_role, "savings", int(cash), p)
 		return
 	var own: Array = all_farmers if role == "Farmer" else all_bakers
@@ -827,7 +827,7 @@ func _update_hands(day: int) -> void:
 			# A losing stretch: let one go.
 			_let_go(p, hands.pop_back(), day, "losing money")
 			falling = 0
-		elif hands.size() < MAX_HANDS and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
+		elif hands.size() < Tuning.i("max_hands_per_shop", MAX_HANDS) and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
 			var value: float = _hand_value(p, hands.size())
 			if value > wage * 1.1:
 				var h = _free_hand()
@@ -872,9 +872,10 @@ func _hand_value(p: Node, n: int) -> float:
 	var made: float = float(job.get_meta("output_ema", 0.0))
 	if p.current_role == "Farmer":
 		return made / float(1 + n) * market.wheat_price
-	var last: int = HAND_STEPS.size() - 1
-	var step: float = float(HAND_STEPS[mini(n + 1, last)]) - float(HAND_STEPS[mini(n, last)])
-	var alone: float = made / float(HAND_STEPS[mini(n, last)])
+	var steps: Array = hand_steps()
+	var last: int = steps.size() - 1
+	var step: float = float(steps[mini(n + 1, last)]) - float(steps[mini(n, last)])
+	var alone: float = made / float(steps[mini(n, last)])
 	if p.current_role == "Woodworker":
 		return step * alone * market.firewood_bid()
 	return step * alone * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
@@ -897,15 +898,21 @@ func _overstocked(p: Node) -> bool:
 
 
 ## Output multiplier for a baker or woodworker with their current hands.
+## Output of a bakery or yard with 0, 1 and 2 hired hands (dev mode can change the two steps).
+static func hand_steps() -> Array:
+	return [float(HAND_STEPS[0]), Tuning.f("hand_output_1", float(HAND_STEPS[1])), Tuning.f("hand_output_2", float(HAND_STEPS[2]))]
+
+
 static func hand_mult(p: Node) -> float:
-	return float(HAND_STEPS[mini(hands_of(p), HAND_STEPS.size() - 1)])
+	var steps: Array = hand_steps()
+	return float(steps[mini(hands_of(p), steps.size() - 1)])
 
 
 ## A hand's daily wage in coins: one loaf plus one firewood at today's prices, times WAGE_MARKUP.
 static func daily_wage(m) -> float:
 	if m == null:
 		return 5.9
-	return (float(m.bread_price) + float(m.firewood_price)) * WAGE_MARKUP
+	return (float(m.bread_price) + float(m.firewood_price)) * Tuning.f("wage_markup", WAGE_MARKUP)
 
 
 ## Daily: every person burns one firewood. A hearth with none is a cold day; after
@@ -1012,7 +1019,7 @@ func _update_cottagers(_day: int) -> void:
 			h.set_meta("cottager", true)
 		elif h.has_meta("cottager"):
 			h.remove_meta("cottager")
-		if not (idle or own_build or quiet_merchant):
+		if not Tuning.on("gardens", true) or not (idle or own_build or quiet_merchant):
 			if h.has_meta("garden"):
 				h.remove_meta("garden")
 			continue

@@ -40,6 +40,8 @@ they do for a living and who for, and hands or servants they employ.
 - M: the merchants panel (trips, profit, last deal).
 - L: switch the Event Log between town news (the default: who was hired, what was built, who
   arrived, what the merchants sold, what trouble struck) and everything (the full debug log).
+- F1 or the Dev button: dev mode. Start a town at any size with any money and stock, and change
+  the numbers the town runs on (docs/DEV_MODE.md).
 - "Village 1" / "Village 2": jump to a village. "World": see both.
 - Field / Farmer / Baker / Household buttons: place one by clicking the map (Esc cancels).
 

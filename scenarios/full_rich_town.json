@@ -1,0 +1,14 @@
+{
+  "name": "Full, rich town",
+  "inputs": {},
+  "start": {
+    "people": 50,
+    "coins_others": 200,
+    "coins_owners": 500,
+    "market_coins": 10000,
+    "market_wheat": 90,
+    "market_bread": 100,
+    "market_firewood": 80,
+    "prosperity": 0.9
+  }
+}

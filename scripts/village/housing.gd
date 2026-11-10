@@ -73,8 +73,8 @@ func _people() -> Array:
 
 
 func _new_house(owner, occupant, done: bool) -> Dictionary:
-	var h := {"id": next_id, "owner": owner, "occupant": occupant, "wood": HOUSE_WOOD if done else 0,
-		"work": BUILD_DAYS if done else 0, "done": done, "unpaid": 0}
+	var h := {"id": next_id, "owner": owner, "occupant": occupant, "wood": Tuning.i("house_logs", HOUSE_WOOD) if done else 0,
+		"work": Tuning.i("house_build_days", BUILD_DAYS) if done else 0, "done": done, "unpaid": 0}
 	var slot: int = next_id - 1
 	h.pos = HOUSE_ORIGIN + Vector2((slot % HOUSE_COLS) * HOUSE_DX, (slot / HOUSE_COLS) * HOUSE_DY)
 	if village != null:
@@ -90,12 +90,12 @@ func _new_house(owner, occupant, done: bool) -> Dictionary:
 
 
 func wood_cost() -> float:
-	return float(HOUSE_WOOD) * (market.firewood_price if market else 1.0)
+	return float(Tuning.i("house_logs", HOUSE_WOOD)) * (market.firewood_price if market else 1.0)
 
 
 ## A worker's wages for the days it takes to build.
 func labour_cost() -> float:
-	return float(BUILD_DAYS) * LaborMarket.daily_wage(market)
+	return float(Tuning.i("house_build_days", BUILD_DAYS)) * LaborMarket.daily_wage(market)
 
 
 ## What a house is worth: what it costs to build one today.
@@ -227,7 +227,7 @@ func on_day(day: int) -> void:
 	if not initialized:
 		for a in people:
 			_new_house(a, a, true)
-		for i in START_SPARE:
+		for i in Tuning.i("houses_spare_at_start", START_SPARE):
 			_new_house(null, null, true)
 		initialized = true
 		_log("[HOUSING] day=%d started with %d houses for %d people" % [day, houses.size(), people.size()])
@@ -328,9 +328,9 @@ func on_day(day: int) -> void:
 		var b = h.owner
 		if b == null or not is_instance_valid(b):
 			continue   # the owner died or left today; tomorrow's tidy-up drops the house
-		if h.wood < HOUSE_WOOD:
+		if h.wood < Tuning.i("house_logs", HOUSE_WOOD):
 			var spare: int = int(market.firewood - float(market.firewood_target) * WOOD_PILE_KEEP)
-			var want: int = mini(HOUSE_WOOD - h.wood, spare)
+			var want: int = mini(Tuning.i("house_logs", HOUSE_WOOD) - h.wood, spare)
 			var got: int = 0
 			if want > 0:
 				var wood_price: float = market.firewood_price
@@ -362,7 +362,7 @@ func on_day(day: int) -> void:
 		else:
 			stats.hired_days += 1
 		h.work += 1
-		if h.work < BUILD_DAYS:
+		if h.work < Tuning.i("house_build_days", BUILD_DAYS):
 			continue
 		h.done = true
 		_release_worker(h)
@@ -484,7 +484,7 @@ func start_new_builds(day: int) -> void:
 	for h in houses:
 		if h.get("up") != null:
 			improving += 1
-	if improving < MAX_IMPROVING:
+	if Tuning.on("home_improvements", true) and improving < MAX_IMPROVING:
 		var pick: Dictionary = {}
 		var pick_cash: float = 0.0
 		for h in houses:
@@ -600,7 +600,7 @@ func _servants(day: int, wage: float) -> void:
 	for h in houses:
 		var kept: Array = []
 		var master = h.owner
-		var want: int = servants_wanted(h) if master != null and is_instance_valid(master) else 0
+		var want: int = servants_wanted(h) if Tuning.on("servants", true) and master != null and is_instance_valid(master) else 0
 		for s in h.get("servants", []):
 			if s == null or not is_instance_valid(s) or not village.households.has(s) or s.get_meta("employer", null) != master:
 				continue   # died, left, or changed trade
@@ -694,9 +694,9 @@ func describe(a) -> String:
 			var who: String = ""
 			if wk != null and is_instance_valid(wk):
 				who = ", building it themselves" if wk == a else ", %s working on it" % wk.name
-			elif h.wood >= HOUSE_WOOD:
+			elif h.wood >= Tuning.i("house_logs", HOUSE_WOOD):
 				who = ", waiting for a worker"
-			parts.append("Building house %d: wood %d/%d, work %d/%d days%s." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS, who])
+			parts.append("Building house %d: wood %d/%d, work %d/%d days%s." % [h.id, h.wood, Tuning.i("house_logs", HOUSE_WOOD), h.work, Tuning.i("house_build_days", BUILD_DAYS), who])
 		elif h.done and h.owner == a and h.occupant != a:
 			let_out += 1
 	if let_out > 0:

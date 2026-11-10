@@ -164,7 +164,7 @@ func _draw() -> void:
 			draw_rect(Rect2(c + Vector2(-14, -9), Vector2(28, 20)), Color(0.75, 0.62, 0.42, 0.5), false, 2.0)
 			draw_line(c + Vector2(-14, 11), c + Vector2(14, -9), WOOD, 2.0)
 			draw_line(c + Vector2(-14, -9), c + Vector2(14, 11), WOOD, 2.0)
-			var frac: float = 0.5 * float(h.wood) / Housing.HOUSE_WOOD + 0.5 * float(h.work) / Housing.BUILD_DAYS
+			var frac: float = 0.5 * float(h.wood) / float(Tuning.i("house_logs", Housing.HOUSE_WOOD)) + 0.5 * float(h.work) / float(Tuning.i("house_build_days", Housing.BUILD_DAYS))
 			draw_rect(Rect2(c + Vector2(-14, 15), Vector2(28, 4)), Color(0, 0, 0, 0.5))
 			draw_rect(Rect2(c + Vector2(-14, 15), Vector2(28 * frac, 4)), Color(0.95, 0.80, 0.30))
 			_label(c + Vector2(0, 31), "building", 9, TEXT_DIM)

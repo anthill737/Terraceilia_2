@@ -53,7 +53,8 @@ var bread_produced_today: int = 0
 var oven_fuel: int = 0   # loaves the firewood now in the oven can still bake
 
 var oven_capacity_per_day: int = 12  # loaves a baker makes alone (was 15, which fed the whole town with no help); 18 and 21 with hands
-var maintenance_cost_per_day: float = 0.3
+var maintenance_cost_per_day: float:
+	get: return Tuning.f("upkeep_baker", 0.3)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
@@ -189,7 +190,7 @@ const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (househ
 ## The first hand adds half again, the second a quarter more (LaborMarket.hand_mult), and
 ## this figure is the oven's firm daily limit.
 func _oven_capacity() -> int:
-	return maxi(1, roundi(float(oven_capacity_per_day) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent)))
+	return maxi(1, roundi(float(Tuning.i("baker_loaves_per_day", oven_capacity_per_day)) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent)))
 
 
 func _hand_batch(base: int) -> int:
@@ -223,7 +224,7 @@ func _update_overhead() -> void:
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
-		wallet.credit(STARTING_CASH)
+		wallet.credit(Tuning.f("owner_start_coins", STARTING_CASH))
 	if inv:
 		inv.items = {"wheat": 0, "flour": 0, "bread": 5, "firewood": 6}
 	prod = agent.get_node_or_null("ProductionBatch") as ProductionBatch

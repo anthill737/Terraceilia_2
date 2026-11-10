@@ -42,8 +42,8 @@ func spawn_farmer_at(pos: Vector2, initial_field_node: Node2D = null) -> Node:
 		return null
 
 	var total_pop: int = _village.get_total_population()
-	if total_pop >= _village.pop_mgr.MAX_TOTAL_POP:
-		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
+	if total_pop >= Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP):
+		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP)]
 		print(msg)
 		if _village.event_bus:
 			_village.event_bus.emit_log(msg)
@@ -131,8 +131,8 @@ func spawn_baker_at(pos: Vector2) -> Node:
 		return null
 
 	var total_pop: int = _village.get_total_population()
-	if total_pop >= _village.pop_mgr.MAX_TOTAL_POP:
-		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
+	if total_pop >= Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP):
+		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP)]
 		print(msg)
 		if _village.event_bus:
 			_village.event_bus.emit_log(msg)
@@ -206,8 +206,8 @@ func spawn_household_at(pos: Vector2) -> Node:
 		return null
 
 	var total_pop: int = _village.get_total_population()
-	if total_pop >= _village.pop_mgr.MAX_TOTAL_POP:
-		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, _village.pop_mgr.MAX_TOTAL_POP]
+	if total_pop >= Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP):
+		var msg := "[POP] Spawn blocked — cap reached (%d/%d)" % [total_pop, Tuning.i("town_size_limit", _village.pop_mgr.MAX_TOTAL_POP)]
 		print(msg)
 		if _village.event_bus:
 			_village.event_bus.emit_log(msg)

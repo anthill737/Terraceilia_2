@@ -30,7 +30,16 @@ signal trade_toggled(enabled: bool)
 
 
 func _ready() -> void:
+	# Dev mode (docs/DEV_MODE.md): read any scenario or --set values before the villages are made.
+	Tuning.load_cmdline()
 	spawn_initial_villages()
+	if Tuning.has_start():
+		_dev_start()
+
+
+## Dev mode: build the asked-for starting town; the clock waits until it is ready.
+func _dev_start() -> void:
+	await DevStart.apply(self)
 
 
 func spawn_initial_villages() -> void:

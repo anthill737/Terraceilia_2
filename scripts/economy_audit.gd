@@ -70,8 +70,9 @@ func audit(farmer: Agent, baker: Agent, market: Market, bus: EventBus, tick: int
 		errors.append("Market wheat_price above ceiling: %.2f > %.2f" % [market.wheat_price, market.WHEAT_PRICE_CEILING])
 	if market.bread_price < market.BREAD_PRICE_FLOOR - 0.001:
 		errors.append("Market bread_price below floor: %.2f < %.2f" % [market.bread_price, market.BREAD_PRICE_FLOOR])
-	if market.bread_price > market.BREAD_PRICE_CEILING + 0.001:
-		errors.append("Market bread_price above ceiling: %.2f > %.2f" % [market.bread_price, market.BREAD_PRICE_CEILING])
+	var ceiling: float = Tuning.f("bread_price_ceiling", market.BREAD_PRICE_CEILING)
+	if market.bread_price > ceiling + 0.001:
+		errors.append("Market bread_price above ceiling: %.2f > %.2f" % [market.bread_price, ceiling])
 	if is_nan(market.money):
 		errors.append("Market money is NaN")
 	

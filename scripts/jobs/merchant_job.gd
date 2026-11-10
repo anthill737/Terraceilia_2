@@ -45,8 +45,9 @@ func activate() -> void:
 	super.activate()
 	if route:
 		route.max_travel_time = 600.0   # the walk to the other village is long (wall-clock limit)
-	if wallet and wallet.money < OWNER_CASH and not agent.has_meta("merchant_purse"):
-		wallet.credit(OWNER_CASH - wallet.money)
+	var purse: float = Tuning.f("merchant_start_coins", OWNER_CASH)
+	if wallet and wallet.money < purse and not agent.has_meta("merchant_purse"):
+		wallet.credit(purse - wallet.money)
 	agent.set_meta("merchant_purse", true)
 	agent.set_meta("merchant", true)
 	for k in ["trade_trips", "days_since_trade"]:
@@ -65,7 +66,7 @@ func _world() -> Node:
 
 func _trading_allowed() -> bool:
 	var w = _world()
-	return w != null and w.get("trade_enabled") == true and not w.get_meta("no_merchants", false)
+	return Tuning.on("merchants", true) and w != null and w.get("trade_enabled") == true and not w.get_meta("no_merchants", false)
 
 
 func _other_village():

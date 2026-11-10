@@ -58,7 +58,8 @@ var inventory_throttle: InventoryThrottle = null
 # Capital constraints (B)
 var field_work_capacity_per_day: int = 3
 var fields_worked_today: int = 0
-var maintenance_cost_per_day: float = 0.2
+var maintenance_cost_per_day: float:
+	get: return Tuning.f("upkeep_farmer", 0.2)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
@@ -148,7 +149,7 @@ var wheat_harvested_today: int = 0
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
-		wallet.credit(STARTING_CASH)
+		wallet.credit(Tuning.f("owner_start_coins", STARTING_CASH))
 	if inv:
 		inv.items = {"seeds": 50, "wheat": 0, "bread": 2, "firewood": 4}
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability
@@ -321,7 +322,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
 		# in one more farmer's worth of wheat (more land worked, not more wheat per field).
 		var _hand_mult: float = 1.0 + float(LaborMarket.hands_of(agent))
-		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult * (market.soil_mult * market.shock_harvest_mult if market else 1.0)))
+		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * (Tuning.f("farmer_harvest_percent", 100.0) / 100.0) * _sk_mult * _hand_mult * (market.soil_mult * market.shock_harvest_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
 		inv.add("wheat", actual_wheat)

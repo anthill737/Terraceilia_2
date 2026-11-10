@@ -55,7 +55,7 @@ func on_day(day: int) -> void:
 		if int(active.days_left) <= 0:
 			end(day)
 		return
-	if not enabled or _off_by_world() or day < GRACE_DAYS or day - last_end_day < MIN_GAP_DAYS:
+	if not enabled or not Tuning.on("troubles", true) or _off_by_world() or day < GRACE_DAYS or day - last_end_day < MIN_GAP_DAYS:
 		return
 	if rng.randf() < DAILY_CHANCE:
 		var kinds: Array = KINDS.keys()

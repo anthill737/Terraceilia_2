@@ -1,0 +1,10 @@
+{
+  "name": "Poor town of 20",
+  "inputs": {},
+  "start": {
+    "people": 20,
+    "coins_others": 5,
+    "coins_owners": 30,
+    "market_coins": 300
+  }
+}

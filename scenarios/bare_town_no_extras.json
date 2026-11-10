@@ -1,0 +1,11 @@
+{
+  "name": "Bare town: no garden plots, servants, home improvements, merchants or troubles",
+  "inputs": {
+    "gardens": false,
+    "servants": false,
+    "home_improvements": false,
+    "merchants": false,
+    "troubles": false
+  },
+  "start": {}
+}

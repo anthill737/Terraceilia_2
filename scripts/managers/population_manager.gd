@@ -27,7 +27,7 @@ func count() -> int:
 
 
 func is_at_pop_cap() -> bool:
-	return count() >= MAX_TOTAL_POP
+	return count() >= Tuning.i("town_size_limit", MAX_TOTAL_POP)
 
 
 func new_person_id() -> int:
@@ -98,5 +98,5 @@ func unregister_baker(b: Node) -> void:
 
 func get_status_text() -> String:
 	return "total=%d/%d (households=%d farmers=%d bakers=%d woodworkers=%d)" % [
-		get_total_population(), MAX_TOTAL_POP,
+		get_total_population(), Tuning.i("town_size_limit", MAX_TOTAL_POP),
 		households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()]

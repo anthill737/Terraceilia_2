@@ -316,9 +316,9 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 	if field.is_mature():
 		var harvest_result = field.harvest()
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
-		# Hired hands (wages mode) work the field with the farmer: more labour, more yield.
+		# Hired hands work the field with the farmer: more labour, more yield.
 		var _hand_mult: float = 1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)
-		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult))
+		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult * (market.soil_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
 		inv.add("wheat", actual_wheat)

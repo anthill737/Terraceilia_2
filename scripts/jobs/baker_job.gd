@@ -180,10 +180,10 @@ func set_tick(t: int) -> void:
 const STARTING_CASH: float = 500.0
 
 
-## Hired hands (wages mode) add oven time and bigger batches, never bread from nothing: the same
+## Hired hands add oven time and bigger batches, never bread from nothing: the same
 ## flour makes the same bread, a busy bakery just gets through more of it in a day.
 func _oven_capacity() -> int:
-	return roundi(float(oven_capacity_per_day) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
+	return roundi(float(oven_capacity_per_day) * (market.oven_mult if market else 1.0) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
 
 
 func _hand_batch(base: int) -> int:

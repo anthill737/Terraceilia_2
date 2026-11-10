@@ -42,7 +42,7 @@ const BROKE_LOAVES: float = 3.0
 ## "wages": producers keep their trade; one with more work than hands hires households as
 ## farm or bakery hands and pays them a daily wage out of their own wallet.
 ## Set by config ("labor": {"mode": ...}) or --labor-mode=<mode> after "--".
-var labor_mode: String = "switching"
+var labor_mode: String = "wages"   # hiring (batch 2 default); "switching" lets producers change trade
 const HAND_WAGE_LOAVES: float = 2.0       # a day's wage, in loaves at today's bread price
 const HAND_OUTPUT_BOOST: float = 0.5      # each hand adds this share of the employer's own output
 const MAX_HANDS: int = 2
@@ -212,9 +212,10 @@ func update_daily(day: int) -> void:
 			if p and is_instance_valid(p):
 				_evaluate_producer_switch(p, day)
 
-	# Hands and wages (wages mode): pay today's wages, then hire or let go.
-	if labor_mode == "wages":
-		_update_hands(day)
+	# Hands and wages: pay today's wages, then hire or let go.
+	# Batch 2: hiring hands is how households earn, so it runs in both modes; the modes now
+	# differ only in whether farmers and bakers may change trade.
+	_update_hands(day)
 
 	# Evaluate producers for sustained-loss migration
 	_evaluate_producer_migration(day)
@@ -711,7 +712,7 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 	role_switch_requested.emit(p, best_role.to_lower())
 
 
-# ─── Hands and wages (wages mode) ────────────────────────────────────────────
+# ─── Hands and wages (both modes since batch 2) ──────────────────────────────────────
 
 ## Daily: each employer pays each hand HAND_WAGE_LOAVES loaves' worth (money moves from one
 ## wallet to the other; none is made or destroyed). An employer lets a hand go when it cannot
@@ -814,7 +815,7 @@ func _release_hands(p: Node, why: String) -> void:
 	p.set_meta("hands", [])
 
 
-## Hands an employer has today (0 outside wages mode).
+## Hands an employer has today.
 static func hands_of(p: Node) -> int:
 	if p == null or not p.has_meta("hands"):
 		return 0

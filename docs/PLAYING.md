@@ -38,6 +38,8 @@ they do for a living and who for, and hands or servants they employ.
 - Page Up / Page Down (or the << >> buttons): game speed, 0.1x to 10x.
 - P or the Pause button: pause. Space or "Center": back to the selected village.
 - M: the merchants panel (trips, profit, last deal).
+- L: switch the Event Log between town news (the default: who was hired, what was built, who
+  arrived, what the merchants sold, what trouble struck) and everything (the full debug log).
 - "Village 1" / "Village 2": jump to a village. "World": see both.
 - Field / Farmer / Baker / Household buttons: place one by clicking the map (Esc cancels).
 

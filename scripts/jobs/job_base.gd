@@ -83,6 +83,8 @@ func buy_firewood_to(target: int) -> int:
 	var need: int = target - inv.get_qty("firewood")
 	if need <= 0:
 		return 0
+	if agent.has_meta("garden") and inv.get_qty("firewood") > 0:
+		return 0   # gathers their own (LaborMarket._update_cottagers)
 	var price: float = market.firewood_price
 	var got: int = market.sell_firewood_to_agent(agent, need)
 	if got > 0:

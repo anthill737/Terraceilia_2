@@ -111,7 +111,8 @@ func get_job_inspector_data() -> Dictionary:
 			state_str = "traveling→" + (route.target.name if route.target else "?")
 		elif agent.pending_target != null:
 			state_str = "waiting→" + agent.pending_target.name
-	d["state"] = state_str
+	d["state"] = get_status_text()
+	d["state_raw"] = state_str
 	d["trade_active"] = trade_route_active
 	d["trade_target"] = trade_target_village.village_name if trade_target_village else ""
 	d["seeds"] = inv.get_qty("seeds") if inv else 0

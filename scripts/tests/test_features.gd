@@ -15,6 +15,8 @@ extends Node
 ##   7. hands: a hired hand walks to the employer's field, bakery or yard.
 ##   8. improving: an owner with money to spare improves their home with logs and a builder.
 ##   9. cottagers: someone with no work eats from a garden plot and is not put out for rent.
+##  10. servants: an owner with a proper house and money to spare keeps a paid servant, who
+##      spends the day at the master's house.
 ##
 ##   godot --headless --path . res://scenes/TestFeatures.tscn
 ## Exit code 0 when every check passes.
@@ -55,6 +57,9 @@ class Probe extends Node:
 	var hand_name := ""
 	# 8. improving
 	var improver = null
+	# 10. servants
+	var servant_near := 999999.0
+	var servant_name := ""
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -172,6 +177,9 @@ class Probe extends Node:
 		improver = v.all_woodworkers[0] if not v.all_woodworkers.is_empty() else null
 		if improver != null:
 			improver.wallet.credit(500.0)
+			var ihome: Dictionary = hs._home_of(improver)
+			if not ihome.is_empty() and ihome.owner == improver:
+				ihome.level = 2   # already a proper house, so a servant can be taken on (check 10)
 			print("[FEATURES] day %d: %s has $%.0f to spare" % [day, improver.name, improver.get_cash()])
 
 	func _watch(day: int) -> void:
@@ -192,6 +200,14 @@ class Probe extends Node:
 		# 6. merchant abroad
 		if merchant != null and is_instance_valid(merchant) and v2 != null and merchant.current_village_ref == v2:
 			merchant_seen_abroad = true
+		# 10. a servant at the master's house
+		for hh in hs.houses:
+			for s in hh.get("servants", []):
+				if is_instance_valid(s) and hh.get("node") != null:
+					var sd: float = s.global_position.distance_to(hh.node.global_position)
+					if sd < servant_near:
+						servant_near = sd
+						servant_name = "%s for %s" % [s.name, hh.owner.name]
 		# 7. a hired hand at the workplace
 		for a in v.households:
 			if not is_instance_valid(a) or not (a.has_meta("employer") and is_instance_valid(a.get_meta("employer"))):
@@ -225,7 +241,7 @@ class Probe extends Node:
 
 	func _extras_done() -> bool:
 		var traded: bool = merchant == null or not is_instance_valid(merchant) or int(merchant.get_meta("trade_trips", 0)) > 0
-		return traded and v.housing.stats.improved > 0 and hand_near < 20.0 and v.calendar.day_index >= 12
+		return traded and v.housing.stats.improved > 0 and hand_near < 20.0 and servant_near < 20.0 and v.calendar.day_index >= 12
 
 	func _stage_hunger(day: int) -> void:
 		var hs = v.housing
@@ -252,9 +268,11 @@ class Probe extends Node:
 			"closest %.0f px from the site" % job_worker_near)
 		_check("the house was finished", job_done_day >= 0,
 			"started day %d, finished day %d" % [job_start_day, job_done_day])
-		var released: bool = job_worker != null and is_instance_valid(job_worker) and not job_worker.has_meta("builds_house") \
-			and not (job_worker.current_job is HouseholdJob and job_worker.current_job.work_site != null)
-		_check("the worker goes back to normal life afterwards", released or job_worker == null, "")
+		# Free of this job: not recorded on the finished house, and not marked as building it.
+		# (They may well have other work by now: a hand, a servant, another building.)
+		var still_on_it: bool = job_worker != null and is_instance_valid(job_worker) and job_worker.has_meta("builds_house") and int(job_worker.get_meta("builds_house")) == int(job.id)
+		var released: bool = job_worker != null and is_instance_valid(job_worker) and job.get("worker") == null and not still_on_it
+		_check("the worker is released from the job when the house is done", released or job_worker == null, "")
 		_check("builders paid wages", hs.stats.wages_paid > 0.0, "$%.2f paid over %d hired days" % [hs.stats.wages_paid, hs.stats.hired_days])
 
 		# 6. merchant
@@ -274,6 +292,9 @@ class Probe extends Node:
 				better += "%s's home is now a %s; " % [hh.owner.name, Housing.level_name(int(hh.level))]
 		_check("an owner with money to spare improved their home", hs.stats.improved > 0 and better != "",
 			"%simprovements finished %d, started %d" % [better, hs.stats.improved, hs.stats.improve_started])
+		# 10. servants
+		_check("an owner with a proper house keeps a paid servant who works there", servant_near < 20.0 and hs.stats.servant_wages > 0.0,
+			"%s, closest %.0f px, $%.2f paid over %d days" % [servant_name if servant_name != "" else "no servant", servant_near, hs.stats.servant_wages, hs.stats.servant_days])
 		# 9. cottagers
 		var cott := 0
 		var cott_ok := 0
@@ -306,6 +327,17 @@ class Probe extends Node:
 		# 5. starving: a farmer with no bread whose hunger runs out.
 		var farmer = v.all_farmers[0] if not v.all_farmers.is_empty() else null
 		if farmer != null:
+			# First with bread on the shelf: someone holding coins buys a loaf on the spot and lives.
+			v.market.bread = maxi(v.market.bread, 5)
+			var cash0: float = farmer.get_cash()
+			farmer.inv.items["bread"] = 0
+			farmer.hunger.hunger_days = 1
+			farmer.hunger._on_day_changed(day)
+			_check("someone with coins and bread on the shelf buys a loaf at the last moment and lives",
+				v.all_farmers.has(farmer) and not farmer.hunger.is_starving and farmer.get_cash() < cash0,
+				"alive: %s, paid $%.2f, hunger %d" % [v.all_farmers.has(farmer), cash0 - farmer.get_cash(), farmer.hunger.hunger_days])
+			# Then with no bread to be had anywhere: death.
+			v.market.bread = 0
 			var deaths_before: int = v.starved_deaths
 			var purse_before: float = v.market.money
 			var cash: float = farmer.get_cash()
@@ -313,7 +345,7 @@ class Probe extends Node:
 			farmer.hunger.hunger_days = 1
 			farmer.hunger._on_day_changed(day)
 			var gone: bool = not v.all_farmers.has(farmer)
-			_check("a farmer with no bread whose hunger hits 0 dies and is removed",
+			_check("a farmer whose hunger hits 0 with no bread to be had dies and is removed",
 				gone and v.starved_deaths == deaths_before + 1,
 				"removed: %s, deaths %d -> %d" % [gone, deaths_before, v.starved_deaths])
 			_check("their coins go to the town purse", absf((v.market.money - purse_before) - cash) < 0.01,

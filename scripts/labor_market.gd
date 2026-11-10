@@ -28,7 +28,7 @@ const RECENT_SWITCH_MARGIN: float = 0.25
 const RECENT_SWITCH_WINDOW_DAYS: int = 30
 const SAVINGS_BUFFER_REQUIRED: float = 100.0   # batch 3: coins saved before opening a business (was 200)
 const STARTUP_COST: float = 50.0               # batch 3: paid to the town market on opening
-const COLD_DAYS_TO_LEAVE: int = 4              # batch 3: days without firewood before leaving town
+const COLD_DAYS_TO_LEAVE: int = 10  # was 4: six households with full purses left over one empty woodpile
 const FOOD_BUFFER_FRACTION: float = 2.0 / 3.0
 
 # ─── Migration constants ──────────────────────────────────────────────────────
@@ -155,9 +155,16 @@ func load_career_entry_config(cfg: Dictionary) -> void:
 # ─── Main daily update ────────────────────────────────────────────────────────
 
 ## Called once per game day (from main._on_calendar_day_changed).
+## Days in a row the market has been short of what each trade makes. A business opens only
+## after OPEN_SHORT_DAYS of it: on a single dip a village once ended up with 8 farms.
+const OPEN_SHORT_DAYS: int = 3
+var _short_days: Dictionary = {"Farmer": 0, "Baker": 0, "Woodworker": 0}
+
 func update_daily(day: int) -> void:
 	if not _initialized:
 		return
+	for role in _short_days.keys():
+		_short_days[role] = int(_short_days[role]) + 1 if _market_wants(role) else 0
 
 	switches_today = 0
 	blocked_today = 0
@@ -575,7 +582,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 	# Gate: the town has to want more of what the new business makes. Profits of the farmer
 	# already in town said nothing about whether the market would buy a second farmer's wheat;
 	# new farmers opened with the wheat store full, never sold a sack and starved.
-	if not _market_wants(best_role):
+	if int(_short_days.get(best_role, 0)) < OPEN_SHORT_DAYS:
 		_log_career_blocked(day, pop_id, best_role, "no_demand", 0, h)
 		return
 
@@ -920,7 +927,7 @@ func _update_firewood(day: int) -> void:
 			var n: int = int(a.get_meta("cold_days", 0)) + 1
 			a.set_meta("cold_days", n)
 			cold += 1
-			if n < COLD_DAYS_TO_LEAVE or day < STARTUP_GRACE_DAYS:
+			if n < COLD_DAYS_TO_LEAVE or day < STARTUP_GRACE_DAYS or a.has_meta("merchant"):
 				continue
 			if gi > 0 and _live_count(group) <= 1:
 				continue
@@ -996,22 +1003,26 @@ func _update_cottagers(_day: int) -> void:
 	for h in all_households:
 		if not (h and is_instance_valid(h)) or h.inv == null:
 			continue
-		if h.has_meta("merchant"):
-			# A merchant with no deal for a few days eats from a garden plot meanwhile.
-			if int(h.get_meta("days_since_trade", 0)) >= 3 and h.inv.get_qty("bread") < GARDEN_BREAD_KEEP:
-				h.inv.add("bread", 1)
-			continue
+		var quiet_merchant: bool = h.has_meta("merchant") and int(h.get_meta("days_since_trade", 0)) >= 2
 		var own_build: bool = h.has_meta("builds_house") and not h.has_meta("hired_builder") \
 				and not (h.has_meta("employer") and is_instance_valid(h.get_meta("employer")))
-		if not is_idle(h) and not own_build:
-			if h.has_meta("cottager"):
-				h.remove_meta("cottager")
-			continue
-		if is_idle(h):
+		var idle: bool = is_idle(h)
+		if idle:
 			idle_count += 1
-		h.set_meta("cottager", true)
+			h.set_meta("cottager", true)
+		elif h.has_meta("cottager"):
+			h.remove_meta("cottager")
+		if not (idle or own_build or quiet_merchant):
+			if h.has_meta("garden"):
+				h.remove_meta("garden")
+			continue
+		# Living off the plot: enough bread in the house to catch up a missed meal, deadwood
+		# for the hearth, and no coins spent on either (HouseholdJob reads "garden"). A merchant
+		# with no deal for two days lives this way too, so a quiet spell does not eat the
+		# money they trade with (both merchants went broke and left town by day 42 before).
+		h.set_meta("garden", true)
 		if h.inv.get_qty("bread") < GARDEN_BREAD_KEEP:
-			h.inv.add("bread", GARDEN_BREAD_KEEP - h.inv.get_qty("bread"))   # enough to catch up a missed meal
+			h.inv.add("bread", GARDEN_BREAD_KEEP - h.inv.get_qty("bread"))
 		if h.inv.get_qty("bread") > 0:
 			h.consecutive_failed_food_days = 0
 			h.days_in_survival_mode = 0

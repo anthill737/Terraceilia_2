@@ -62,7 +62,8 @@ func get_job_inspector_data() -> Dictionary:
 			state_str = "traveling→" + (route.target.name if route.target else "?")
 		elif agent.pending_target != null:
 			state_str = phase_str + " (waiting→" + agent.pending_target.name + ")"
-	d["state"] = state_str
+	d["state"] = get_status_text()   # plain words for the inspector (was AT_HOME (waiting->Field1))
+	d["state_raw"] = state_str
 	d["bread_consumed"] = bread_consumed
 	d["effective_reserve"] = effective_reserve_target
 	d["failed_food_days"] = consecutive_failed_food_days
@@ -204,6 +205,8 @@ func _on_wait_finished() -> void:
 
 
 func attempt_buy_bread() -> void:
+	if agent.has_meta("garden") and inv != null and inv.get_qty("bread") > 0:
+		return   # living off the plot: no coins spent on bread while there is some in the house
 	if market and wallet and inv:
 		var current_bread: int = inv.get_qty("bread")
 		var hunger_ratio: float = float(hunger.hunger_days) / float(hunger.hunger_max_days) if hunger != null and hunger.hunger_max_days > 0 else 1.0
@@ -253,6 +256,8 @@ func consume_bread_at_home() -> void:
 func needs_food_trip() -> bool:
 	if inv == null or hunger == null:
 		return false
+	if agent.has_meta("garden"):
+		return inv.get_qty("bread") == 0 or inv.get_qty("firewood") == 0   # only when the plot has failed them
 	if needs_firewood():
 		return true
 	if agent.current_tick - last_market_trip_tick < market_trip_cooldown_ticks:
@@ -336,8 +341,11 @@ func _check_idle_guard() -> void:
 
 
 func get_status_text() -> String:
-	if work_site != null and route.target == work_site:
-		return work_kind if route.is_waiting else "Going to work"
+	if work_site != null and is_instance_valid(work_site):
+		if route.target == work_site:
+			return work_kind if route.is_waiting else "Going to work"
+		if route.target == null and agent.global_position.distance_to(work_site.global_position) < 12.0:
+			return work_kind   # standing at the workplace between rounds
 	if route.target == market_location:
 		if route.is_waiting:
 			return "Waiting at Market"

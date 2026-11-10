@@ -158,6 +158,17 @@ func _ready() -> void:
 
 
 func _on_starved(_agent_name: String) -> void:
+	# Hunger is at 0 with no bread in the house. Someone holding the price of a loaf while the
+	# market has bread buys one and eats it on the spot (they were often paid that same
+	# morning and had no chance to shop). Starving is for people with no bread to be had.
+	if market != null and wallet != null and hunger != null and market.bread > 0 and wallet.money >= market.bread_price:
+		if market.sell_bread_to_household(self, 1) > 0:
+			hunger.is_starving = false
+			hunger.hunger_days = hunger.eat_restore_days
+			log_event("Bought a loaf with the last of their strength and ate it.")
+			if event_bus:
+				event_bus.emit_log("%s was at the end of their hunger, bought a loaf and ate it" % name)
+			return
 	log_event("Died of starvation.")
 	if event_bus:
 		event_bus.emit_log("STARVATION: %s died (hunger at 0, no bread)" % name)

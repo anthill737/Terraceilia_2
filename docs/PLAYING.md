@@ -3,8 +3,11 @@
 1. Open Godot 4.6.1 and import `project.godot` from this folder.
 2. Press F5 (or the play button). The main scene is `scenes/Main.tscn`.
 
-The window opens on village 1. Two villages run at once; trade between them is off until you
-press "Trade: OFF".
+The window opens on village 1. Two villages run at once and their merchants trade between
+them from the start (the Trade button turns that off).
+
+The game behaves the same at every speed. A day is about 27 seconds at 1x and about 3 seconds
+at 10x. How the town works is in docs/WORKING_TOWN.md.
 
 ## What you're looking at
 
@@ -16,11 +19,17 @@ press "Trade: OFF".
   An outline with a yellow bar is a house being built; the bar is wood bought then days worked.
   The name under a house is who lives there.
 - People are the small squares with a hunger bar: green farmer, orange baker, brown woodworker,
-  pink household. They walk between home, market and work.
+  pink household, light blue merchant. They walk between home, market and work. A hired hand
+  walks to the field, bakery or yard; a builder to the building site; a servant to the
+  master's house; a merchant to the other village and back.
+- Homes grow as their owners improve them: a wing for a house, a second for a fine house, a
+  tower for a hall. A yellow bar under a home means it is being improved.
 
 The top panel shows the selected village: people by trade, houses, market stock and prices
-(bread, wheat, firewood) and the town purse. Click a person to see their money, food,
-firewood, home (owns or rents, from whom, days behind on rent), and hands they employ.
+(bread, wheat, firewood: the prices people pay), the town purse, how many people are idle, and
+any trouble under way (blight, a bakery fire, a hard frost, rats in the store). Click a person
+to see their money, food, firewood, home (owns or rents, from whom, days behind on rent), what
+they do for a living and who for, and hands or servants they employ.
 
 ## Controls
 
@@ -28,15 +37,16 @@ firewood, home (owns or rents, from whom, days behind on rent), and hands they e
 - Left click a person: inspect them.
 - Page Up / Page Down (or the << >> buttons): game speed, 0.1x to 10x.
 - P or the Pause button: pause. Space or "Center": back to the selected village.
+- M: the merchants panel (trips, profit, last deal).
 - "Village 1" / "Village 2": jump to a village. "World": see both.
 - Field / Farmer / Baker / Household buttons: place one by clicking the map (Esc cancels).
 
 ## Known gaps
 
-- Houses are drawn in a grid; there is no building animation, only the progress bar.
-- Farmer hands work by multiplying the harvest, so you won't see them in the fields.
-- Lots of newcomers still go broke and leave (about 30 per village over 120 days of testing):
-  there isn't enough paid work yet.
-- With one baker, bread can climb past $6 when demand outruns the oven; the baker gets rich
-  and poor households can't buy. Nothing caps it, by design: demand sets the price.
-- Wheat still aims for a fixed 45 pile, so it sits at its 1.00 floor with a big pile.
+- With only bread and firewood to buy, about a quarter of the people are on garden plots at any
+  time. More trades (ale, iron and tools, cloth) are the way to more work.
+- Wheat sits at its 1.00 floor with a full store: it costs about 0.60 to grow.
+- Houses are drawn in a grid; building shows as a progress bar.
+- Nothing caps the bread price, by design: demand sets it. After a bakery fire it can pass $5
+  for a week or two before it settles.
+- Farmers and bakers live at the farmhouse and bakery, not in the house with their name on it.

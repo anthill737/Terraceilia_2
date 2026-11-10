@@ -40,6 +40,11 @@ const MAX_LEVEL: int = 99                       # no real limit: there is always
 const MAX_IMPROVING: int = 2          # homes being improved at once in one village
 const LEVEL_NAMES: Array = ["", "cottage", "house", "fine house", "hall", "great hall", "manor"]
 const OWNER_WAGE_DAYS: float = 10.0   # a business owner keeps this many days of wages per hand (and one more) before improving
+## Servants: someone who owns the house they live in, once it is more than a cottage, keeps a
+## servant when they can afford one (two in a hall or bigger). The servant is a household
+## with no other work, paid the daily wage from the first day, who spends the day at the
+## master's house. It is the other way profit goes back into the town, and a steady one.
+const SERVANT_START_DAYS: float = 15.0   # wages in hand, beyond the owner's reserve, before taking one on
 const STALL_DAYS: int = 20             # a half-built house with no wood or worker this long is given up
 const WOOD_PILE_KEEP: float = 1.0     # builders only buy firewood above the full target: heating first
 const HOUSE_ORIGIN := Vector2(440, 400)  # village-local spot of the first house
@@ -53,7 +58,7 @@ var event_bus = null
 var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid, pos, node}
 var next_id: int = 1
 var initialized: bool = false
-var stats := {"improve_started": 0, "improved": 0, "abandoned": 0, "idle_days": 0, "self_days": 0, "hired_days": 0, "moved_into_own": 0, "wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
+var stats := {"servant_days": 0, "servant_wages": 0.0, "improve_started": 0, "improved": 0, "abandoned": 0, "idle_days": 0, "self_days": 0, "hired_days": 0, "moved_into_own": 0, "wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
 
 
 func _people() -> Array:
@@ -236,6 +241,7 @@ func on_day(day: int) -> void:
 			h.occupant = null
 			h.unpaid = 0
 		if h.owner != null and not people.has(h.owner):
+			_release_servants(h, "their master is gone")
 			if h.get("up") != null:
 				_release_worker(h.up)
 				h.up = null
@@ -420,6 +426,8 @@ func on_day(day: int) -> void:
 			stats.improved += 1
 			_log("[HOUSING] day=%d %s finished improving house %d: it is now a %s" % [day, ob.name, h.id, level_name(int(h.level))])
 
+	_servants(day, wage)
+
 	_sync_homes()
 
 	if day % 5 == 0:
@@ -555,6 +563,77 @@ func _send_to_site(w, spot) -> void:
 		j.set_work_site(spot)
 
 
+func servants_wanted(h: Dictionary) -> int:
+	var lvl: int = int(h.get("level", 1))
+	if not h.done or h.owner == null or h.occupant != h.owner or lvl < 2:
+		return 0
+	return 2 if lvl >= 4 else 1
+
+
+func servant_count() -> int:
+	var n: int = 0
+	for h in houses:
+		n += (h.get("servants", []) as Array).size()
+	return n
+
+
+func _release_servants(h: Dictionary, why: String) -> void:
+	for s in h.get("servants", []):
+		_release_servant(s, why)
+	h.servants = []
+
+
+func _release_servant(s, why: String) -> void:
+	if s == null or not is_instance_valid(s):
+		return
+	for k in ["employer", "servant"]:
+		if s.has_meta(k):
+			s.remove_meta(k)
+	_send_to_site(s, null)
+	if s.has_method("log_event"):
+		s.log_event("No longer a servant: %s." % why)
+
+
+## Daily: pay each servant, let them go when the master cannot pay or has slipped under
+## their reserve, and take one on when the master has money to spare and someone is free.
+func _servants(day: int, wage: float) -> void:
+	for h in houses:
+		var kept: Array = []
+		var master = h.owner
+		var want: int = servants_wanted(h) if master != null and is_instance_valid(master) else 0
+		for s in h.get("servants", []):
+			if s == null or not is_instance_valid(s) or not village.households.has(s) or s.get_meta("employer", null) != master:
+				continue   # died, left, or changed trade
+			if kept.size() >= want or master.wallet.money < _reserve_of(master) or not _pay(master, s, wage):
+				_release_servant(s, "%s could no longer keep one" % master.name)
+				_log("[SERVANT] day=%d %s lets %s go ($%.1f in hand)" % [day, master.name, s.name, master.get_cash()])
+				continue
+			stats.servant_days += 1
+			stats.servant_wages += wage
+			kept.append(s)
+			_send_servant(s, h, master)
+		if kept.size() < want and master.wallet != null \
+				and master.wallet.money >= _reserve_of(master) + SERVANT_START_DAYS * wage * float(kept.size() + 1):
+			var s2 = village.labor_market._free_hand() if village.labor_market else null
+			if s2 != null and s2 != master and _pay(master, s2, wage):
+				s2.set_meta("employer", master)
+				s2.set_meta("servant", true)
+				kept.append(s2)
+				_send_servant(s2, h, master)
+				stats.servant_days += 1
+				stats.servant_wages += wage
+				if s2.has_method("log_event"):
+					s2.log_event("Taken on as a servant by %s at $%.2f a day." % [master.name, wage])
+				_log("[SERVANT] day=%d %s takes on %s as a servant at $%.2f a day ($%.1f in hand)" % [day, master.name, s2.name, wage, master.get_cash()])
+		h.servants = kept
+
+
+func _send_servant(s, h: Dictionary, master) -> void:
+	var j = s.get("current_job")
+	if j is HouseholdJob and h.get("node") != null:
+		j.set_work_site(h.node, "Keeping house for %s" % master.name)
+
+
 func summary() -> Dictionary:
 	var done := 0
 	var empty := 0
@@ -631,5 +710,11 @@ func describe(a) -> String:
 				int(home.up.wood), int(home.up.wood_need), int(home.up.work), int(home.up.days_need)])
 	if a.has_meta("builds_house"):
 		parts.append("Working on building house %d." % int(a.get_meta("builds_house")))
+	if not home.is_empty() and home.owner == a and not (home.get("servants", []) as Array).is_empty():
+		var names: Array = []
+		for s in home.servants:
+			if is_instance_valid(s):
+				names.append(str(s.name))
+		parts.append("Keeps a servant: %s." % ", ".join(names))
 	parts.append("A house is worth $%.0f (wood $%.0f + 5 days' wages $%.0f)." % [house_value(), wood_cost(), labour_cost()])
 	return " ".join(parts)

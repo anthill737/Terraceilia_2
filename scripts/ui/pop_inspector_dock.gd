@@ -264,7 +264,12 @@ func refresh(selected_pop: Node) -> void:
 			_meta_number(selected_pop, "trade_profit_total"),
 			last_deal if last_deal != "" else "no deal yet"]
 	elif selected_pop.has_meta("employer") and is_instance_valid(selected_pop.get_meta("employer", null)):
-		living = "Works for %s (hired hand)." % _person_label(selected_pop.get_meta("employer", null))
+		var boss = selected_pop.get_meta("employer", null)
+		var boss_role: String = str(boss.get("current_role")).to_lower() if boss.get("current_role") != null else ""
+		if selected_pop.has_meta("servant"):
+			living = "Servant in the house of %s, the %s." % [_person_label(boss), boss_role]
+		else:
+			living = "Hired hand: works for %s, the %s." % [_person_label(boss), boss_role]
 	elif selected_pop.has_meta("cottager") and selected_pop.get_meta("cottager", false):
 		living = "No work: lives off a garden plot and gathered firewood."
 

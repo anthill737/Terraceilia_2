@@ -52,7 +52,7 @@ var last_diagnostic_day: int = -1
 var bread_produced_today: int = 0
 var oven_fuel: int = 0   # loaves the firewood now in the oven can still bake
 
-var oven_capacity_per_day: int = 10  # loaves a baker makes alone (was 15, which fed the whole town with no help); 15 and 17 with hands
+var oven_capacity_per_day: int = 12  # loaves a baker makes alone (was 15, which fed the whole town with no help); 18 and 21 with hands
 var maintenance_cost_per_day: float = 0.3
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
@@ -132,7 +132,8 @@ func get_job_inspector_data() -> Dictionary:
 			state_str = "traveling→" + (route.target.name if route.target else "?")
 		elif agent.pending_target != null:
 			state_str = phase_str + " (waiting→" + agent.pending_target.name + ")"
-	d["state"] = state_str
+	d["state"] = get_status_text()
+	d["state_raw"] = state_str
 	d["wheat"] = inv.get_qty("wheat") if inv else 0
 	d["flour"] = inv.get_qty("flour") if inv else 0
 	d["neg_cashflow_days"] = consecutive_days_negative_cashflow

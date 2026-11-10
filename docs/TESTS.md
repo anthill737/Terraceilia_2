@@ -1,7 +1,8 @@
 # Tests
 
-All of them run the real game (Main.tscn) at 10x speed with 240 physics steps a second, so
-people walk and trade as in play. Run with Godot 4.6.1, headless, from the project folder.
+All of them run the real game (Main.tscn) at 10x speed, so people walk and trade as in play.
+Add `--fixed-fps 30 --disable-vsync` before the scene to run about five times faster with the
+same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, from the project folder.
 
 - `res://scenes/TestSurvival.tscn -- --days=120 --trade [--village-seeds=a,b] [--result=x.json]
   [--events=x.txt]`: both villages for N days; checks that no village dies out, loses a quarter
@@ -15,9 +16,18 @@ people walk and trade as in play. Run with Godot 4.6.1, headless, from the proje
   The old version stepped the clock by hand with a quarter of a second of walking per game day,
   so nobody reached the market, everyone starved, and it still printed PASS.
 - `res://scenes/TestFeatures.tscn`: sets up each feature on purpose in village 1 and checks it
-  happens on its own: a renter builds their own house working on site and moves in; a homeless
-  person with money buys a house; a business owner's house gets a hired worker who walks to the
-  site, is paid daily and finishes it; someone holding bread at hunger 0 eats and lives; a
-  farmer with no bread at hunger 0 dies and their coins go to the town purse.
-- `res://scenes/TestTradeMigration.tscn`: forces a price gap and checks farmers and bakers carry
-  goods to the other village and come back.
+  happens on its own (17 checks): a renter builds their own house working on site and moves in;
+  a homeless person with money buys a house; a business owner's house gets a hired worker who
+  walks to the site, is paid daily and finishes it; the merchant carries bread to the other
+  village and sells it at a profit; a hired hand walks to the workplace; an owner with money to
+  spare improves their home; an owner with a proper house keeps a paid servant who works there;
+  people with no work eat from a garden plot and keep their home; someone holding bread at
+  hunger 0 eats and lives; a farmer with no bread at hunger 0 dies and their coins go to the
+  town purse.
+- `res://scenes/TestShocks.tscn`: sets off a bakery fire and rats in village 1 and blight in
+  village 2 on day 15, and checks (9 checks) that the price of the hit good rose or its stock
+  fell hard, the trouble ended, the price settled back within 25%, nobody starved, the village
+  held, and a merchant carried goods between the villages.
+- `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
+  goods when a price gap is forced. In normal play they stay home and the merchants trade; this
+  test switches that on for itself.

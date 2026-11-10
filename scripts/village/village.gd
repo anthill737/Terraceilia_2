@@ -751,7 +751,7 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 		var h_idx: int = households.find(ag)
 		if h_idx != -1:
 			households.remove_at(h_idx)
-		for k in ["employer", "builds_house", "hired_builder", "cottager"]:
+		for k in ["employer", "servant", "builds_house", "hired_builder", "cottager", "garden"]:
 			if ag.has_meta(k):
 				ag.remove_meta(k)
 		ag.set_meta("purse_given", true)   # they have a purse already; none is minted

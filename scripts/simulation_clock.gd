@@ -5,28 +5,37 @@ signal ticked(tick: int)
 signal speed_changed(new_speed: float)
 
 var tick: int = 0
-var tick_rate: float = 1.0
+## Game seconds in one tick. Ten ticks make a day, so a day is about 27 seconds at 1x and
+## about 3 seconds at 10x.
+##
+## Ticks are counted on the physics clock, so people walk the same distance per tick at every
+## speed. Before, ticks came from a wall-clock timer. At 10x on a busy machine each frame ran
+## the most physics it is allowed (64 steps, 2.67 game seconds of walking) and gave one tick,
+## and the whole economy was tuned and tested in that state. At 1x to 3x, or recording in
+## fixed steps, people got 1 game second of walking per tick: they could not finish their
+## rounds and the town starved. Now every speed gives the 2.67 the economy was built on.
+const TICK_SECONDS: float = 64.0 / 24.0
+var tick_rate: float = TICK_SECONDS
 var speed_multiplier: float = 1.0
 const MIN_SPEED: float = 0.1
 const MAX_SPEED: float = 10.0
-
-var timer: Timer
+## Tests that step the villages by hand switch the clock off.
+var running: bool = true
+var _acc: float = 0.0
 
 
 func _ready() -> void:
-	timer = Timer.new()
-	timer.wait_time = tick_rate
-	timer.autostart = true
-	timer.timeout.connect(_on_timer_timeout)
-	add_child(timer)
-	
-	# Initialize engine time scale
-	Engine.time_scale = speed_multiplier
+	set_speed(speed_multiplier)
 
 
-func _on_timer_timeout() -> void:
-	tick += 1
-	ticked.emit(tick)
+func _physics_process(delta: float) -> void:
+	if not running:
+		return
+	_acc += delta   # game time: the physics step already includes Engine.time_scale
+	while _acc >= TICK_SECONDS:
+		_acc -= TICK_SECONDS
+		tick += 1
+		ticked.emit(tick)
 
 
 func set_speed(multiplier: float) -> void:

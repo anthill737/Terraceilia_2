@@ -12,6 +12,7 @@ var home_location: Node2D = null
 ## Where this person works today, when they are building a house (Housing). While set, the
 ## day is spent there instead of at home; trips to market return to it.
 var work_site: Node2D = null
+var work_kind: String = "Building a house"   # what they do there (status text)
 var market_location: Node2D = null
 
 # Travel Config (tunable survival triggers)
@@ -76,8 +77,9 @@ const STARTING_CASH: float = 60.0    # batch 3: a household's purse (was 500)
 const HOME_FIREWOOD: int = 3         # firewood kept for the hearth
 
 func activate() -> void:
-	if wallet and wallet.money <= 0.0:
+	if wallet and wallet.money <= 0.0 and not agent.has_meta("purse_given"):
 		wallet.credit(STARTING_CASH)
+	agent.set_meta("purse_given", true)
 	if inv:
 		inv.items = {"bread": 0, "firewood": 3}
 	agent._health_bar_y = -24.0
@@ -141,7 +143,9 @@ func day_spot() -> Node2D:
 	return home_location
 
 
-func set_work_site(spot: Node2D) -> void:
+func set_work_site(spot: Node2D, kind: String = "Building a house") -> void:
+	if spot != null:
+		work_kind = kind
 	if spot == work_site:
 		return
 	var old: Node2D = day_spot()
@@ -227,7 +231,11 @@ func attempt_buy_bread() -> void:
 		else:
 			# Count each day once: several failed trips in one day are one bad day (batch 2).
 			var today: int = hunger.calendar.day_index if hunger and hunger.calendar else -2
-			if today != _last_failed_food_day or today == -2:
+			# Only a day with no bread in the house is a hungry day; failing to top up a
+			# reserve is not.
+			if inv.get_qty("bread") > 0:
+				consecutive_failed_food_days = 0
+			elif today != _last_failed_food_day or today == -2:
 				consecutive_failed_food_days += 1
 				_last_failed_food_day = today
 			if event_bus:
@@ -329,12 +337,14 @@ func _check_idle_guard() -> void:
 
 func get_status_text() -> String:
 	if work_site != null and route.target == work_site:
-		return "Building a house" if route.is_waiting else "Going to build"
+		return work_kind if route.is_waiting else "Going to work"
 	if route.target == market_location:
 		if route.is_waiting:
 			return "Waiting at Market"
 		return "Going to Market"
 	elif route.target == home_location:
+		if route.is_waiting and agent.has_meta("cottager"):
+			return "Tending the garden plot"
 		if route.is_waiting:
 			if inv.get_qty("bread") > 0:
 				return "Eating"

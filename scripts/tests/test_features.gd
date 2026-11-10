@@ -10,6 +10,11 @@ extends Node
 ##   4. eating at 0: someone whose hunger runs out while holding a loaf eats it and lives.
 ##   5. starving: a farmer whose hunger runs out with no bread dies and is removed; their coins
 ##      go to the town purse.
+##   6. merchant: with bread dear and gone in village 2, village 1's merchant buys bread at
+##      home, walks it to village 2 and sells it there at a profit.
+##   7. hands: a hired hand walks to the employer's field, bakery or yard.
+##   8. improving: an owner with money to spare improves their home with logs and a builder.
+##   9. cottagers: someone with no work eats from a garden plot and is not put out for rent.
 ##
 ##   godot --headless --path . res://scenes/TestFeatures.tscn
 ## Exit code 0 when every check passes.
@@ -40,6 +45,16 @@ class Probe extends Node:
 	var job_start_day := -1
 	var job_owner_cash := 0.0
 	var job_done_day := -1
+	# 6. merchant
+	var v2 = null
+	var merchant = null
+	var merchant_seen_abroad := false
+	var merchant_cash := 0.0
+	# 7. hands
+	var hand_near := 999999.0
+	var hand_name := ""
+	# 8. improving
+	var improver = null
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -57,7 +72,9 @@ class Probe extends Node:
 		var world := main.get_node_or_null("World")
 		if world == null or world.villages.is_empty():
 			return
+		world.set_meta("no_shocks", true)   # troubles have their own test
 		v = world.villages[0]
+		v2 = world.villages[1] if world.villages.size() > 1 else null
 		if v == null or v.calendar == null or v.housing == null or not v.housing.initialized:
 			return
 		var day: int = v.calendar.day_index
@@ -66,7 +83,7 @@ class Probe extends Node:
 			stage = 1
 		if stage == 1:
 			_watch(day)
-			if (_own_done() and _job_finished()) or day >= MAX_DAYS:
+			if (_own_done() and _job_finished() and _extras_done()) or day >= MAX_DAYS:
 				_stage_hunger(day)
 				stage = 2
 				return
@@ -86,7 +103,7 @@ class Probe extends Node:
 				continue
 			if a.has_meta("employer") and is_instance_valid(a.get_meta("employer")):
 				continue
-			if a.has_meta("builds_house"):
+			if a.has_meta("builds_house") or a.has_meta("merchant"):
 				continue
 			return a
 		return null
@@ -99,7 +116,7 @@ class Probe extends Node:
 			if not is_instance_valid(a):
 				continue
 			var home: Dictionary = hs._home_of(a)
-			if not home.is_empty() and home.owner != a and not (a.has_meta("employer") and is_instance_valid(a.get_meta("employer"))):
+			if not home.is_empty() and home.owner != a and not a.has_meta("merchant") and not (a.has_meta("employer") and is_instance_valid(a.get_meta("employer"))):
 				own = a
 				break
 		if own == null:
@@ -118,6 +135,11 @@ class Probe extends Node:
 			print("[FEATURES] day %d: %s gets $%.0f to build a home of their own" % [day, own.name, extra])
 		# 2. Someone else loses their home and gets money to buy one; the town has one empty.
 		buyer = _free_household([own])
+		if buyer == null:   # everyone has work: any household that is not the merchant will do
+			for a in v.households:
+				if is_instance_valid(a) and a != own and not a.has_meta("merchant") and not a.has_meta("builds_house"):
+					buyer = a
+					break
 		if buyer != null:
 			var home2: Dictionary = hs._home_of(buyer)
 			if not home2.is_empty():
@@ -135,6 +157,22 @@ class Probe extends Node:
 			job_start_day = day
 			job_owner_cash = boss.get_cash()
 			print("[FEATURES] day %d: %s starts house %d and must hire someone" % [day, boss.name, job.id])
+		# 6. Bread is gone and dear in village 2; village 1 has plenty.
+		for a in v.households:
+			if is_instance_valid(a) and a.has_meta("merchant"):
+				merchant = a
+		if merchant != null and v2 != null:
+			v.market.bread = maxi(v.market.bread, v.market.bread_target + 20)
+			v2.market.bread = 0
+			v2.market.bread_price = v.market.bread_price * 1.8
+			merchant_cash = merchant.get_cash()
+			print("[FEATURES] day %d: bread $%.2f with %d on the shelf in village 1, $%.2f and none in village 2; %s has $%.0f" % [
+				day, v.market.bread_price, v.market.bread, v2.market.bread_price, merchant.name, merchant_cash])
+		# 8. The woodworker (owns the house they live in) gets money to spare.
+		improver = v.all_woodworkers[0] if not v.all_woodworkers.is_empty() else null
+		if improver != null:
+			improver.wallet.credit(500.0)
+			print("[FEATURES] day %d: %s has $%.0f to spare" % [day, improver.name, improver.get_cash()])
 
 	func _watch(day: int) -> void:
 		var hs = v.housing
@@ -151,6 +189,19 @@ class Probe extends Node:
 					print("[FEATURES] day %d: %s's house %d wood %d work %d, worker %s, %s has employer: %s" % [
 						day, own.name, hh.id, hh.wood, hh.work, wk.name if wk != null and is_instance_valid(wk) else "none",
 						own.name, own.has_meta("employer") and is_instance_valid(own.get_meta("employer"))])
+		# 6. merchant abroad
+		if merchant != null and is_instance_valid(merchant) and v2 != null and merchant.current_village_ref == v2:
+			merchant_seen_abroad = true
+		# 7. a hired hand at the workplace
+		for a in v.households:
+			if not is_instance_valid(a) or not (a.has_meta("employer") and is_instance_valid(a.get_meta("employer"))):
+				continue
+			var hj = a.current_job
+			if hj is HouseholdJob and hj.work_site != null and is_instance_valid(hj.work_site):
+				var dd: float = a.global_position.distance_to(hj.work_site.global_position)
+				if dd < hand_near:
+					hand_near = dd
+					hand_name = "%s for %s (%s)" % [a.name, a.get_meta("employer").name, hj.work_kind]
 		# 3. hired worker
 		if not job.is_empty():
 			var w = job.get("worker")
@@ -171,6 +222,10 @@ class Probe extends Node:
 
 	func _job_finished() -> bool:
 		return job.is_empty() or job.done
+
+	func _extras_done() -> bool:
+		var traded: bool = merchant == null or not is_instance_valid(merchant) or int(merchant.get_meta("trade_trips", 0)) > 0
+		return traded and v.housing.stats.improved > 0 and hand_near < 20.0 and v.calendar.day_index >= 12
 
 	func _stage_hunger(day: int) -> void:
 		var hs = v.housing
@@ -202,10 +257,38 @@ class Probe extends Node:
 		_check("the worker goes back to normal life afterwards", released or job_worker == null, "")
 		_check("builders paid wages", hs.stats.wages_paid > 0.0, "$%.2f paid over %d hired days" % [hs.stats.wages_paid, hs.stats.hired_days])
 
+		# 6. merchant
+		var trips: int = int(merchant.get_meta("trade_trips", 0)) if merchant != null and is_instance_valid(merchant) else 0
+		var mprofit: float = float(merchant.get_meta("trade_profit_total", 0.0)) if merchant != null and is_instance_valid(merchant) else 0.0
+		_check("the merchant carried goods to the other village and sold them", trips > 0 and merchant_seen_abroad,
+			"%d sale(s), seen in village 2: %s, last: %s" % [trips, merchant_seen_abroad,
+				str(merchant.get_meta("trade_last", "")) if merchant != null and is_instance_valid(merchant) else "no merchant"])
+		_check("the merchant made money on it", mprofit > 0.0, "profit $%.2f, village 1 trade so far: %d units" % [mprofit, v.trade_stats.units])
+		# 7. hands
+		_check("a hired hand walked to the employer's workplace", hand_near < 20.0,
+			"%s, closest %.0f px" % [hand_name if hand_name != "" else "nobody hired", hand_near])
+		# 8. improving
+		var better := ""
+		for hh in hs.houses:
+			if hh.done and int(hh.get("level", 1)) >= 2 and hh.owner != null and is_instance_valid(hh.owner):
+				better += "%s's home is now a %s; " % [hh.owner.name, Housing.level_name(int(hh.level))]
+		_check("an owner with money to spare improved their home", hs.stats.improved > 0 and better != "",
+			"%simprovements finished %d, started %d" % [better, hs.stats.improved, hs.stats.improve_started])
+		# 9. cottagers
+		var cott := 0
+		var cott_ok := 0
+		for a in v.households:
+			if is_instance_valid(a) and a.has_meta("cottager"):
+				cott += 1
+				var ch: Dictionary = hs._home_of(a)
+				if a.inv.get_qty("bread") > 0 and a.hunger.hunger_days >= 3 and (ch.is_empty() or int(ch.get("unpaid", 0)) == 0):
+					cott_ok += 1
+		_check("people with no work eat from a garden plot and keep their home", cott == cott_ok,
+			"%d without work, %d fed and housed, nobody left town: %s" % [cott, cott_ok, v.labor_market.idle_count >= 0])
 		# 4. eating at 0: a household holding one loaf, hunger about to run out, already ate today.
 		var eater = null
 		for a in v.households + v.all_woodworkers:
-			if a != null and is_instance_valid(a) and not [own, buyer, job_worker].has(a):
+			if a != null and is_instance_valid(a) and not [own, buyer, job_worker].has(a) and not a.has_meta("merchant"):
 				eater = a
 				break
 		if eater != null:

@@ -225,6 +225,8 @@ func update_daily(day: int) -> void:
 	# Batch 2: hiring hands is how households earn, so it runs in both modes; the modes now
 	# differ only in whether farmers and bakers may change trade.
 	_update_hands(day)
+	# People with no work live off a garden plot and gathered wood (docs/WORKING_TOWN.md).
+	_update_cottagers(day)
 	# Batch 3: every hearth burns one firewood a day.
 	_update_firewood(day)
 
@@ -448,6 +450,8 @@ func _log_career_eval(day: int, agent: Node, ce) -> void:
 
 ## Evaluate a single household: migration first (with grace gate), then role switch.
 func _evaluate_household(h: Node, day: int) -> void:
+	if h.has_meta("merchant"):
+		return   # merchants keep their trade; the leave and new-business rules are for households
 	# Tick down switch cooldown
 	if h.switch_cooldown_days > 0:
 		h.switch_cooldown_days -= 1
@@ -590,7 +594,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 		if best_u <= 0.0:
 			_log_career_blocked(day, pop_id, best_role, "margin_zero", 0, h)
 			return
-	elif best_u < u_current * (1.0 + margin):
+	elif best_u < u_current + absf(u_current) * margin:
 		_log_career_blocked(day, pop_id, best_role, "margin", int(margin * 100.0), h)
 		return
 
@@ -775,8 +779,16 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 ## output at today's prices is worth more than the wage. Households without an employer are
 ## the labour pool.
 var wages_paid_total: float = 0.0   # all wages ever paid in this village (tests)
+## Employers who wanted to take someone on today and found nobody free.
+var open_jobs: int = 0
+## People in town with no work today (cottagers). Newcomers only come when this is small.
+var idle_count: int = 0
+const GARDEN_BREAD_KEEP: int = 2     # a cottager's garden keeps this much food in the house
+const GATHERED_WOOD_PER_DAY: int = 1 # deadwood a cottager gathers: enough for their own hearth
+const GATHERED_WOOD_KEEP: int = 3    # (selling it flooded the firewood market and ruined the woodworker)
 
 func _update_hands(day: int) -> void:
+	open_jobs = 0
 	var wage: float = daily_wage(market)
 	var paid: float = 0.0
 	var employed: int = 0
@@ -785,7 +797,7 @@ func _update_hands(day: int) -> void:
 			continue
 		var hands: Array = p.get_meta("hands", [])
 		hands = hands.filter(func(h): return is_instance_valid(h) and all_households.has(h))
-		var cash_now: float = p.get_cash()
+		var cash_now: float = p.get_cash() + float(p.get_meta("invested_total", 0.0))
 		var prev: float = float(p.get_meta("hand_prev_cash", cash_now))
 		var falling: int = int(p.get_meta("hand_falling_days", 0))
 		falling = falling + 1 if cash_now < prev - 0.01 else 0
@@ -800,6 +812,7 @@ func _update_hands(day: int) -> void:
 				paid += wage
 				wages_paid_total += wage
 				kept.append(h)
+				_send_to_work(h, p)
 			else:
 				_let_go(p, h, day, "could not pay")
 		hands = kept
@@ -814,12 +827,24 @@ func _update_hands(day: int) -> void:
 				if h != null:
 					hands.append(h)
 					h.set_meta("employer", p)
+					_send_to_work(h, p)
+					# Paid from the first day: a cottager taken on today stops gardening today, and
+					# with the first wage a day late a hungry one starved on the way to the job.
+					if p.wallet and h.wallet and p.wallet.money >= wage:
+						p.wallet.debit(wage)
+						h.wallet.credit(wage)
+						p.cashflow_today_expense += wage
+						h.cashflow_today_income += wage
+						paid += wage
+						wages_paid_total += wage
 					if event_bus:
 						event_bus.emit_log("[HANDS] day=%d %s hired %s at $%.2f/day (extra output worth $%.2f)" % [day, p.name, h.name, wage, value])
 					if h.has_method("log_event"):
 						h.log_event("Taken on as a hand by %s at $%.2f a day." % [p.name, wage])
+				else:
+					open_jobs += 1   # work waiting and nobody free: a newcomer may come for it
 		p.set_meta("hands", hands)
-		p.set_meta("hand_prev_cash", p.get_cash())
+		p.set_meta("hand_prev_cash", p.get_cash() + float(p.get_meta("invested_total", 0.0)))
 		p.set_meta("hand_falling_days", falling)
 		employed += hands.size()
 	if day % 5 == 0:
@@ -888,7 +913,8 @@ func _update_firewood(day: int) -> void:
 				continue
 			var have: int = a.inv.get_qty("firewood")
 			if have > 0:
-				a.inv.items["firewood"] = have - 1
+				# In a hard frost a hearth burns twice the wood (Shocks).
+				a.inv.items["firewood"] = have - mini(have, 1 + (market.shock_extra_burn if market else 0))
 				a.set_meta("cold_days", 0)
 				continue
 			var n: int = int(a.get_meta("cold_days", 0)) + 1
@@ -921,6 +947,78 @@ func _woodworker_utility(ce) -> float:
 	return avg + firewood_scarcity_ema * 5.0 - 2.0 - float(ce.last_risk) * 3.0
 
 
+## A hired hand spends the working day at the employer's workplace: a field, the bakery or
+## the lumber yard (null: back to their own home).
+func _send_to_work(h, p) -> void:
+	if h == null or not is_instance_valid(h):
+		return
+	var j = h.get("current_job")
+	if not (j is HouseholdJob):
+		return
+	var spot: Node2D = null
+	var kind: String = ""
+	if p != null and is_instance_valid(p):
+		var pj = p.get("current_job")
+		if pj is FarmerJob:
+			for f in pj.fields:
+				if f != null and is_instance_valid(f) and f is Node2D:
+					spot = f
+					break
+			if spot == null:
+				spot = pj.house_node
+			kind = "Working in the fields"
+		elif pj is BakerJob:
+			spot = pj.bakery_location
+			kind = "Working at the bakery"
+		elif pj is WoodworkerJob:
+			spot = pj.yard_location
+			kind = "Cutting wood at the yard"
+	j.set_work_site(spot, kind)
+
+
+## True when `h` has no work today: no employer and not building a house.
+func is_idle(h) -> bool:
+	if h == null or not is_instance_valid(h):
+		return false
+	if h.has_meta("employer") and is_instance_valid(h.get_meta("employer")):
+		return false
+	return not h.has_meta("builds_house") and not h.has_meta("merchant")
+
+
+## Cottagers. Someone with no work does not sit and go broke: like a medieval cottager they
+## keep a garden plot (enough to eat, never more than GARDEN_BREAD_KEEP in the house) and
+## gather deadwood for their own hearth. They buy and sell nothing. It is a poor living; a wage is
+## better, and anyone hired stops gardening and buys from the market like everyone else.
+## This is how Victoria 3 (peasants on subsistence farms) and Banished (labourers) keep the
+## jobless alive without paying them.
+func _update_cottagers(_day: int) -> void:
+	idle_count = 0
+	for h in all_households:
+		if not (h and is_instance_valid(h)) or h.inv == null:
+			continue
+		if h.has_meta("merchant"):
+			# A merchant with no deal for a few days eats from a garden plot meanwhile.
+			if int(h.get_meta("days_since_trade", 0)) >= 3 and h.inv.get_qty("bread") < GARDEN_BREAD_KEEP:
+				h.inv.add("bread", 1)
+			continue
+		var own_build: bool = h.has_meta("builds_house") and not h.has_meta("hired_builder") \
+				and not (h.has_meta("employer") and is_instance_valid(h.get_meta("employer")))
+		if not is_idle(h) and not own_build:
+			if h.has_meta("cottager"):
+				h.remove_meta("cottager")
+			continue
+		if is_idle(h):
+			idle_count += 1
+		h.set_meta("cottager", true)
+		if h.inv.get_qty("bread") < GARDEN_BREAD_KEEP:
+			h.inv.add("bread", GARDEN_BREAD_KEEP - h.inv.get_qty("bread"))   # enough to catch up a missed meal
+		if h.inv.get_qty("bread") > 0:
+			h.consecutive_failed_food_days = 0
+			h.days_in_survival_mode = 0
+		if h.inv.get_qty("firewood") < GATHERED_WOOD_KEEP:
+			h.inv.items["firewood"] = h.inv.get_qty("firewood") + GATHERED_WOOD_PER_DAY + (market.shock_extra_burn if market else 0)
+
+
 ## The poorest household that has no employer.
 func _free_hand():
 	var best = null
@@ -929,8 +1027,8 @@ func _free_hand():
 			continue
 		if h.has_meta("employer") and is_instance_valid(h.get_meta("employer")):
 			continue
-		if h.has_meta("builds_house"):
-			continue   # busy building a house (Housing)
+		if h.has_meta("builds_house") or h.has_meta("merchant"):
+			continue   # busy building a house (Housing), or a merchant
 		if best == null or h.get_cash() < best.get_cash():
 			best = h
 	return best
@@ -940,6 +1038,7 @@ func _let_go(p: Node, h, day: int, why: String) -> void:
 	var hname: String = h.name if is_instance_valid(h) else "?"
 	if is_instance_valid(h):
 		h.remove_meta("employer")
+		_send_to_work(h, null)
 		if h.has_method("log_event"):
 			h.log_event("Let go by %s (%s)." % [p.name, why])
 	if event_bus:
@@ -950,6 +1049,7 @@ func _release_hands(p: Node, why: String) -> void:
 	for h in p.get_meta("hands", []):
 		if is_instance_valid(h):
 			h.remove_meta("employer")
+			_send_to_work(h, null)
 			if h.has_method("log_event"):
 				h.log_event("Out of work: %s." % why)
 	p.set_meta("hands", [])

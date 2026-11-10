@@ -20,6 +20,10 @@ var wheat_capacity: int = 90    # 2 x wheat_target
 var bread_capacity: int = 100   # 2 x bread_target
 # Villages differ (batch 2): set by World per village.
 var soil_mult: float = 1.0   # wheat per harvest
+## Troubles in force (scripts/village/shocks.gd): blight, an oven fire, a hard frost.
+var shock_harvest_mult: float = 1.0
+var shock_oven_mult: float = 1.0
+var shock_extra_burn: int = 0
 var oven_mult: float = 1.0   # loaves per oven day
 
 const SEED_PRICE: float = 0.5
@@ -1163,7 +1167,7 @@ func _adjust_wheat_price(day: int) -> void:
 		if wheat > wheat_prev and wheat >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
-			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 			inventory_nudge += recovery_adjustment
 		
 		new_price *= (1.0 + inventory_nudge)
@@ -1270,7 +1274,7 @@ func _adjust_bread_price(day: int) -> void:
 		if bread > bread_prev and bread >= upper_band:
 			# Inventory increased and above upper band (oversupply) -> apply downward adjustment
 			# Mirror the upward adjustment magnitude used during scarcity
-			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (1.0 - inv_ratio) * MAX_INVENTORY_NUDGE_PER_DAY)
+			var recovery_adjustment: float = -min(MAX_INVENTORY_NUDGE_PER_DAY, (inv_ratio - 1.0) * MAX_INVENTORY_NUDGE_PER_DAY)
 			inventory_nudge += recovery_adjustment
 		
 		new_price *= (1.0 + inventory_nudge)

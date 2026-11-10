@@ -13,6 +13,7 @@ var deplete_per_day: int = 1
 var auto_eat_enabled: bool = true
 var auto_eat_threshold_ratio: float = 0.5  # 50%
 var auto_eat_max_per_day: int = 1
+const RECOVER_AT: int = 3   # after the day's meal, hunger at or under this means a missed meal to make up
 
 # State
 var hunger_days: int = 5
@@ -58,6 +59,14 @@ func _on_day_changed(day: int) -> void:
 		if calendar != null:
 			try_auto_eat(calendar.tick)
 	
+	# Catching up: someone still hungry after the day's meal eats a second loaf if they have
+	# one. One loaf a day only ever held hunger where it was, so every missed meal was
+	# permanent: over a few hundred days people ratcheted down to their last day and one bad
+	# morning killed them.
+	if auto_eat_enabled and ate_today and hunger_days > 0 and hunger_days <= RECOVER_AT and inv != null and inv.remove(food_item, 1):
+		hunger_days = min(hunger_max_days, hunger_days + eat_restore_days)
+		if bus:
+			bus.emit_log("Day %d: %s ate a second loaf to catch up (hunger %d/%d)" % [day, agent_name, hunger_days, hunger_max_days])
 	# Last chance: anyone holding bread eats it before going hungry to the end.
 	if hunger_days <= 0 and inv != null and inv.remove(food_item, 1):
 		hunger_days = eat_restore_days

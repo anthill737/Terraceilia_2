@@ -11,8 +11,10 @@ var _wallet_ref: Wallet = null
 var _health_bar_fg: ColorRect = null
 var _wealth_indicator: ColorRect = null
 
-const WEALTH_POOR_THRESHOLD: float = 1000.0
-const WEALTH_WEALTHY_THRESHOLD: float = 4000.0
+# Wallets run from about $60 to a few hundred, so the tiers sit at $100 and $400.
+# (Agent.get_wealth_tier keeps its own copy of these two numbers.)
+const WEALTH_POOR_THRESHOLD: float = 100.0
+const WEALTH_WEALTHY_THRESHOLD: float = 400.0
 
 
 func setup(parent_node: Node2D, hunger: HungerNeed, wallet: Wallet, bar_y: float = -22.0) -> void:

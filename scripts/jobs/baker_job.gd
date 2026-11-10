@@ -52,7 +52,7 @@ var last_diagnostic_day: int = -1
 var bread_produced_today: int = 0
 var oven_fuel: int = 0   # loaves the firewood now in the oven can still bake
 
-var oven_capacity_per_day: int = 15
+var oven_capacity_per_day: int = 10  # loaves a baker makes alone (was 15, which fed the whole town with no help); 15 and 17 with hands
 var maintenance_cost_per_day: float = 0.3
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
@@ -188,7 +188,7 @@ const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (househ
 ## The first hand adds half again, the second a quarter more (LaborMarket.hand_mult), and
 ## this figure is the oven's firm daily limit.
 func _oven_capacity() -> int:
-	return roundi(float(oven_capacity_per_day) * (market.oven_mult if market else 1.0) * LaborMarket.hand_mult(agent))
+	return maxi(1, roundi(float(oven_capacity_per_day) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent)))
 
 
 func _hand_batch(base: int) -> int:
@@ -960,7 +960,7 @@ func should_depart_for_trade(target_village: Node, local_snap: Dictionary, cargo
 func _maybe_evaluate_trade(tick: int) -> void:
 	# Guard: trade disabled globally.
 	var world = _get_world()
-	if world == null or not world.get("trade_enabled"):
+	if world == null or not world.get("trade_enabled") or not world.get_meta("producers_trade", false):
 		return
 	# Guard: mid-travel — never evaluate while physically moving between villages.
 	if trade_route_active and (route != null and route.is_traveling):

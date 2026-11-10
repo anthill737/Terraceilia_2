@@ -320,7 +320,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
 		# in one more farmer's worth of wheat (more land worked, not more wheat per field).
 		var _hand_mult: float = 1.0 + float(LaborMarket.hands_of(agent))
-		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult * (market.soil_mult if market else 1.0)))
+		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult * (market.soil_mult * market.shock_harvest_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
 		inv.add("wheat", actual_wheat)
@@ -631,7 +631,7 @@ func should_depart_for_trade(target_village: Node, local_snap: Dictionary) -> bo
 
 func _maybe_evaluate_trade(tick: int) -> void:
 	var world = _get_world()
-	if world == null or not world.trade_enabled:
+	if world == null or not world.trade_enabled or not world.get_meta("producers_trade", false):
 		return
 	if agent.current_village_ref == null or agent.home_village_ref == null:
 		return

@@ -85,8 +85,8 @@ var days_in_role: int:
 			skills.days_in_role = v
 
 # -- Wealth thresholds (visual-only) ------------------------------------------
-const WEALTH_POOR_THRESHOLD: float = 1000.0
-const WEALTH_WEALTHY_THRESHOLD: float = 4000.0
+const WEALTH_POOR_THRESHOLD: float = 100.0      # was 1000 and 4000: everyone showed as poor
+const WEALTH_WEALTHY_THRESHOLD: float = 400.0
 
 # -- Visual overlay config (set before super() in subclass to override) --------
 var _health_bar_y: float = -22.0
@@ -173,6 +173,7 @@ const ROLE_COLORS: Dictionary = {
 	"Baker":     Color(0.8, 0.6, 0.2, 1),
 	"Woodworker": Color(0.6, 0.4, 0.2, 1),
 	"Household": Color(1, 0.4, 1, 1),
+	"Merchant":  Color(0.3, 0.7, 1.0, 1),
 }
 
 const ROLE_GROUPS: Dictionary = {
@@ -180,6 +181,7 @@ const ROLE_GROUPS: Dictionary = {
 	"Baker":     "bakers",
 	"Woodworker": "woodworkers",
 	"Household": "households",
+	"Merchant":  "households",   # a merchant lives as a household that also trades
 }
 
 
@@ -200,7 +202,7 @@ func set_role(role: String) -> void:
 	if sprite and ROLE_COLORS.has(role):
 		sprite.color = ROLE_COLORS[role]
 
-	if role == "Household":
+	if role == "Household" or role == "Merchant":
 		_health_bar_y = -24.0
 
 	match role:
@@ -212,6 +214,8 @@ func set_role(role: String) -> void:
 			current_job = WoodworkerJob.new()
 		"Household":
 			current_job = HouseholdJob.new()
+		"Merchant":
+			current_job = MerchantJob.new()
 
 	if current_job:
 		current_job.name = role + "Job"

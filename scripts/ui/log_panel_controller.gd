@@ -9,6 +9,12 @@ var log_lines: Array[String] = []
 var log_buffer: Array[String] = []
 var user_at_bottom: bool = true
 const MAX_LOG_LINES: int = 200
+## The export buffer keeps this many of the newest lines; older ones are dropped.
+const MAX_BUFFER_LINES: int = 20000
+## The buffer is cut back only once it is this far over the cap, so the cut is not per line.
+const BUFFER_TRIM_SLACK: int = 2000
+## Set when a message arrives; the visible text is rewritten once in the next frame.
+var _log_dirty: bool = false
 const SCROLL_THRESHOLD: int = 50
 
 
@@ -51,13 +57,23 @@ func _on_event_logged(msg: String) -> void:
 
 	while log_lines.size() > MAX_LOG_LINES:
 		log_lines.pop_front()
+	if log_buffer.size() > MAX_BUFFER_LINES + BUFFER_TRIM_SLACK:
+		log_buffer.assign(log_buffer.slice(log_buffer.size() - MAX_BUFFER_LINES))
 
-	if event_log:
-		event_log.clear()
-		for line in log_lines:
-			event_log.append_text(line + "\n")
-		if user_at_bottom:
-			event_log.scroll_to_line(event_log.get_line_count())
+	_log_dirty = true
+
+
+## Rewrite the visible log at most once a frame, however many messages came in.
+func _process(_delta: float) -> void:
+	if not _log_dirty:
+		return
+	_log_dirty = false
+	if event_log == null:
+		return
+	event_log.clear()
+	event_log.append_text("\n".join(log_lines) + "\n")
+	if user_at_bottom:
+		event_log.scroll_to_line(event_log.get_line_count())
 
 
 func _on_log_scroll(_value: float) -> void:

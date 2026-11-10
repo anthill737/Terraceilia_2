@@ -174,11 +174,11 @@ class Probe extends Node:
 		stats[vid] = s
 		var n := cash.size()
 		var row := {"v": vid, "day": day, "pop": n, "farmers": roles.Farmer, "bakers": roles.Baker, "households": roles.Household, "woodworkers": roles.Woodworker,
-			"hands": hands, "wheat_p": snappedf(m.wheat_price, 0.01), "bread_p": snappedf(m.bread_price, 0.01),
+			"hands": hands, "shock": str(v.shocks.active.get("kind", "")) if v.shocks else "", "trips": v.trade_stats.trips, "trade_units": v.trade_stats.units, "idle": v.labor_market.idle_count if v.labor_market else 0, "wheat_p": snappedf(m.wheat_price, 0.01), "bread_p": snappedf(m.bread_price, 0.01),
 			"m_wheat": m.wheat, "w_tgt": m.wheat_target, "m_bread": m.bread, "b_tgt": m.bread_target, "fw_p": snappedf(m.firewood_price, 0.01), "m_fw": m.firewood, "cold": cold, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
 			"cash_min": snappedf(cash[0], 0.1) if n else 0.0, "cash_med": snappedf(cash[n / 2], 0.1) if n else 0.0,
 			"starving": starving, "starving_can_pay": starving_can_pay, "switches": s.switches, "closed": s.closed, "opened": s.opened, "left": s.left,
-			"houses": hs.houses, "empty": hs.empty, "building": hs.building, "renters": hs.renters, "built": s.built, "evicted": s.evicted, "starved": s.starved,
+			"houses": hs.houses, "empty": hs.empty, "building": hs.building, "renters": hs.renters, "built": s.built, "evicted": s.evicted, "improved": v.housing.stats.improved if v.housing else 0, "sold": s.sold, "starved": s.starved,
 			"house_value": snappedf(v.housing.house_value(), 0.1) if v.housing else 0.0, "rent": snappedf(v.housing.rent_per_day(), 0.01) if v.housing else 0.0}
 		log_rows.append(row)
 		print("[SURVIVAL] " + JSON.stringify(row))

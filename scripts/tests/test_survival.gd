@@ -35,6 +35,13 @@ class Probe extends Node:
 	var stats := {}             # village id -> counters
 	var done := false
 	var trade := false
+	## --events=path: every village's event log goes to this file (capped at EVENTS_CAP bytes),
+	## so a run shows which parts of the game actually happen.
+	var events_path := ""
+	var events_file: FileAccess = null
+	var events_bytes := 0
+	const EVENTS_CAP := 40 * 1024 * 1024
+	var hooked := {}
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -42,6 +49,9 @@ class Probe extends Node:
 			if arg.begins_with("--days="): days = int(arg.substr(7))
 			if arg.begins_with("--result="): result_path = arg.substr(9)
 			if arg == "--trade": trade = true
+			if arg.begins_with("--events="): events_path = arg.substr(9)
+		if events_path != "":
+			events_file = FileAccess.open(events_path, FileAccess.WRITE)
 		started_ms = Time.get_ticks_msec()
 
 	func _process(_d: float) -> void:
@@ -59,6 +69,12 @@ class Probe extends Node:
 		if trade and not world.trade_enabled:
 			world.trade_enabled = true
 			print("[SURVIVAL] trade on")
+		if events_file != null:
+			for v in world.villages:
+				if v != null and v.event_bus != null and not hooked.has(v.village_id):
+					hooked[v.village_id] = true
+					var vid: int = v.village_id
+					v.event_bus.event_logged.connect(func(msg: String) -> void: _event(vid, msg))
 		var finished := 0
 		for v in world.villages:
 			if v == null or v.calendar == null:
@@ -76,6 +92,13 @@ class Probe extends Node:
 		elif Time.get_ticks_msec() - started_ms > (days * 8 + 120) * 1000:
 			print("[SURVIVAL] timed out")
 			_finish()
+
+	func _event(vid: int, msg: String) -> void:
+		if events_file == null or events_bytes > EVENTS_CAP:
+			return
+		var line := "v%d %s\n" % [vid, msg]
+		events_bytes += line.length()
+		events_file.store_string(line)
 
 	func _sample(v, day: int) -> void:
 		var vid: int = v.village_id
@@ -152,7 +175,7 @@ class Probe extends Node:
 		var n := cash.size()
 		var row := {"v": vid, "day": day, "pop": n, "farmers": roles.Farmer, "bakers": roles.Baker, "households": roles.Household, "woodworkers": roles.Woodworker,
 			"hands": hands, "wheat_p": snappedf(m.wheat_price, 0.01), "bread_p": snappedf(m.bread_price, 0.01),
-			"m_wheat": m.wheat, "m_bread": m.bread, "b_tgt": m.bread_target, "fw_p": snappedf(m.firewood_price, 0.01), "m_fw": m.firewood, "cold": cold, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
+			"m_wheat": m.wheat, "w_tgt": m.wheat_target, "m_bread": m.bread, "b_tgt": m.bread_target, "fw_p": snappedf(m.firewood_price, 0.01), "m_fw": m.firewood, "cold": cold, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
 			"cash_min": snappedf(cash[0], 0.1) if n else 0.0, "cash_med": snappedf(cash[n / 2], 0.1) if n else 0.0,
 			"starving": starving, "starving_can_pay": starving_can_pay, "switches": s.switches, "closed": s.closed, "opened": s.opened, "left": s.left,
 			"houses": hs.houses, "empty": hs.empty, "building": hs.building, "renters": hs.renters, "built": s.built, "evicted": s.evicted, "starved": s.starved,
@@ -186,6 +209,9 @@ class Probe extends Node:
 				results.append({"check": l[0], "ok": l[1], "detail": l[2]})
 				print("[SURVIVAL] %s %s (%s)" % ["PASS" if l[1] else "FAIL", l[0], l[2]])
 		print("[SURVIVAL] COMPLETE checks=%d failures=%d" % [checks, failures])
+		if events_file != null:
+			events_file.close()
+			events_file = null
 		if result_path != "":
 			var f := FileAccess.open(result_path, FileAccess.WRITE)
 			if f:

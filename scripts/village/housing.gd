@@ -6,9 +6,16 @@ class_name Housing
 ## market's firewood price plus 5 days of a worker's wage. Buying an empty house costs that.
 ## Building one costs the same: the builder buys the logs and pays a day's wage to someone
 ## out of work for each of the 5 days (if nobody is free, the builder does it and keeps the
-## wage). Rent is that same value spread over RENT_PAYBACK_DAYS. Whoever buys or builds,
-## a renter for themselves or a richer person to let out, needs the same amount: the
-## house's value plus CUSHION_DAYS of bread and firewood left over.
+## wage). Rent is that same value spread over RENT_PAYBACK_DAYS.
+##
+## The building work is real: each house has one worker for the whole job, who walks to the
+## site and spends the day there instead of at home. A household with no employer builds its
+## own house; anyone else hires someone out of work and pays them a day's wage per work day.
+## A day with no worker on site is a day with no progress.
+##
+## Money needed, all with CUSHION_DAYS of bread and firewood left over: buying, or building
+## with a hired worker, takes the house's whole value; a household doing its own building
+## pays the logs in coin and the 5 days in its own time, so it needs only the wood cost.
 ## The town owns houses nobody else does (the starting spares and those left behind).
 ##
 ## Each house has a spot on the map (a grid south-east of the market) and the people living
@@ -33,7 +40,7 @@ var event_bus = null
 var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid, pos, node}
 var next_id: int = 1
 var initialized: bool = false
-var stats := {"wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
+var stats := {"idle_days": 0, "self_days": 0, "hired_days": 0, "moved_into_own": 0, "wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
 
 
 func _people() -> Array:
@@ -93,6 +100,22 @@ func cushion() -> float:
 
 func can_afford_house(a) -> bool:
 	return a != null and a.wallet != null and a.wallet.money >= house_value() + cushion()
+
+
+## A household with no employer can do its own building work.
+func _self_builder(a) -> bool:
+	if a == null or not is_instance_valid(a) or not village.households.has(a):
+		return false
+	return not (a.has_meta("employer") and is_instance_valid(a.get_meta("employer")))
+
+
+## Money `a` needs before starting a house: the logs (and wages, unless they build it
+## themselves) plus the cushion.
+func can_afford_to_build(a) -> bool:
+	if a == null or a.wallet == null:
+		return false
+	var cost: float = wood_cost() if _self_builder(a) else house_value()
+	return a.wallet.money >= cost + cushion()
 
 
 func _home_of(a) -> Dictionary:
@@ -170,6 +193,7 @@ func on_day(day: int) -> void:
 			if h.done:
 				h.owner = null
 			else:
+				_release_worker(h)
 				if h.get("node") != null and is_instance_valid(h.node):
 					h.node.queue_free()
 				houses.erase(h)
@@ -222,9 +246,8 @@ func on_day(day: int) -> void:
 			village.labor_market.migrate_requested.emit(a, "no_rent")
 
 	# Building: buy the wood a bit at a time from what heating doesn't need, then 5 days of
-	# work. Each work day the builder pays a day's wage to someone out of work.
+	# work by one worker on site (see the top of this file).
 	var wage: float = LaborMarket.daily_wage(market)
-	var hired_today: Array = []
 	for h in houses:
 		if h.done:
 			continue
@@ -235,31 +258,55 @@ func on_day(day: int) -> void:
 			if want > 0:
 				h.wood += market.sell_firewood_to_agent(b, want)
 			continue
-		var worker = village.labor_market._free_hand() if village.labor_market else null
-		if worker != null and worker != b and not hired_today.has(worker) and b.wallet and b.wallet.money >= wage:
-			b.wallet.debit(wage)
-			worker.wallet.credit(wage)
+		var w = _worker_for(h, b, day)
+		if w == null:
+			h.idle_days = int(h.get("idle_days", 0)) + 1
+			stats.idle_days += 1
+			continue
+		if w != b:
+			if not _pay(b, w, wage):
+				_log("[HOUSING] day=%d %s can't pay %s's wage; work on house %d stops" % [day, b.name, w.name, h.id])
+				_release_worker(h)
+				stats.idle_days += 1
+				continue
 			b.cashflow_today_expense += wage
-			worker.cashflow_today_income += wage
-			hired_today.append(worker)
+			w.cashflow_today_income += wage
 			stats.wages_paid += wage
-			h.worker = str(worker.name)
+		if w == b:
+			stats.self_days += 1
 		else:
-			h.worker = ""
+			stats.hired_days += 1
 		h.work += 1
 		if h.work < BUILD_DAYS:
 			continue
 		h.done = true
+		_release_worker(h)
 		stats.built += 1
 		var old: Dictionary = _home_of(b)
 		if not old.is_empty() and old.owner != b:
 			old.occupant = null      # a renter moves into their own new house
 			old.unpaid = 0
 			h.occupant = b
+			stats.moved_into_own += 1
 			_log("[HOUSING] day=%d %s finished house %d and moved in" % [day, b.name, h.id])
 		else:
 			_log("[HOUSING] day=%d %s finished house %d to rent out" % [day, b.name, h.id])
 
+	_sync_homes()
+
+	if day % 5 == 0:
+		var line := "[HOUSING] day=%d houses=%d empty=%d building=%d renters=%d homeless=%d built=%d evicted=%d" % [
+			day, summary().houses, summary().empty, summary().building, summary().renters, homeless, stats.built, stats.evicted]
+		print(line)
+		_log(line)
+
+
+## Morning, before employers hire: at most one person decides to start a house today.
+## (A household that starts its own is then busy with it and isn't taken on as a hand.)
+func start_new_builds(day: int) -> void:
+	if market == null or village == null or not initialized:
+		return
+	var people: Array = _people()
 	# Start at most one new house a day. First a renter who can afford a home of their own,
 	# then, if the town is full and doing well, the richest person builds one to rent out.
 	var going: int = 0
@@ -273,7 +320,7 @@ func on_day(day: int) -> void:
 			var home: Dictionary = _home_of(a)
 			if home.is_empty() or home.owner == a or _building_by(a):
 				continue
-			if can_afford_house(a):
+			if can_afford_to_build(a):
 				builder = a
 				why = "a home of their own"
 				break
@@ -286,17 +333,56 @@ func on_day(day: int) -> void:
 					builder = a
 					why = "to rent out"
 		if builder != null:
-			_new_house(builder, null, false)
+			var nh: Dictionary = _new_house(builder, null, false)
+			if _self_builder(builder):
+				# Busy with their own house from now on: nobody takes them on as a hand until
+				# it is done (LaborMarket._free_hand skips builds_house).
+				builder.set_meta("builds_house", nh.id)
 			stats.started += 1
 			_log("[HOUSING] day=%d %s starts a house %s ($%.1f)" % [day, builder.name, why, builder.get_cash()])
 
-	_sync_homes()
 
-	if day % 5 == 0:
-		var line := "[HOUSING] day=%d houses=%d empty=%d building=%d renters=%d homeless=%d built=%d evicted=%d" % [
-			day, summary().houses, summary().empty, summary().building, summary().renters, homeless, stats.built, stats.evicted]
-		print(line)
-		_log(line)
+
+## Today's worker for house `h`: whoever already works on it if still free to, else the
+## builder (a household with no employer), else the poorest person out of work. Null when
+## nobody is free; the house then waits.
+func _worker_for(h: Dictionary, b, day: int):
+	var w = h.get("worker")
+	if w != null and (not is_instance_valid(w) or not _people().has(w) or (w.has_meta("employer") and is_instance_valid(w.get_meta("employer")))):
+		_release_worker(h)
+		w = null
+	if w == null and _self_builder(b):
+		w = b
+	if w == null and village.labor_market:
+		w = village.labor_market._free_hand()
+	if w == null:
+		return null
+	if h.get("worker") != w:
+		h.worker = w
+		w.set_meta("builds_house", h.id)
+		if w != b and w.has_method("log_event"):
+			w.log_event("Hired by %s to build house %d at $%.2f a day." % [b.name, h.id, LaborMarket.daily_wage(market)])
+		_log("[HOUSING] day=%d %s works on house %d for %s" % [day, w.name, h.id, "themselves" if w == b else b.name])
+	if h.get("node") != null:
+		_send_to_site(w, h.node)
+	return w
+
+
+func _release_worker(h: Dictionary) -> void:
+	var w = h.get("worker")
+	h.worker = null
+	if w == null or not is_instance_valid(w):
+		return
+	if w.has_meta("builds_house"):
+		w.remove_meta("builds_house")
+	_send_to_site(w, null)
+
+
+## Point a worker's day at the building site (null: back to their own home).
+func _send_to_site(w, spot) -> void:
+	var j = w.get("current_job")
+	if j is HouseholdJob:
+		j.set_work_site(spot)
 
 
 func summary() -> Dictionary:
@@ -353,11 +439,18 @@ func describe(a) -> String:
 	var let_out := 0
 	for h in houses:
 		if not h.done and h.owner == a:
-			parts.append("Building house %d: wood %d/%d, work %d/%d days%s." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS,
-				(", hired " + str(h.get("worker", ""))) if str(h.get("worker", "")) != "" else ""])
+			var wk = h.get("worker")
+			var who: String = ""
+			if wk != null and is_instance_valid(wk):
+				who = ", building it themselves" if wk == a else ", %s working on it" % wk.name
+			elif h.wood >= HOUSE_WOOD:
+				who = ", waiting for a worker"
+			parts.append("Building house %d: wood %d/%d, work %d/%d days%s." % [h.id, h.wood, HOUSE_WOOD, h.work, BUILD_DAYS, who])
 		elif h.done and h.owner == a and h.occupant != a:
 			let_out += 1
 	if let_out > 0:
 		parts.append("Lets out %d house(s)." % let_out)
+	if a.has_meta("builds_house"):
+		parts.append("Working on building house %d." % int(a.get_meta("builds_house")))
 	parts.append("A house is worth $%.0f (wood $%.0f + 5 days' wages $%.0f)." % [house_value(), wood_cost(), labour_cost()])
 	return " ".join(parts)

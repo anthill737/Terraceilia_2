@@ -62,12 +62,12 @@ var hysteresis_cooldown_ticks: int = 0
 # ── Inter-village trade evaluation ────────────────────────────────────────────
 ## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
 ## Reduces log noise and churn; baker remains reactive without over-evaluating.
-const TRADE_EVAL_INTERVAL: int = 30
+const TRADE_EVAL_INTERVAL: int = 3   # a third of a day (the game runs 10 ticks a day; this was 30, written for 100)
 ## Travel cost per world unit of distance (fixed trip overhead, not per-unit).
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks the baker must stay at a village after arrival before re-evaluating trade.
 ## Set to 200 — ~2 in-game days at 100 ticks/day; ~20% of inter-village travel time.
-const TRADE_MIN_STAY_TICKS: int = 200
+const TRADE_MIN_STAY_TICKS: int = 20  # 2 days (was 200 = 20 days at 10 ticks a day)
 ## Minimum bread surplus (above home reserve) needed to justify an export trip.
 ## Below this the batch is too trivial to cover travel time.
 const MIN_EXPORT_SURPLUS_BREAD: int = 15

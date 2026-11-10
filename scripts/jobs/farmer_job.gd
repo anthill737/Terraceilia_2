@@ -22,11 +22,11 @@ const WAIT_TIME: float = 1.0
 # Inter-village trade constants
 ## Evaluate trade every 30 ticks (0.3 in-game days, 3 evals/day max).
 ## Reduces log noise; agents remain reactive without churning every 10 ticks.
-const TRADE_EVAL_INTERVAL: int = 30
+const TRADE_EVAL_INTERVAL: int = 3   # a third of a day (the game runs 10 ticks a day; this was 30, written for 100)
 const TRAVEL_COST_PER_DISTANCE: float = 0.0002
 ## Ticks an agent must remain in the arrived village before re-evaluating trade.
 ## 200 ticks = 2 in-game days. Prevents ping-pong across a full production cycle.
-const TRADE_MIN_STAY_TICKS: int = 200
+const TRADE_MIN_STAY_TICKS: int = 20  # 2 days (was 200 = 20 days at 10 ticks a day)
 
 # ── Trade decision thresholds ─────────────────────────────────────────────────
 ## Minimum wheat held to justify an export trip. Below this, travel overhead > gain.

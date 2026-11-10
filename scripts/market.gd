@@ -118,7 +118,15 @@ var firewood_short_today: int = 0
 var firewood_sold_ema: float = 6.0
 
 # PART 3: Targets aligned with actual throughput
-var wheat_target: int = 45  # Reduced from 60 to match production capacity
+## How much wheat the market aims to hold: a few days of what bakers actually buy, the same
+## rule as bread. It was a fixed 45, so the farmer's ease-off and the wheat price answered
+## to a made-up number instead of how much the bakers really use.
+var wheat_target: int = 45
+const WHEAT_DAYS_OF_STOCK: float = 3.0
+const WHEAT_TARGET_MIN: int = 6
+var wheat_bought_by_bakers_today: int = 0
+var wheat_short_today: int = 0
+var wheat_demand_ema: float = 15.0
 ## How much bread the market aims to hold: a few days of what people actually want. It
 ## follows demand instead of a fixed number, so the baker's ramp up / ease off and the
 ## price both answer to how much the town really eats.
@@ -153,6 +161,9 @@ var wheat_market_buy_blocked: bool = false
 var bread_market_buy_blocked: bool = false
 
 # Clearing price tracking (reset daily) - prevents reference price ratcheting
+## Running totals since the game began, for tests and the HUD (never reset).
+var totals := {"wheat_from_farmers": 0, "wheat_to_bakers": 0, "bread_from_bakers": 0,
+	"bread_to_people": 0, "firewood_in": 0, "firewood_out": 0}
 var wheat_total_cleared: int = 0
 var wheat_total_value: float = 0.0
 var bread_total_cleared: int = 0
@@ -552,6 +563,7 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 		stopped_by_cap = true
 	
 	wheat_sold_today += units_bought
+	totals.wheat_from_farmers += units_bought
 	
 	var upper_band_wheat: int = int(float(wheat_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (wheat - units_bought) < upper_band_wheat
@@ -611,6 +623,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	wheat_requested_today += requested
 	
 	if wheat == 0:
+		wheat_short_today += requested
 		if event_bus:
 			event_bus.emit_log("Tick %d: %s tried to buy %d wheat, but market has 0." % [current_tick, _agent_label(baker), requested])
 		_set_result(0, "empty", "wheat", wheat_price)
@@ -627,6 +640,8 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 		return 0
 	
 	var before_market_wheat: int = wheat
+	if requested > wheat and baker_wallet.money >= float(requested) * wheat_price:
+		wheat_short_today += requested - wheat
 	var amount_sold: int = min(requested, wheat)
 	amount_sold = min(amount_sold, max_affordable)
 	
@@ -639,6 +654,8 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	money += cost
 	baker_inv.add("wheat", amount_sold)
 	wheat -= amount_sold
+	totals.wheat_to_bakers += amount_sold
+	wheat_bought_by_bakers_today += amount_sold
 	
 	var reason: String = "success" if amount_sold >= requested else "partial"
 	_set_result(amount_sold, reason, "wheat", wheat_price)
@@ -705,6 +722,7 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 		stopped_by_cap = true
 	
 	bread_sold_today += units_bought
+	totals.bread_from_bakers += units_bought
 	
 	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
@@ -788,6 +806,7 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 		stopped_by_cap = true
 	
 	bread_sold_today += units_bought
+	totals.bread_from_bakers += units_bought
 	
 	var upper_band_bread: int = int(float(bread_target) * (1.0 + TARGET_BAND_PCT))
 	var should_update_clearing: bool = not is_survival and (bread - units_bought) < upper_band_bread
@@ -847,6 +866,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	money += cost
 	bread -= qty
 	bread_bought_by_people_today += qty
+	totals.bread_to_people += qty
 	
 	var reason: String = "success" if qty >= requested else "partial"
 	_set_result(qty, reason, "bread", bread_price)
@@ -900,6 +920,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	money += cost
 	bread -= qty
 	bread_bought_by_people_today += qty
+	totals.bread_to_people += qty
 	
 	var reason: String = "success" if qty >= requested else "partial"
 	_set_result(qty, reason, "bread", bread_price)
@@ -945,6 +966,17 @@ func _update_bread_target() -> void:
 			current_day, bread_bought_by_people_today, bread_short_today, bread_demand_ema, bread_target, bread])
 
 
+func _update_wheat_target() -> void:
+	var wanted: int = wheat_bought_by_bakers_today + wheat_short_today
+	wheat_demand_ema = 0.3 * float(wanted) + 0.7 * wheat_demand_ema
+	# Never above what the store can hold with its top band (the store's size stays fixed).
+	wheat_target = clampi(roundi(WHEAT_DAYS_OF_STOCK * wheat_demand_ema), WHEAT_TARGET_MIN,
+		int(float(wheat_capacity) / (1.0 + TARGET_BAND_PCT)))
+	if event_bus:
+		event_bus.emit_log("[WHEAT DEMAND] day=%d bought=%d short=%d avg=%.1f target=%d stock=%d" % [
+			current_day, wheat_bought_by_bakers_today, wheat_short_today, wheat_demand_ema, wheat_target, wheat])
+
+
 func on_day_changed(day: int) -> void:
 	"""Called by Calendar when a new day starts. Adjusts prices based on inventory vs target."""
 	current_day = day
@@ -953,6 +985,7 @@ func on_day_changed(day: int) -> void:
 	_apply_inventory_decay(day)
 	
 	_update_bread_target()
+	_update_wheat_target()
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
 	_adjust_firewood_price()
@@ -983,6 +1016,8 @@ func on_day_changed(day: int) -> void:
 	bread_requested_today = 0
 	bread_bought_by_people_today = 0
 	bread_short_today = 0
+	wheat_bought_by_bakers_today = 0
+	wheat_short_today = 0
 	
 	# Reset market-side hysteresis tracking
 	wheat_market_buy_blocked = false
@@ -1345,6 +1380,7 @@ func buy_firewood_from_agent(agent, amount_offered: int, min_acceptable_price: f
 	money -= pay
 	firewood += qty
 	firewood_bought_today += qty
+	totals.firewood_in += qty
 	return qty
 
 
@@ -1368,6 +1404,7 @@ func sell_firewood_to_agent(agent, requested: int) -> int:
 	money += cost
 	firewood -= qty
 	firewood_sold_today += qty
+	totals.firewood_out += qty
 	return qty
 
 

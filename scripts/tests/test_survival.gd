@@ -82,7 +82,7 @@ class Probe extends Node:
 		var s: Dictionary = stats.get(vid, {"no_farmer_run": 0, "no_baker_run": 0, "worst_no_farmer": 0, "worst_no_baker": 0,
 			"starve_with_food_days": 0, "days": 0, "switches": 0, "left": 0, "extinct_day": -1, "first_money": -1.0,
 			"exodus_days": 0, "worst_day_loss": 0, "closed": 0, "opened": 0,
-			"start_pop": -1, "end_pop": 0, "built": 0, "sold": 0, "rented_out": 0, "evicted": 0, "homeless_max": 0})
+			"start_pop": -1, "end_pop": 0, "built": 0, "sold": 0, "rented_out": 0, "evicted": 0, "homeless_max": 0, "starved": 0, "starved_with_food": 0})
 		var m = v.market
 		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0}
 		var starving_can_pay := 0
@@ -130,6 +130,8 @@ class Probe extends Node:
 			hs = v.housing.summary()
 			for k in ["built", "sold", "rented_out", "evicted", "homeless_max"]:
 				s[k] = v.housing.stats[k]
+		s.starved = v.starved_deaths
+		s.starved_with_food = v.starved_with_food
 		if day >= GRACE_DAYS:
 			if s.start_pop < 0:
 				s.start_pop = cash.size()
@@ -153,7 +155,8 @@ class Probe extends Node:
 			"m_wheat": m.wheat, "m_bread": m.bread, "b_tgt": m.bread_target, "fw_p": snappedf(m.firewood_price, 0.01), "m_fw": m.firewood, "cold": cold, "m_money": snappedf(m.money, 0.1), "people_money": snappedf(people_money, 0.1),
 			"cash_min": snappedf(cash[0], 0.1) if n else 0.0, "cash_med": snappedf(cash[n / 2], 0.1) if n else 0.0,
 			"starving": starving, "starving_can_pay": starving_can_pay, "switches": s.switches, "closed": s.closed, "opened": s.opened, "left": s.left,
-			"houses": hs.houses, "empty": hs.empty, "building": hs.building, "renters": hs.renters, "built": s.built, "evicted": s.evicted}
+			"houses": hs.houses, "empty": hs.empty, "building": hs.building, "renters": hs.renters, "built": s.built, "evicted": s.evicted, "starved": s.starved,
+			"house_value": snappedf(v.housing.house_value(), 0.1) if v.housing else 0.0, "rent": snappedf(v.housing.rent_per_day(), 0.01) if v.housing else 0.0}
 		log_rows.append(row)
 		print("[SURVIVAL] " + JSON.stringify(row))
 
@@ -170,6 +173,8 @@ class Probe extends Node:
 				["village %d never without a baker for %d days" % [vid, NO_ROLE_DAYS], s.worst_no_baker < NO_ROLE_DAYS, "longest %d days" % s.worst_no_baker],
 				["village %d starving with coins for a loaf and bread in the market on at most %d%% of days" % [vid, int(STARVE_WITH_FOOD_SHARE * 100)],
 					float(s.starve_with_food_days) <= STARVE_WITH_FOOD_SHARE * maxf(1.0, float(s.days)), "%d of %d days" % [s.starve_with_food_days, s.days]],
+				["village %d: nobody starved to death holding coins for a loaf while the market had bread" % vid,
+					s.starved_with_food == 0, "%d of %d deaths" % [s.starved_with_food, s.starved]],
 				["village %d never lost over %d%% of its people in one day" % [vid, int(EXODUS_SHARE * 100)], s.exodus_days == 0,
 					"%d such days, most lost in a day %d" % [s.exodus_days, s.worst_day_loss]],
 				["village %d ended bigger than it started" % vid, s.days < GROWTH_MIN_DAYS or s.end_pop > s.start_pop,

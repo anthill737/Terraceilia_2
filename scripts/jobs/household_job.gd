@@ -84,8 +84,6 @@ func activate() -> void:
 	route.arrived.connect(_on_arrived)
 	route.wait_finished.connect(_on_wait_finished)
 	route.travel_timeout.connect(_on_travel_timeout)
-	if hunger:
-		hunger.starved.connect(_on_starved)
 
 
 func deactivate() -> void:
@@ -96,8 +94,6 @@ func deactivate() -> void:
 			route.wait_finished.disconnect(_on_wait_finished)
 		if route.travel_timeout.is_connected(_on_travel_timeout):
 			route.travel_timeout.disconnect(_on_travel_timeout)
-	if hunger and hunger.starved.is_connected(_on_starved):
-		hunger.starved.disconnect(_on_starved)
 
 
 func _calculate_effective_reserve_target() -> int:
@@ -328,13 +324,6 @@ func on_day_changed(_day: int) -> void:
 	agent.log_event("End of day: has $%.0f and %d loaves of bread." % [agent.get_cash(), _br])
 	if training_days_remaining > 0:
 		training_days_remaining -= 1
-
-
-func _on_starved(agent_name_param: String) -> void:
-	agent.log_event("Died of starvation.")
-	if event_bus:
-		event_bus.emit_log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
-	agent.agent_died.emit(agent)
 
 
 ## True when the hearth is down to its last stick: time to go to market (batch 3).

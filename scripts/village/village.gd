@@ -602,20 +602,39 @@ func spawn_household_at(pos: Vector2) -> Node:
 	return await spawn_service.spawn_household_at(pos)
 
 
+## Anyone who starves to death (any trade). What they had in their purse goes to the town;
+## a house they owned passes to the town the next morning (Housing). Their hands are free
+## to be taken on by someone else.
+var starved_deaths: int = 0
+var starved_with_food: int = 0   # died holding coins for a loaf while the market had bread
+
 func _on_household_died(agent_node: Node) -> void:
-	all_woodworkers.erase(agent_node)
-	if agent_node.is_in_group("woodworkers"):
-		agent_node.remove_from_group("woodworkers")
-	var idx: int = households.find(agent_node)
-	if idx != -1:
-		households.remove_at(idx)
+	if not is_instance_valid(agent_node) or agent_node.is_queued_for_deletion():
+		return
+	starved_deaths += 1
+	if market and agent_node.get_cash() >= market.bread_price and market.bread > 0:
+		starved_with_food += 1
+	if event_bus:
+		event_bus.emit_log("[DEATH] day=%d %s starved ($%.1f, market bread %d at $%.2f)" % [
+			calendar.day_index if calendar else -1, agent_node.name, agent_node.get_cash(),
+			market.bread if market else -1, market.bread_price if market else 0.0])
+	if prosperity_meter and calendar:
+		prosperity_meter.record_starvation_event(calendar.day_index)
+	if labor_market:
+		labor_market._release_hands(agent_node, "employer died")
+	var w = agent_node.get("wallet")
+	if market and w != null and w.money > 0.0:
+		market.money += w.money
+		w.debit(w.money)
+	_labor_svc.handle_migrate_requested(agent_node, "starved")
 
-	if agent_node.is_in_group("households"):
-		agent_node.remove_from_group("households")
-	if agent_node.is_in_group("agents"):
-		agent_node.remove_from_group("agents")
 
-	agent_node.queue_free()
+## Every person's death is heard, whatever trade they changed to.
+func _listen_for_deaths() -> void:
+	for grp in [households, all_farmers, all_bakers, all_woodworkers]:
+		for a in grp:
+			if a != null and is_instance_valid(a) and not a.agent_died.is_connected(_on_household_died):
+				a.agent_died.connect(_on_household_died)
 
 
 # ============================================================================
@@ -632,6 +651,7 @@ func _on_calendar_day_changed(day: int) -> void:
 			pop_mgr.count(), MAX_TOTAL_POP,
 			households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()])
 
+	_listen_for_deaths()
 	if labor_market:
 		labor_market.update_daily(day)
 

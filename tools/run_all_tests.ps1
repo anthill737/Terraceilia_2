@@ -72,6 +72,16 @@ if ($ec2 -ne 0) {
 }
 
 Write-Host ""
+Write-Host "=== Headless TestFeatures.tscn (each feature set up and checked) ===" -ForegroundColor Cyan
+$ec3 = Invoke-GodotHeadlessScene "res://scenes/TestFeatures.tscn"
+if ($ec3 -ne 0) {
+    Write-Host "TestFeatures FAILED (exit $ec3)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestFeatures OK." -ForegroundColor Green
+}
+
+Write-Host ""
 if ($failed) {
     Write-Host "SUITE: FAIL" -ForegroundColor Red
     exit 1

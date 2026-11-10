@@ -95,8 +95,8 @@ func calculate_throttle(recipe: Dictionary) -> float:
 			var last_percent: int = int((float(last_throttle_band) / 10.0) * 100.0)
 			var inv_percent: float = (inv_float / float(target_inventory)) * 100.0 if target_inventory > 0 else 0.0
 			event_bus.emit_log(
-				"Tick %d: %s eased production from %d%% to %d%% — market wheat stock is about %.0f%% full." %
-				[current_tick, agent_name, last_percent, throttle_percent, inv_percent]
+				"Tick %d: %s eased production from %d%% to %d%% — market %s stock is about %.0f%% full." %
+				[current_tick, agent_name, last_percent, throttle_percent, output_good, inv_percent]
 			)
 		last_throttle_band = current_band
 	

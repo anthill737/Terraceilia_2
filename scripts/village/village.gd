@@ -652,6 +652,8 @@ func _on_calendar_day_changed(day: int) -> void:
 			households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()])
 
 	_listen_for_deaths()
+	if housing:
+		housing.start_new_builds(day)   # before employers hire (housing.gd)
 	if labor_market:
 		labor_market.update_daily(day)
 

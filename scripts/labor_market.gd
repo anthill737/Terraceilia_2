@@ -568,6 +568,13 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if best_role == h.current_role:
 		return
 
+	# Gate: the town has to want more of what the new business makes. Profits of the farmer
+	# already in town said nothing about whether the market would buy a second farmer's wheat;
+	# new farmers opened with the wheat store full, never sold a sack and starved.
+	if not _market_wants(best_role):
+		_log_career_blocked(day, pop_id, best_role, "no_demand", 0, h)
+		return
+
 	# Gate: land cap (block farmer switches when fields are full)
 	if best_role == "Farmer" and field_count_ref.size() >= max_fields:
 		_log_career_blocked(day, pop_id, "Farmer", "land_cap", field_count_ref.size(), h)
@@ -639,21 +646,47 @@ func _evaluate_producer_migration(_day: int) -> void:
 		for p in group.duplicate():
 			if not (p and is_instance_valid(p)):
 				continue
-			if p.consecutive_days_negative_cashflow < MIGRATION_NEG_PROFIT_DAYS:
-				continue
-			if not _is_broke(p):
-				continue
+			# Close after a losing streak that left them broke, or as soon as they are broke and
+			# going hungry (a business with no sales and no costs never has a "losing" day, so
+			# such an owner starved before; now they close and look for work).
+			var hungry: bool = _broke_and_hungry(p)
+			if not hungry:
+				if p.consecutive_days_negative_cashflow < MIGRATION_NEG_PROFIT_DAYS:
+					continue
+				if not _is_broke(p):
+					continue
 			if _live_count(group) <= 1:
 				if event_bus:
 					event_bus.emit_log("[LaborMkt] %s kept: last of their trade (%d losing days, $%.1f)" % [
 						p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
 				continue
 			if event_bus:
-				event_bus.emit_log("[LaborMkt] %s closing shop: %d losing days and broke ($%.1f)" % [
-					p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
+				event_bus.emit_log("[LaborMkt] %s closing shop: %s ($%.1f)" % [
+					p.name, "broke and going hungry" if hungry else "%d losing days and broke" % p.consecutive_days_negative_cashflow, p.get_cash()])
 			_release_hands(p, "employer left")
 			# Batch 3: the business closes and its owner looks for work; nobody leaves town for it.
 			business_failed.emit(p)
+
+
+## True when the market is short of what `role` makes: its stock is below the stock target
+## (a few days of what people actually buy).
+func _market_wants(role: String) -> bool:
+	if market == null:
+		return true
+	match role:
+		"Farmer":
+			return market.wheat < market.wheat_target
+		"Baker":
+			return market.bread < market.bread_target
+		"Woodworker":
+			return market.firewood < market.firewood_target
+	return true
+
+
+## Broke and going hungry: under BROKE rules and already a couple of days without bread.
+func _broke_and_hungry(p: Node) -> bool:
+	var hn = p.get("hunger")
+	return _is_broke(p) and hn != null and hn.hunger_days <= 3
 
 
 func _is_broke(p: Node) -> bool:
@@ -741,6 +774,8 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 ## wages in hand, its goods are not piling up unsold at the market, and the hand's extra
 ## output at today's prices is worth more than the wage. Households without an employer are
 ## the labour pool.
+var wages_paid_total: float = 0.0   # all wages ever paid in this village (tests)
+
 func _update_hands(day: int) -> void:
 	var wage: float = daily_wage(market)
 	var paid: float = 0.0
@@ -763,6 +798,7 @@ func _update_hands(day: int) -> void:
 				p.cashflow_today_expense += wage
 				h.cashflow_today_income += wage
 				paid += wage
+				wages_paid_total += wage
 				kept.append(h)
 			else:
 				_let_go(p, h, day, "could not pay")
@@ -893,6 +929,8 @@ func _free_hand():
 			continue
 		if h.has_meta("employer") and is_instance_valid(h.get_meta("employer")):
 			continue
+		if h.has_meta("builds_house"):
+			continue   # busy building a house (Housing)
 		if best == null or h.get_cash() < best.get_cash():
 			best = h
 	return best

@@ -9,6 +9,9 @@ enum Phase { AT_MARKET, AT_HOME }
 var phase: Phase = Phase.AT_HOME
 
 var home_location: Node2D = null
+## Where this person works today, when they are building a house (Housing). While set, the
+## day is spent there instead of at home; trips to market return to it.
+var work_site: Node2D = null
 var market_location: Node2D = null
 
 # Travel Config (tunable survival triggers)
@@ -131,6 +134,25 @@ func set_tick(t: int) -> void:
 	_check_idle_guard()
 
 
+## Where the day is spent: the building site when working on a house, otherwise home.
+func day_spot() -> Node2D:
+	if work_site != null and is_instance_valid(work_site):
+		return work_site
+	return home_location
+
+
+func set_work_site(spot: Node2D) -> void:
+	if spot == work_site:
+		return
+	var old: Node2D = day_spot()
+	work_site = spot
+	var now: Node2D = day_spot()
+	if agent.pending_target == old:
+		agent.pending_target = now
+	if route != null and route.target == old:
+		route.set_target(now)
+
+
 func set_locations(home: Node2D, market_node: Node2D) -> void:
 	home_location = home
 	market_location = market_node
@@ -146,9 +168,9 @@ func _on_arrived(t: Node2D) -> void:
 		attempt_buy_bread()
 		buy_firewood_to(HOME_FIREWOOD)
 		phase = Phase.AT_MARKET
-		agent.pending_target = home_location
+		agent.pending_target = day_spot()
 		route.wait(WAIT_TIME)
-	elif t == home_location:
+	elif t == home_location or t == work_site:
 		consume_bread_at_home()
 		phase = Phase.AT_HOME
 		var current_bread: int = inv.get_qty("bread") if inv != null else 0
@@ -158,7 +180,7 @@ func _on_arrived(t: Node2D) -> void:
 			if event_bus and not logged_staying_home:
 				event_bus.emit_log("Tick %d: %s deciding to go to market (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
 		else:
-			agent.pending_target = home_location
+			agent.pending_target = day_spot()
 			if event_bus and not logged_staying_home:
 				event_bus.emit_log("Tick %d: %s staying home (bread=%d/%d, hunger=%.1f%%)" % [agent.current_tick, agent.name, current_bread, effective_reserve_target, hunger_ratio * 100])
 				logged_staying_home = true
@@ -168,7 +190,7 @@ func _on_arrived(t: Node2D) -> void:
 func _on_wait_finished() -> void:
 	if agent.pending_target != null:
 		if agent.pending_target == market_location and not needs_food_trip():
-			agent.pending_target = home_location
+			agent.pending_target = day_spot()
 			if event_bus:
 				event_bus.emit_log("Tick %d: %s [BUGFIX] market trip cancelled - need resolved during wait" % [agent.current_tick, agent.name])
 		if agent.pending_target == market_location and agent.pending_target != route.target:
@@ -261,7 +283,7 @@ func _on_travel_timeout(_t: Node2D) -> void:
 	if event_bus:
 		event_bus.emit_log("[TRAVEL] Tick %d: %s travel timeout recovery - returning home" % [agent.current_tick, agent.name])
 	phase = Phase.AT_HOME
-	agent.pending_target = home_location
+	agent.pending_target = day_spot()
 	if route:
 		route.wait(WAIT_TIME)
 
@@ -279,7 +301,7 @@ func _check_travel_timeout() -> void:
 			route.stop()
 			agent.travel_ticks = 0
 			phase = Phase.AT_HOME
-			agent.pending_target = home_location
+			agent.pending_target = day_spot()
 			route.wait(WAIT_TIME)
 	else:
 		agent.travel_ticks = 0
@@ -301,11 +323,13 @@ func _check_idle_guard() -> void:
 	if needs_food_trip():
 		agent.pending_target = market_location
 	else:
-		agent.pending_target = home_location
+		agent.pending_target = day_spot()
 	route.wait(WAIT_TIME)
 
 
 func get_status_text() -> String:
+	if work_site != null and route.target == work_site:
+		return "Building a house" if route.is_waiting else "Going to build"
 	if route.target == market_location:
 		if route.is_waiting:
 			return "Waiting at Market"

@@ -23,7 +23,7 @@ Two 120-day runs, hiring mode, trade on, seeds 12345,66666 and 4242,777. All 14 
 both. Nobody starved to death in any of the four villages. Villages grew 7 to 12, 7 to 11,
 7 to 12 and 7 to 9. 6 to 9 houses built per village; nobody bought one, all newcomers rented.
 
-The economy test (TestEconomy) now ends each seed on day 13 with everyone dead. That test was
+(Fixed in the next change, see docs/TESTS.md.) The economy test (TestEconomy) now ends each seed on day 13 with everyone dead. That test was
 already hollow: nothing in it ever trades (the market's stock never moves), its households
 starved by day 12, and before this change the farmer and baker "survived" to day 60 only because
 they were frozen. It still reports PASS because it has no survival minimum. It needs fixing on

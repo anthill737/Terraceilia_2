@@ -37,4 +37,6 @@ firewood, home (owns or rents, from whom, days behind on rent), and hands they e
 - Farmer hands work by multiplying the harvest, so you won't see them in the fields.
 - Lots of newcomers still go broke and leave (about 30 per village over 120 days of testing):
   there isn't enough paid work yet.
+- With one baker, bread can climb past $6 when demand outruns the oven; the baker gets rich
+  and poor households can't buy. Nothing caps it, by design: demand sets the price.
 - Wheat still aims for a fixed 45 pile, so it sits at its 1.00 floor with a big pile.

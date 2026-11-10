@@ -33,6 +33,11 @@ func set_speed(multiplier: float) -> void:
 	speed_multiplier = clamp(multiplier, MIN_SPEED, MAX_SPEED)
 	# Use Engine.time_scale to scale the entire game (physics, timers, animations)
 	Engine.time_scale = speed_multiplier
+	# Run physics more often when sped up, so one step never covers more game time than at
+	# 2.5x (1/24 s). At 10x that is 240 steps a second, the same as the survival test. With a
+	# fixed 60, a sped-up game took 10x longer steps than normal and towns fell apart.
+	Engine.physics_ticks_per_second = clampi(roundi(24.0 * speed_multiplier), 60, 240)
+	Engine.max_physics_steps_per_frame = 64
 	speed_changed.emit(speed_multiplier)
 
 

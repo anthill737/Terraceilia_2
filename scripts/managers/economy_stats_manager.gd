@@ -11,11 +11,13 @@ var _cashflow_7d: Dictionary = {
 	"Household": [],
 	"Farmer":    [],
 	"Baker":     [],
+	"Woodworker": [],
 }
 
 var _farmers: Array = []
 var _bakers: Array = []
 var _households: Array = []
+var _woodworkers: Array = []
 
 
 ## Bind this stats manager to village-local agent arrays.
@@ -30,6 +32,7 @@ func roll_daily() -> void:
 	var role_agents: Dictionary = {
 		"Farmer":    _farmers,
 		"Baker":     _bakers,
+		"Woodworker": _woodworkers,
 		"Household": _households,
 	}
 	for role: String in role_agents:
@@ -60,3 +63,7 @@ func role_rolling_7d_avg(role: String) -> float:
 	if hist.is_empty():
 		return 0.0
 	return role_rolling_7d_sum(role) / float(hist.size())
+
+
+func bind_woodworkers(woodworkers: Array) -> void:
+	_woodworkers = woodworkers

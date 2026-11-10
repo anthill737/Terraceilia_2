@@ -507,6 +507,9 @@ func _collect_agents() -> Array:
 		for a in v.all_bakers:
 			if a != null and is_instance_valid(a):
 				out.append(a)
+		for a in v.all_woodworkers:
+			if a != null and is_instance_valid(a):
+				out.append(a)
 	return out
 
 

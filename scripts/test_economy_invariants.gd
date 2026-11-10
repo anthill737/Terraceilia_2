@@ -260,6 +260,8 @@ func _collect_pops() -> Array:
 		out.append(x)
 	for x in pm.all_bakers:
 		out.append(x)
+	for x in pm.all_woodworkers:
+		out.append(x)
 	for x in pm.households:
 		out.append(x)
 	return out

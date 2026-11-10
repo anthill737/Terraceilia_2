@@ -5,7 +5,9 @@ class_name ProductionProfitability
 ## Prevents producers from operating at a loss.
 
 # Configuration
-var minimum_profit_margin: float = 0.10  # 10% minimum profit margin
+var minimum_profit_margin: float = 0.25  # 25% minimum profit margin (batch 3; was 10%)
+## Cost per unit made beyond the recipe inputs: wages, upkeep, fuel. Set daily by the job.
+var overhead_per_unit: float = 0.0
 
 # State tracking (prevents log spam)
 var is_profitable: bool = true
@@ -88,7 +90,7 @@ func calculate_minimum_profitable_price(recipe: Dictionary) -> float:
 		return 0.0
 	
 	# Minimum price = cost per unit * (1 + profit margin)
-	var cost_per_unit: float = total_input_cost / float(output_qty)
+	var cost_per_unit: float = total_input_cost / float(output_qty) + overhead_per_unit
 	return cost_per_unit * (1.0 + minimum_profit_margin)
 
 
@@ -104,6 +106,8 @@ func get_market_price(good: String) -> float:
 			return market.bread_price
 		"seeds":
 			return market.SEED_PRICE
+		"firewood":
+			return market.firewood_price
 		_:
 			if event_bus:
 				event_bus.emit_log("ERROR: ProductionProfitability attempted to look up price for non-market good '%s'" % good)
@@ -154,5 +158,5 @@ func get_min_acceptable_price_with_bid(recipe: Dictionary) -> float:
 		return 0.0
 	
 	# Minimum price = cost per unit * (1 + profit margin)
-	var cost_per_unit: float = total_input_cost / float(output_qty)
+	var cost_per_unit: float = total_input_cost / float(output_qty) + overhead_per_unit
 	return cost_per_unit * (1.0 + minimum_profit_margin)

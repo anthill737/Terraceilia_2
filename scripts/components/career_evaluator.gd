@@ -13,7 +13,7 @@ const WEIGHT_RISK: float = 3.0
 
 const EVAL_INTERVAL_DAYS: int = 7
 
-const CASH_LOW_THRESHOLD: float = 200.0
+const CASH_LOW_THRESHOLD: float = 100.0   # batch 3: wallets are smaller (was 200)
 const FOOD_LOW_THRESHOLD: int = 2
 
 const TRAINING_DAYS: Dictionary = {

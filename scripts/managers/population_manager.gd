@@ -9,15 +9,17 @@ const MAX_TOTAL_POP: int = 50
 var households: Array = []
 var all_farmers: Array = []
 var all_bakers: Array = []
+var all_woodworkers: Array = []
 
 var next_farmer_id: int = 2
 var next_baker_id: int = 2
+var next_woodworker_id: int = 1
 var next_household_id: int = 2
 var _next_person_id: int = 1
 
 
 func get_total_population() -> int:
-	return households.size() + all_farmers.size() + all_bakers.size()
+	return households.size() + all_farmers.size() + all_bakers.size() + all_woodworkers.size()
 
 
 func count() -> int:
@@ -95,6 +97,6 @@ func unregister_baker(b: Node) -> void:
 
 
 func get_status_text() -> String:
-	return "total=%d/%d (households=%d farmers=%d bakers=%d)" % [
+	return "total=%d/%d (households=%d farmers=%d bakers=%d woodworkers=%d)" % [
 		get_total_population(), MAX_TOTAL_POP,
-		households.size(), all_farmers.size(), all_bakers.size()]
+		households.size(), all_farmers.size(), all_bakers.size(), all_woodworkers.size()]

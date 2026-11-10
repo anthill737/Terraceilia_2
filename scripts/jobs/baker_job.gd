@@ -21,7 +21,9 @@ const BAKING_TIME: float = 2.0
 
 const GRIND_BATCH_SIZE: int = 5
 const BAKE_BATCH_SIZE: int = 5
-const FLOUR_PER_WHEAT: int = 2
+const WHEAT_PER_FLOUR: int = 2          # batch 3: two wheat make one flour, one flour one loaf
+const LOAVES_PER_FIREWOOD: int = 5       # the oven burns one firewood for every five loaves
+const HOME_FIREWOOD: int = 3             # firewood kept for the baker's own hearth
 const BREAD_PER_FLOUR: int = 1
 
 const WHEAT_LOW_WATERMARK: int = 5
@@ -31,8 +33,8 @@ const BREAD_PRODUCTION_MIN: int = 2
 
 const BREAD_RECIPE: Dictionary = {
 	"output_good": "bread",
-	"output_quantity": 2,
-	"inputs": {"wheat": 1}
+	"output_quantity": 1,
+	"inputs": {"wheat": 2}
 }
 
 var process_timer: float = 0.0
@@ -48,6 +50,7 @@ var phase_error_cooldown: int = 100
 
 var last_diagnostic_day: int = -1
 var bread_produced_today: int = 0
+var oven_fuel: int = 0   # loaves the firewood now in the oven can still bake
 
 var oven_capacity_per_day: int = 15
 var maintenance_cost_per_day: float = 0.3
@@ -177,24 +180,51 @@ func set_tick(t: int) -> void:
 	_maybe_evaluate_trade(t)
 
 
-const STARTING_CASH: float = 500.0
+const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (households start with 60)
 
 
 ## Hired hands add oven time and bigger batches, never bread from nothing: the same
 ## flour makes the same bread, a busy bakery just gets through more of it in a day.
+## The first hand adds half again, the second a quarter more (LaborMarket.hand_mult), and
+## this figure is the oven's firm daily limit.
 func _oven_capacity() -> int:
-	return roundi(float(oven_capacity_per_day) * (market.oven_mult if market else 1.0) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
+	return roundi(float(oven_capacity_per_day) * (market.oven_mult if market else 1.0) * LaborMarket.hand_mult(agent))
 
 
 func _hand_batch(base: int) -> int:
-	return roundi(float(base) * (1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)))
+	return roundi(float(base) * LaborMarket.hand_mult(agent))
+
+
+## Put firewood on the fire until it can bake `units` loaves, and return how many it can.
+func _take_oven_fuel(units: int) -> int:
+	while oven_fuel < units and inv.get_qty("firewood") > 1:   # the last stick is for the hearth
+		inv.remove("firewood", 1)
+		oven_fuel += LOAVES_PER_FIREWOOD
+	var n: int = mini(units, oven_fuel)
+	oven_fuel -= n
+	return n
+
+
+## What a loaf costs beyond its wheat: oven firewood, the hands' wages and the bakery's
+## upkeep, spread over a normal day's baking. The profit and margin checks add this to the
+## wheat cost, so a baker stops baking when bread no longer pays its true cost (batch 3).
+func _update_overhead() -> void:
+	if market == null:
+		return
+	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_oven_capacity()))
+	var over: float = (float(LaborMarket.hands_of(agent)) * LaborMarket.daily_wage(market) + maintenance_cost_per_day) / maxf(1.0, per_day)
+	over += market.firewood_price / float(LOAVES_PER_FIREWOOD)
+	if profit:
+		profit.overhead_per_unit = over
+	if margin_compression:
+		margin_compression.overhead_per_unit = over
 
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(STARTING_CASH)
 	if inv:
-		inv.items = {"wheat": 0, "flour": 0, "bread": 5}
+		inv.items = {"wheat": 0, "flour": 0, "bread": 5, "firewood": 6}
 	prod = agent.get_node_or_null("ProductionBatch") as ProductionBatch
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability
 	margin_compression = agent.get_node_or_null("MarginCompression")
@@ -261,6 +291,7 @@ func set_locations(bakery: Node2D, market_node: Node2D) -> void:
 		inventory_throttle.bind(market, event_bus, get_display_name())
 	if food_reserve and market:
 		food_reserve.bind(inv, hunger, market, wallet, event_bus, get_display_name())
+	_update_overhead()
 	route.set_target(market_location)
 
 
@@ -339,6 +370,7 @@ func perform_market_transactions() -> void:
 				agent.pending_target = market_location
 			route.wait(WAIT_TIME)
 			return
+	buy_firewood_to(HOME_FIREWOOD + ceili(float(_oven_capacity()) / float(LOAVES_PER_FIREWOOD)))
 	match phase:
 		Phase.RESTOCK:
 			if not market.can_producer_produce("bread"):
@@ -471,7 +503,7 @@ func start_production() -> void:
 
 
 
-	if inv.get_qty("wheat") > 0:
+	if inv.get_qty("wheat") >= WHEAT_PER_FLOUR:
 		production_state = ProductionState.GRINDING
 		process_timer = GRINDING_TIME
 	elif inv.get_qty("flour") > 0:
@@ -525,9 +557,10 @@ func process_grinding(delta: float) -> void:
 		var target_batch: int = _hand_batch(GRIND_BATCH_SIZE)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)
-		var units: int = prod.compute_batch(target_batch, "wheat", "flour", FLOUR_PER_WHEAT)
+		# Two wheat grind into one flour, so grinding never needs more room than it frees.
+		var units: int = mini(target_batch, inv.get_qty("wheat") / WHEAT_PER_FLOUR)
 		if units == 0:
-			if inv.get_qty("wheat") == 0:
+			if inv.get_qty("wheat") < WHEAT_PER_FLOUR:
 				if inv.get_qty("flour") > 0:
 					production_state = ProductionState.BAKING
 					process_timer = BAKING_TIME
@@ -544,7 +577,10 @@ func process_grinding(delta: float) -> void:
 					agent.pending_target = market_location
 				route.wait(WAIT_TIME)
 		else:
-			var ok: bool = prod.convert("wheat", "flour", units, FLOUR_PER_WHEAT)
+			var ok: bool = inv.get_qty("wheat") >= units * WHEAT_PER_FLOUR
+			if ok:
+				inv.remove("wheat", units * WHEAT_PER_FLOUR)
+				inv.add("flour", units)
 			if not ok:
 				if event_bus:
 					event_bus.emit_log("ERROR Tick %d: Baker grinding failed due to capacity/rollback safety" % agent.current_tick)
@@ -554,10 +590,10 @@ func process_grinding(delta: float) -> void:
 					agent.pending_target = market_location
 				route.wait(WAIT_TIME)
 			else:
-				var flour_produced: int = units * FLOUR_PER_WHEAT
+				var flour_produced: int = units
 				if event_bus:
-					event_bus.emit_log("Tick %d: Baker ground %d wheat into %d flour" % [agent.current_tick, units, flour_produced])
-				agent.log_event("Ground %d wheat into %d flour." % [units, flour_produced])
+					event_bus.emit_log("Tick %d: Baker ground %d wheat into %d flour" % [agent.current_tick, units * WHEAT_PER_FLOUR, flour_produced])
+				agent.log_event("Ground %d wheat into %d flour." % [units * WHEAT_PER_FLOUR, flour_produced])
 				var current_bread: int = inv.get_qty("bread")
 				var current_flour: int = inv.get_qty("flour")
 				var current_wheat: int = inv.get_qty("wheat")
@@ -580,7 +616,7 @@ func process_grinding(delta: float) -> void:
 				elif current_flour > 0 and cap.remaining_space() >= BREAD_PER_FLOUR:
 					production_state = ProductionState.BAKING
 					process_timer = BAKING_TIME
-				elif current_wheat > 0 and cap.remaining_space() >= FLOUR_PER_WHEAT:
+				elif current_wheat >= WHEAT_PER_FLOUR:
 					production_state = ProductionState.GRINDING
 					process_timer = GRINDING_TIME
 				else:
@@ -644,10 +680,13 @@ func process_baking(delta: float) -> void:
 		var target_batch: int = _hand_batch(BAKE_BATCH_SIZE)
 		if inventory_throttle and not (food_reserve and food_reserve.survival_override_active):
 			target_batch = inventory_throttle.apply_to_batch(target_batch)
+		target_batch = mini(target_batch, _oven_capacity() - bread_produced_today)
 		var units: int = prod.compute_batch(target_batch, "flour", "bread", BREAD_PER_FLOUR)
+		# The oven needs firewood: one for every LOAVES_PER_FIREWOOD loaves. No wood, no bread.
+		units = _take_oven_fuel(units)
 		if units == 0:
 			if inv.get_qty("flour") == 0:
-				if inv.get_qty("wheat") > 0:
+				if inv.get_qty("wheat") >= WHEAT_PER_FLOUR:
 					production_state = ProductionState.GRINDING
 					process_timer = GRINDING_TIME
 				else:
@@ -710,7 +749,7 @@ func process_baking(delta: float) -> void:
 				elif current_flour > 0 and cap.remaining_space() >= BREAD_PER_FLOUR:
 					production_state = ProductionState.BAKING
 					process_timer = BAKING_TIME
-				elif current_wheat > 0 and cap.remaining_space() >= FLOUR_PER_WHEAT:
+				elif current_wheat >= WHEAT_PER_FLOUR:
 					production_state = ProductionState.GRINDING
 					process_timer = GRINDING_TIME
 				else:
@@ -743,7 +782,8 @@ func on_day_changed(_day: int) -> void:
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
 	set_meta("output_ema", 0.3 * float(bread_produced_today) + 0.7 * float(get_meta("output_ema", float(bread_produced_today))))
-	set_meta("wheat_per_bread", 1.0 / float(FLOUR_PER_WHEAT * BREAD_PER_FLOUR))
+	set_meta("wheat_per_bread", float(WHEAT_PER_FLOUR) / float(BREAD_PER_FLOUR))
+	_update_overhead()
 	bread_produced_today = 0
 
 

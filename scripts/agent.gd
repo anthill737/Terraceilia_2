@@ -159,12 +159,14 @@ func _ready() -> void:
 const ROLE_COLORS: Dictionary = {
 	"Farmer":    Color(0.2, 1, 0.2, 1),
 	"Baker":     Color(0.8, 0.6, 0.2, 1),
+	"Woodworker": Color(0.6, 0.4, 0.2, 1),
 	"Household": Color(1, 0.4, 1, 1),
 }
 
 const ROLE_GROUPS: Dictionary = {
 	"Farmer":    "farmers",
 	"Baker":     "bakers",
+	"Woodworker": "woodworkers",
 	"Household": "households",
 }
 
@@ -194,6 +196,8 @@ func set_role(role: String) -> void:
 			current_job = FarmerJob.new()
 		"Baker":
 			current_job = BakerJob.new()
+		"Woodworker":
+			current_job = WoodworkerJob.new()
 		"Household":
 			current_job = HouseholdJob.new()
 

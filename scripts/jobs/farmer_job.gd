@@ -141,14 +141,15 @@ func set_tick(t: int) -> void:
 	_maybe_evaluate_trade(t)
 
 
-const STARTING_CASH: float = 500.0
+const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (households start with 60)
+const HOME_FIREWOOD: int = 4         # firewood kept for the farmer's own hearth
 var wheat_harvested_today: int = 0
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(STARTING_CASH)
 	if inv:
-		inv.items = {"seeds": 50, "wheat": 0, "bread": 2}
+		inv.items = {"seeds": 50, "wheat": 0, "bread": 2, "firewood": 4}
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability
 	inventory_throttle = agent.get_node_or_null("InventoryThrottle") as InventoryThrottle
 	route.bind(agent)
@@ -316,8 +317,9 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 	if field.is_mature():
 		var harvest_result = field.harvest()
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
-		# Hired hands work the field with the farmer: more labour, more yield.
-		var _hand_mult: float = 1.0 + LaborMarket.HAND_OUTPUT_BOOST * LaborMarket.hands_of(agent)
+		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
+		# in one more farmer's worth of wheat (more land worked, not more wheat per field).
+		var _hand_mult: float = 1.0 + float(LaborMarket.hands_of(agent))
 		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * _sk_mult * _hand_mult * (market.soil_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))
@@ -365,6 +367,7 @@ func handle_market_arrival() -> void:
 			agent.log_event(
 				"Sold %d wheat at $%.2f each (%s)." % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")]
 			)
+	buy_firewood_to(HOME_FIREWOOD)
 	if inv.get_qty("seeds") < 20:
 		var _cf_seeds_snap: float = agent.get_cash()
 		market.sell_seeds_to_farmer(agent)
@@ -409,6 +412,7 @@ func on_day_changed(_day: int) -> void:
 		agent.cashflow_today_expense += maintenance_cost_per_day
 	day_money_start = wallet.money if wallet else 0.0
 	set_meta("output_ema", 0.3 * float(wheat_harvested_today) + 0.7 * float(get_meta("output_ema", float(wheat_harvested_today))))
+	_update_overhead()
 	wheat_harvested_today = 0
 	fields_worked_today = 0
 	warned_no_field_today = false
@@ -853,3 +857,12 @@ func _on_trade_arrival() -> void:
 				agent.home_village_ref.record_trade_export("wheat", sold_qty)
 		_begin_trade_commit_window(agent.current_tick, arrived_village.village_name)
 		route.wait(WAIT_TIME)
+
+
+## What a bushel costs beyond its seed: the hands' wages and the farm's upkeep, spread over a
+## normal day's harvest. The profit check adds this to the seed cost (batch 3).
+func _update_overhead() -> void:
+	if market == null or profit == null:
+		return
+	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 10.0)
+	profit.overhead_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.daily_wage(market) + maintenance_cost_per_day) / per_day

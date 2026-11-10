@@ -9,6 +9,8 @@ class_name LaborMarket
 # ─── Signals ────────────────────────────────────────────────────────────────
 signal migrate_requested(agent: Node, reason: String)
 signal role_switch_requested(household: Node, new_role: String)
+## Batch 3: a business that fails closes; its owner stays in town as a household.
+signal business_failed(agent: Node)
 
 # ─── EMA constants (diagnostics + spawn suppression) ────────────────────────
 const EMA_ALPHA: float = 0.2
@@ -24,7 +26,9 @@ const EVAL_INTERVAL_DAYS: int = 7
 const IMPROVEMENT_MARGIN: float = 0.15
 const RECENT_SWITCH_MARGIN: float = 0.25
 const RECENT_SWITCH_WINDOW_DAYS: int = 30
-const SAVINGS_BUFFER_REQUIRED: float = 200.0
+const SAVINGS_BUFFER_REQUIRED: float = 100.0   # batch 3: coins saved before opening a business (was 200)
+const STARTUP_COST: float = 50.0               # batch 3: paid to the town market on opening
+const COLD_DAYS_TO_LEAVE: int = 4              # batch 3: days without firewood before leaving town
 const FOOD_BUFFER_FRACTION: float = 2.0 / 3.0
 
 # ─── Migration constants ──────────────────────────────────────────────────────
@@ -43,8 +47,8 @@ const BROKE_LOAVES: float = 3.0
 ## farm or bakery hands and pays them a daily wage out of their own wallet.
 ## Set by config ("labor": {"mode": ...}) or --labor-mode=<mode> after "--".
 var labor_mode: String = "wages"   # hiring (batch 2 default); "switching" lets producers change trade
-const HAND_WAGE_LOAVES: float = 2.0       # a day's wage, in loaves at today's bread price
-const HAND_OUTPUT_BOOST: float = 0.5      # each hand adds this share of the employer's own output
+const WAGE_MARKUP: float = 1.25           # batch 3: wage = (1 loaf + 1 firewood at today's prices) x this
+const HAND_STEPS: Array = [1.0, 1.5, 1.75]  # baker/woodworker output with 0, 1, 2 hands
 const MAX_HANDS: int = 2
 const HIRE_CASH_DAYS: float = 10.0        # employer keeps this many days of wages in hand
 const FIRE_LOSS_DAYS: int = 5             # days of falling cash before a hand is let go
@@ -80,6 +84,8 @@ var farmer_profit_ema: float = 0.0
 var baker_profit_ema: float = 0.0
 var bread_scarcity_ema: float = 0.0
 var wheat_scarcity_ema: float = 0.0
+var firewood_scarcity_ema: float = 0.0
+var _wood_entry_day: int = -999
 
 # ─── Prev-day money snapshots (for daily profit delta) ──────────────────────
 var farmer_prev_money: Dictionary = {}  # agent → float
@@ -91,6 +97,7 @@ var baker_prev_money: Dictionary = {}   # agent → float
 var all_farmers: Array = []
 var all_bakers: Array = []
 var all_households: Array = []
+var all_woodworkers: Array = []
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market = null
@@ -177,6 +184,8 @@ func update_daily(day: int) -> void:
 		elif market.wheat <= 0:
 			wheat_scarce = 1.0
 	bread_scarcity_ema = _ema(bread_scarcity_ema, bread_scarce)
+	if market != null:
+		firewood_scarcity_ema = _ema(firewood_scarcity_ema, clampf(1.0 - float(market.firewood) / float(maxi(1, market.firewood_target)), 0.0, 1.0))
 	wheat_scarcity_ema = _ema(wheat_scarcity_ema, wheat_scarce)
 
 	# Daily population + macro-conditions snapshots
@@ -216,6 +225,8 @@ func update_daily(day: int) -> void:
 	# Batch 2: hiring hands is how households earn, so it runs in both modes; the modes now
 	# differ only in whether farmers and bakers may change trade.
 	_update_hands(day)
+	# Batch 3: every hearth burns one firewood a day.
+	_update_firewood(day)
 
 	# Evaluate producers for sustained-loss migration
 	_evaluate_producer_migration(day)
@@ -546,6 +557,12 @@ func _evaluate_household(h: Node, day: int) -> void:
 	# Determine best alternative
 	var best_u: float = maxf(u_farmer, u_baker)
 	var best_role: String = "Farmer" if u_farmer >= u_baker else "Baker"
+	# Batch 3: opening a wood yard is a third option, judged the same way. At most one
+	# household takes it per evaluation week, so a firewood shortage is not answered by a crowd.
+	var u_wood: float = _woodworker_utility(ce)
+	if u_wood > best_u and day - _wood_entry_day >= EVAL_INTERVAL_DAYS:
+		best_u = u_wood
+		best_role = "Woodworker"
 
 	# Skip if the best role IS the current role
 	if best_role == h.current_role:
@@ -609,6 +626,8 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_entries_to_farmer_today += 1
 	elif best_role == "Baker":
 		_entries_to_baker_today += 1
+	elif best_role == "Woodworker":
+		_wood_entry_day = day
 
 
 # ─── Producer migration evaluation ───────────────────────────────────────────
@@ -616,7 +635,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 ## Producers leave only after a losing streak that has left them broke, and never the last of
 ## their trade: a town that still eats bread keeps its last farmer and its last baker.
 func _evaluate_producer_migration(_day: int) -> void:
-	for group in [all_farmers, all_bakers]:
+	for group in [all_farmers, all_bakers, all_woodworkers]:
 		for p in group.duplicate():
 			if not (p and is_instance_valid(p)):
 				continue
@@ -630,10 +649,11 @@ func _evaluate_producer_migration(_day: int) -> void:
 						p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
 				continue
 			if event_bus:
-				event_bus.emit_log("[LaborMkt] %s migrating: %d losing days and broke ($%.1f)" % [
+				event_bus.emit_log("[LaborMkt] %s closing shop: %d losing days and broke ($%.1f)" % [
 					p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
 			_release_hands(p, "employer left")
-			migrate_requested.emit(p, "negative_profit")
+			# Batch 3: the business closes and its owner looks for work; nobody leaves town for it.
+			business_failed.emit(p)
 
 
 func _is_broke(p: Node) -> bool:
@@ -714,17 +734,18 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 
 # ─── Hands and wages (both modes since batch 2) ──────────────────────────────────────
 
-## Daily: each employer pays each hand HAND_WAGE_LOAVES loaves' worth (money moves from one
-## wallet to the other; none is made or destroyed). An employer lets a hand go when it cannot
-## pay, or after FIRE_LOSS_DAYS days of its cash falling; it takes one on when it can keep
-## HIRE_CASH_DAYS of wages in hand and the hand's extra output (HAND_OUTPUT_BOOST of its own,
-## valued at today's prices) is worth more than the wage. Households without an employer are
+## Daily: each employer pays each hand the day's wage in coins (daily_wage: one loaf plus one
+## firewood at today's prices, times WAGE_MARKUP; money moves from one wallet to the other,
+## none is made or destroyed). An employer lets a hand go when it cannot pay, or after
+## FIRE_LOSS_DAYS days of its cash falling; it takes one on when it can keep HIRE_CASH_DAYS of
+## wages in hand, its goods are not piling up unsold at the market, and the hand's extra
+## output at today's prices is worth more than the wage. Households without an employer are
 ## the labour pool.
 func _update_hands(day: int) -> void:
-	var wage: float = HAND_WAGE_LOAVES * (market.bread_price if market else 2.5)
+	var wage: float = daily_wage(market)
 	var paid: float = 0.0
 	var employed: int = 0
-	for p in all_farmers + all_bakers:
+	for p in all_farmers + all_bakers + all_woodworkers:
 		if not (p and is_instance_valid(p)):
 			continue
 		var hands: Array = p.get_meta("hands", [])
@@ -740,6 +761,7 @@ func _update_hands(day: int) -> void:
 				p.wallet.debit(wage)
 				h.wallet.credit(wage)
 				p.cashflow_today_expense += wage
+				h.cashflow_today_income += wage
 				paid += wage
 				kept.append(h)
 			else:
@@ -749,8 +771,8 @@ func _update_hands(day: int) -> void:
 			# A losing stretch: let one go.
 			_let_go(p, hands.pop_back(), day, "losing money")
 			falling = 0
-		elif hands.size() < MAX_HANDS and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1):
-			var value: float = _hand_value(p)
+		elif hands.size() < MAX_HANDS and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
+			var value: float = _hand_value(p, hands.size())
 			if value > wage * 1.1:
 				var h = _free_hand()
 				if h != null:
@@ -771,16 +793,96 @@ func _update_hands(day: int) -> void:
 			event_bus.emit_log(line)
 
 
-## Value of one more hand to `p` per day: HAND_OUTPUT_BOOST of what it made per day (output_ema:
-## wheat for a farmer, bread for a baker, less the wheat in the bread) at today's market prices.
-func _hand_value(p: Node) -> float:
+## Value per day of one more hand to `p`, who has `n` hands now, at today's prices.
+## Farmer: a hand works fields of its own, so it adds one farmer's worth of wheat.
+## Baker and woodworker: the next step of HAND_STEPS (half again, then a quarter more) of
+## what the owner makes alone; bread is counted less its wheat and oven firewood.
+func _hand_value(p: Node, n: int) -> float:
 	var job = p.current_job
 	if job == null or market == null:
 		return 0.0
 	var made: float = float(job.get_meta("output_ema", 0.0))
 	if p.current_role == "Farmer":
-		return HAND_OUTPUT_BOOST * made * market.wheat_price
-	return HAND_OUTPUT_BOOST * made * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 1.0)))
+		return made / float(1 + n) * market.wheat_price
+	var last: int = HAND_STEPS.size() - 1
+	var step: float = float(HAND_STEPS[mini(n + 1, last)]) - float(HAND_STEPS[mini(n, last)])
+	var alone: float = made / float(HAND_STEPS[mini(n, last)])
+	if p.current_role == "Woodworker":
+		return step * alone * market.firewood_bid()
+	return step * alone * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
+
+
+## True when the employer's goods are already piling up at the market: more hands would only
+## make more of what is not selling.
+func _overstocked(p: Node) -> bool:
+	if market == null:
+		return false
+	var band: float = 1.0 + float(market.TARGET_BAND_PCT)
+	match p.current_role:
+		"Farmer":
+			return float(market.wheat) > float(market.wheat_target) * band
+		"Baker":
+			return float(market.bread) > float(market.bread_target) * band
+		"Woodworker":
+			return float(market.firewood) > float(market.firewood_target) * band
+	return false
+
+
+## Output multiplier for a baker or woodworker with their current hands.
+static func hand_mult(p: Node) -> float:
+	return float(HAND_STEPS[mini(hands_of(p), HAND_STEPS.size() - 1)])
+
+
+## A hand's daily wage in coins: one loaf plus one firewood at today's prices, times WAGE_MARKUP.
+static func daily_wage(m) -> float:
+	if m == null:
+		return 5.9
+	return (float(m.bread_price) + float(m.firewood_price)) * WAGE_MARKUP
+
+
+## Daily: every person burns one firewood. A hearth with none is a cold day; after
+## COLD_DAYS_TO_LEAVE cold days in a row the person leaves town. The last of a trade stays.
+func _update_firewood(day: int) -> void:
+	var groups: Array = [all_households, all_farmers, all_bakers, all_woodworkers]
+	var cold: int = 0
+	for gi in groups.size():
+		var group: Array = groups[gi]
+		for a in group.duplicate():
+			if not (a and is_instance_valid(a)) or a.inv == null:
+				continue
+			var have: int = a.inv.get_qty("firewood")
+			if have > 0:
+				a.inv.items["firewood"] = have - 1
+				a.set_meta("cold_days", 0)
+				continue
+			var n: int = int(a.get_meta("cold_days", 0)) + 1
+			a.set_meta("cold_days", n)
+			cold += 1
+			if n < COLD_DAYS_TO_LEAVE or day < STARTUP_GRACE_DAYS:
+				continue
+			if gi > 0 and _live_count(group) <= 1:
+				continue
+			if event_bus:
+				event_bus.emit_log("[FIREWOOD] day=%d %s leaving: %d days without firewood ($%.1f)" % [day, a.name, n, a.get_cash()])
+			if gi > 0:
+				_release_hands(a, "employer left")
+			migrate_requested.emit(a, "no_firewood")
+	if day % 5 == 0 and market != null:
+		var line: String = "[FIREWOOD] day=%d price=$%.2f stock=%d/%d cold_hearths=%d woodworkers=%d" % [
+			day, market.firewood_price, market.firewood, market.firewood_target, cold, _live_count(all_woodworkers)]
+		print(line)
+		if event_bus:
+			event_bus.emit_log(line)
+
+
+## How opening a wood yard looks to a household: what a woodworker has been clearing a day,
+## plus a pull when firewood is short, less the same switching cost and risk the other trades use.
+func _woodworker_utility(ce) -> float:
+	if econ_stats == null or ce == null:
+		return -999.0
+	var n: int = maxi(1, _live_count(all_woodworkers))
+	var avg: float = econ_stats.role_rolling_7d_avg("Woodworker") / float(n)
+	return avg + firewood_scarcity_ema * 5.0 - 2.0 - float(ce.last_risk) * 3.0
 
 
 ## The poorest household that has no employer.
@@ -827,7 +929,7 @@ static func hands_of(p: Node) -> int:
 ## Returns true when bread scarcity is high enough that new household spawns
 ## should be suppressed (no point growing population into a famine).
 func should_suppress_spawn() -> bool:
-	return bread_scarcity_ema >= SPAWN_SUPPRESS_SCARCITY
+	return bread_scarcity_ema >= SPAWN_SUPPRESS_SCARCITY or firewood_scarcity_ema >= SPAWN_SUPPRESS_SCARCITY
 
 
 # ─── Eval-day diagnostic aggregation ─────────────────────────────────────────

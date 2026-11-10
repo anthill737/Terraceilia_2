@@ -69,13 +69,14 @@ func get_job_inspector_data() -> Dictionary:
 	return d
 
 
-const STARTING_CASH: float = 500.0
+const STARTING_CASH: float = 60.0    # batch 3: a household's purse (was 500)
+const HOME_FIREWOOD: int = 3         # firewood kept for the hearth
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(STARTING_CASH)
 	if inv:
-		inv.items = {"bread": 0}
+		inv.items = {"bread": 0, "firewood": 3}
 	agent._health_bar_y = -24.0
 	route.bind(agent)
 	route.speed = SPEED
@@ -147,6 +148,7 @@ func _on_arrived(t: Node2D) -> void:
 	agent.idle_ticks = 0
 	if t == market_location:
 		attempt_buy_bread()
+		buy_firewood_to(HOME_FIREWOOD)
 		phase = Phase.AT_MARKET
 		agent.pending_target = home_location
 		route.wait(WAIT_TIME)
@@ -225,6 +227,8 @@ func consume_bread_at_home() -> void:
 func needs_food_trip() -> bool:
 	if inv == null or hunger == null:
 		return false
+	if needs_firewood():
+		return true
 	if agent.current_tick - last_market_trip_tick < market_trip_cooldown_ticks:
 		return false
 	var current_bread: int = inv.get_qty("bread")
@@ -331,3 +335,8 @@ func _on_starved(agent_name_param: String) -> void:
 	if event_bus:
 		event_bus.emit_log("STARVATION: %s died (hunger depleted, no food available)" % agent_name_param)
 	agent.agent_died.emit(agent)
+
+
+## True when the hearth is down to its last stick: time to go to market (batch 3).
+func needs_firewood() -> bool:
+	return inv != null and inv.get_qty("firewood") <= 1

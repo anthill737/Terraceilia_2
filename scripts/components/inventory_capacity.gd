@@ -16,8 +16,10 @@ func current_total() -> int:
 	if inv == null:
 		return 0
 	var total: int = 0
-	for qty in inv.items.values():
-		total += int(qty)
+	for item in inv.items.keys():
+		if item == "firewood":
+			continue   # stacked by the door, not carried in the pack (batch 3)
+		total += int(inv.items[item])
 	return total
 
 

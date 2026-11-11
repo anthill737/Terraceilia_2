@@ -18,8 +18,15 @@ const MAX_LOG_LINES: int = 200
 const MAX_BUFFER_LINES: int = 20000
 ## The buffer is cut back only once it is this far over the cap, so the cut is not per line.
 const BUFFER_TRIM_SLACK: int = 2000
-## Set when a message arrives; the visible text is rewritten once in the next frame.
+## Set when the text on show changed. The panel is rewritten at most REDRAW_EVERY_MS of real
+## time apart, and only while it is on screen. It used to be rewritten every frame a message
+## came in, which at high speed was every frame: three quarters of the game's frame time went
+## on laying out the same 200 lines again.
 var _log_dirty: bool = false
+const REDRAW_EVERY_MS: int = 250
+var _last_redraw_ms: int = -100000
+## How many times the text was rewritten (tests).
+var redraws: int = 0
 const SCROLL_THRESHOLD: int = 50
 
 
@@ -64,22 +71,31 @@ func _on_event_logged(msg: String) -> void:
 		news_lines.append(news)
 		while news_lines.size() > MAX_LOG_LINES:
 			news_lines.pop_front()
+		_log_dirty = true
 
 	while log_lines.size() > MAX_LOG_LINES:
 		log_lines.pop_front()
 	if log_buffer.size() > MAX_BUFFER_LINES + BUFFER_TRIM_SLACK:
 		log_buffer.assign(log_buffer.slice(log_buffer.size() - MAX_BUFFER_LINES))
 
-	_log_dirty = true
+	# Town news only changes when a news line comes in; the full log changes with every message.
+	if show_everything:
+		_log_dirty = true
 
 
-## Rewrite the visible log at most once a frame, however many messages came in.
+## Rewrite the visible log when its text changed, at most every REDRAW_EVERY_MS of real time
+## (whatever the game speed) and only while it is on screen.
 func _process(_delta: float) -> void:
-	if not _log_dirty:
+	if not _log_dirty or event_log == null:
 		return
+	if not event_log.is_visible_in_tree():
+		return
+	var now: int = Time.get_ticks_msec()
+	if now - _last_redraw_ms < REDRAW_EVERY_MS:
+		return
+	_last_redraw_ms = now
 	_log_dirty = false
-	if event_log == null:
-		return
+	redraws += 1
 	event_log.clear()
 	if show_everything:
 		event_log.append_text("Everything (press L for town news)\n\n" + "\n".join(log_lines) + "\n")
@@ -94,6 +110,7 @@ func toggle_everything() -> void:
 	show_everything = not show_everything
 	user_at_bottom = true
 	_log_dirty = true
+	_last_redraw_ms = -100000   # show the switch at once
 
 
 ## "[TAG] day=12 text" -> "Day 12: text".

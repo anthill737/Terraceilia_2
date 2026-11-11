@@ -36,6 +36,9 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   house on the first morning, that each switch holds for 12 days, the menu's rows, readout and
   reset, and that scenario files save and load. Any game test also takes `--scenario=name` and
   `--set key=value` after `--`.
+- `res://scenes/TestLogPanel.tscn`: runs the game at 10x and checks (8 checks) that the Event Log
+  is rewritten at most 4 times a second and no more often than town news comes in, that it
+  shows the newest news line, and that L switches to everything and back at once.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

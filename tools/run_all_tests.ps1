@@ -102,6 +102,16 @@ if ($ec5 -ne 0) {
 }
 
 Write-Host ""
+Write-Host "=== Headless TestLogPanel.tscn (Event Log shows the right text without redrawing every frame) ===" -ForegroundColor Cyan
+$ec6 = Invoke-GodotHeadlessScene "res://scenes/TestLogPanel.tscn"
+if ($ec6 -ne 0) {
+    Write-Host "TestLogPanel FAILED (exit $ec6)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestLogPanel OK." -ForegroundColor Green
+}
+
+Write-Host ""
 if ($failed) {
     Write-Host "SUITE: FAIL" -ForegroundColor Red
     exit 1

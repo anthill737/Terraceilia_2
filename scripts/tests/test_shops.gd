@@ -149,7 +149,7 @@ class Probe extends Node:
 			4:
 				if LaborMarket.hands_of(baker) >= 3 or day > day0 + 8:
 					_check("a third hand is taken on", LaborMarket.hands_of(baker) == 3, "%d hands on day %d" % [LaborMarket.hands_of(baker), day])
-					var want: int = maxi(1, roundi(12.0 * m.oven_mult * m.shock_oven_mult * LaborMarket.hand_mult_n(baker, 3)))
+					var want: int = maxi(1, roundi(12.0 * m.oven_mult * m.shock_oven_mult * LaborMarket.hand_mult(baker)))
 					_check("and the bakery makes more for it", baker.current_job._oven_capacity() == want and want > roundi(12.0 * LaborMarket.hand_mult_n(baker, 2)),
 						"%d loaves a day with three hands, %d with two" % [baker.current_job._oven_capacity(), roundi(12.0 * m.oven_mult * m.shock_oven_mult * LaborMarket.hand_mult_n(baker, 2))])
 					# Staged: the baker is gone; the bakery is taken over the next morning.

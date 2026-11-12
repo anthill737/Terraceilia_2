@@ -688,6 +688,11 @@ func _evaluate_producer_migration(_day: int) -> void:
 
 ## True when the market is short of what `role` makes: its stock is below the stock target
 ## (a few days of what people actually buy).
+## Tried 2026-11-13 and taken back out: "below the price band under the target" instead. It
+## cut bakery openings from 851 to 150 in eight towns, but wheat arrives in lumps and is
+## rarely under the band three days running, so a town sat on one farm with wheat at 2.50;
+## and with fewer failed shops paying in, the market's purse ran dry in 2 of 8 towns and 43
+## people starved holding coins (docs/SKILL.md).
 func _market_wants(role: String) -> bool:
 	if market == null:
 		return true
@@ -846,7 +851,7 @@ func _update_hands(day: int) -> void:
 		elif p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
 			var value: float = _hand_value(p, hands.size())
 			if value > wage * 1.1:
-				var h = _free_hand()
+				var h = _free_hand_for(p)
 				if h != null:
 					hands.append(h)
 					h.set_meta("employer", p)
@@ -887,7 +892,9 @@ func _hand_value(p: Node, n: int) -> float:
 	if job == null or market == null:
 		return 0.0
 	var made: float = float(job.get_meta("output_ema", 0.0))
-	var extra: float = made / hand_mult_n(p, n) * hand_gain(p, n + 1)
+	# What the owner makes alone, times the next place, times how good the person who would
+	# fill it is (the most skilled person free today).
+	var extra: float = made / hand_mult(p) * hand_gain(p, n + 1) * hand_skill_factor(p, _free_hand_for(p))
 	match str(p.current_role):
 		"Farmer":
 			return extra * market.wheat_price
@@ -939,7 +946,7 @@ static func hand_gain(p: Node, k: int) -> float:
 	return _first_gain(p) * pow(falloff, float(k - 1))
 
 
-## Output multiplier of `p`'s shop with `n` hired hands.
+## Output multiplier of `p`'s shop with `n` hired hands of ordinary skill.
 static func hand_mult_n(p: Node, n: int) -> float:
 	var m: float = 1.0
 	for k in range(1, n + 1):
@@ -947,9 +954,30 @@ static func hand_mult_n(p: Node, n: int) -> float:
 	return m
 
 
-## Output multiplier of `p`'s shop with the hands it has today.
+## How good `h` is at `p`'s trade, as a share of a hand new to it (docs/SKILL.md): what a hand
+## adds is the place they fill (hand_gain) times this. Someone new to the trade counts 1.0,
+## so a new hand adds what a hand always added, and a master about a third more.
+static func hand_skill_factor(p: Node, h) -> float:
+	if not Tuning.on("worker_skill", true) or h == null or not is_instance_valid(h) or not h.has_method("skill_in"):
+		return 1.0
+	return SkillSet.factor(h.skill_in(str(p.current_role))) / SkillSet.factor(SkillSet.START)
+
+
+## Output multiplier of `p`'s shop with the hands it has today. The most skilled hand counts
+## in the first place, where a hand adds most.
 static func hand_mult(p: Node) -> float:
-	return hand_mult_n(p, hands_of(p))
+	if p == null or not p.has_meta("hands"):
+		return 1.0
+	var factors: Array = []
+	for h in p.get_meta("hands", []):
+		if is_instance_valid(h):
+			factors.append(hand_skill_factor(p, h))
+	factors.sort()
+	factors.reverse()
+	var m: float = 1.0
+	for k in range(factors.size()):
+		m += hand_gain(p, k + 1) * float(factors[k])
+	return m
 
 
 ## A shop's level (docs/SHOP_LEVELS.md): 1 as built, up to SHOP_MAX_LEVEL after extensions.
@@ -1097,6 +1125,26 @@ func _update_cottagers(_day: int) -> void:
 			h.days_in_survival_mode = 0
 		if h.inv.get_qty("firewood") < GATHERED_WOOD_KEEP:
 			h.inv.items["firewood"] = h.inv.get_qty("firewood") + GATHERED_WOOD_PER_DAY + (market.shock_extra_burn if market else 0)
+
+
+## Who `p` takes on: of the people free today, the one most skilled in `p`'s trade, and
+## among equals the poorest (docs/SKILL.md).
+func _free_hand_for(p: Node):
+	if not Tuning.on("worker_skill", true) or p == null:
+		return _free_hand()
+	var trade: String = str(p.current_role)
+	var best = null
+	for h in all_households:
+		if not (h and is_instance_valid(h)):
+			continue
+		if h.has_meta("employer") and is_instance_valid(h.get_meta("employer")):
+			continue
+		if h.has_meta("builds_house") or h.has_meta("merchant"):
+			continue
+		if best == null or h.skill_in(trade) > best.skill_in(trade) + 0.001 \
+				or (absf(h.skill_in(trade) - best.skill_in(trade)) <= 0.001 and h.get_cash() < best.get_cash()):
+			best = h
+	return best
 
 
 ## The poorest household that has no employer.

@@ -154,9 +154,10 @@ class Probe extends Node:
 				elif not is_instance_valid(newcomer):
 					_check("the newcomer is taken on", false, "they are gone")
 					_next_phase(main)
-				elif (newcomer.has_meta("employer") and is_instance_valid(newcomer.get_meta("employer"))) or day > day0 + 5:
+				# A farm's want of a hand comes and goes with its harvest days, so give it two weeks.
+				elif (newcomer.has_meta("employer") and is_instance_valid(newcomer.get_meta("employer"))) or day > day0 + 14:
 					var boss = newcomer.get_meta("employer") if newcomer.has_meta("employer") else null
-					_check("the newcomer is taken on within days", boss != null and is_instance_valid(boss), "%s works for %s" % [newcomer_name, str(boss.name) if boss != null and is_instance_valid(boss) else "nobody"])
+					_check("the newcomer is taken on within two weeks", boss != null and is_instance_valid(boss), "%s works for %s" % [newcomer_name, str(boss.name) if boss != null and is_instance_valid(boss) else "nobody"])
 					_next_phase(main)
 
 	# ── 2. No job is waiting: someone comes with the means to open a shop ───

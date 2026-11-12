@@ -319,8 +319,9 @@ class Probe extends Node:
 					day0 = day
 					stage = 1
 			1:
-				# Staged: plenty of wheat on the shelf, so the town is not short.
-				v.market.wheat = maxi(v.market.wheat, v.market.wheat_target + 5)
+				# Staged: a full wheat shelf, so the town is not short. (Topping it up to just over
+				# the target was not enough: a baker can buy 30 sacks between two frames.)
+				v.market.wheat = maxi(v.market.wheat, v.market.wheat_capacity)
 				if day >= day0 + 4:
 					_check("with a farmer in town and wheat on the shelf, the empty farm stays empty",
 						v.all_farmers.size() == 1 and v.recovery.empty_shops("Farmer") == 1 and int(v.recovery.stats.takeovers) == takeovers_then,

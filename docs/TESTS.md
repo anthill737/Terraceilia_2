@@ -42,7 +42,7 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
 - `res://scenes/TestMarket.tscn`: the bread and wheat price rules (docs/BREAD_MARKET.md), a staged
   shortage and overfull shelf in the real game, and that the books balance to the coin.
 - `res://scenes/TestLongRun.tscn -- [--days=1500] [--scenario=x] [--set k=v] [--wipe-day=N]
-  [--rows=x.jsonl] [--news=x.txt]`: plays the game for a long time and fails when a town empties,
+  [--rows=x.jsonl] [--news=x.txt] [--past-full]`: plays the game for a long time and fails when a town empties,
   someone starves holding coins for a loaf, a market purse runs dry, a town goes 30 days without
   a farmer or baker, or the books do not balance. Run with `--fixed-fps 5`: 1,500 days take
   about two minutes.
@@ -54,6 +54,10 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   closed for want of trade is not handed on; that a woodworker with
   coins and no bread to buy takes the empty farm and the only baker does not; that merchants hold
   back their trading coins and carry bread or wheat in; and that nobody is sent from outside.
+- `res://scenes/TestArrivals.tscn`: who comes to town (docs/WHO_ARRIVES.md). Checks (11 checks) that
+  with a job waiting and nobody free the newcomer comes looking for work with a newcomer's purse
+  and is taken on; that with no job waiting the newcomer brings the coins a shop takes and puts
+  them into a shop or a house; and that with the switch off nobody comes while people lack work.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

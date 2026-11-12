@@ -58,6 +58,16 @@ func role_rolling_7d_sum(role: String) -> float:
 	return s
 
 
+## How many people are in `role` today.
+func role_count(role: String) -> int:
+	var list: Array = {"Farmer": _farmers, "Baker": _bakers, "Woodworker": _woodworkers, "Household": _households}.get(role, [])
+	var n: int = 0
+	for a in list:
+		if is_instance_valid(a):
+			n += 1
+	return n
+
+
 func role_rolling_7d_avg(role: String) -> float:
 	var hist: Array = _cashflow_7d.get(role, [])
 	if hist.is_empty():

@@ -176,12 +176,16 @@ func _compute_utility(income: float, skill: float, switch_cost: float, risk: flo
 func _expected_income(role: String, pop_avg: float, current_role: String, econ_stats: Node) -> float:
 	if current_role == role:
 		return pop_avg
-	# For non-current roles, use global average (we don't track per-role history).
-	# Experience gives a small confidence boost via the skill_factor already.
+	# For another trade: what that trade takes in a day, shared among its shops with one more
+	# (this one) added. role_rolling_7d_avg is the whole trade's takings, and until 2026-11-13
+	# a newcomer expected all of it for themselves, however many shops were already sharing
+	# it: with coins to open one, people opened bakery after bakery (779 in 1,500 days) and
+	# went broke.
 	var global_avg: float = 0.0
 	if econ_stats and econ_stats.has_method("role_rolling_7d_avg"):
 		global_avg = econ_stats.role_rolling_7d_avg(role)
-	return global_avg
+	var shops: int = econ_stats.role_count(role) if econ_stats and econ_stats.has_method("role_count") else 0
+	return global_avg / float(shops + 1)
 
 
 func _switch_cost(current_role: String, target_role: String, cooldown: int) -> float:

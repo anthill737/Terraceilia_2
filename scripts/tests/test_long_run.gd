@@ -33,6 +33,7 @@ class Probe extends Node:
 	var news_path := ""
 	var result_path := ""
 	var no_ui := false
+	var past_full := false
 	var wipe_day := -1
 	var wipe_village := 1
 	var rows_file: FileAccess = null
@@ -65,6 +66,7 @@ class Probe extends Node:
 			if arg.begins_with("--news="): news_path = arg.substr(7)
 			if arg.begins_with("--result="): result_path = arg.substr(9)
 			if arg == "--no-ui": no_ui = true
+			if arg == "--past-full": past_full = true   # keep going after a town reaches its size limit
 			if arg.begins_with("--wipe-day="): wipe_day = int(arg.substr(11))
 			if arg.begins_with("--wipe-village="): wipe_village = int(arg.substr(15))
 		if rows_path != "":
@@ -115,7 +117,7 @@ class Probe extends Node:
 			_check_books(world, max_day)
 		var ended := 0
 		for vid in st:
-			if st[vid].dead_run >= DEAD_HOLD or st[vid].full_day >= 0:
+			if st[vid].dead_run >= DEAD_HOLD or (st[vid].full_day >= 0 and not past_full):
 				ended += 1
 		if st.size() >= world.villages.size() and ended >= st.size():
 			_finish("every village is dead or full")

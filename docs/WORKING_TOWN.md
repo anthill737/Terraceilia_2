@@ -34,10 +34,10 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
 
 ## Who comes to town
 
-A newcomer arrives when the town is doing well, a house is empty, and at most one person in town
-is without work. So the town never fills with people it has nothing for. Before, anyone came
-whenever food looked fine, found no work, went broke in about 12 days and left: about 25 leavers
-per village in 120 days.
+A newcomer arrives when the town is doing well and a house is empty. Who comes depends on the
+town (docs/WHO_ARRIVES.md, 2026-11-13): when a job is waiting and nobody is free, someone comes
+looking for work; otherwise the person who comes brings the coins to open a shop. (Until then
+nobody came while more than one person lacked work, and towns stopped at about 25 people.)
 
 A household opens a farm, bakery or wood yard only when it has the savings and the market has
 been short of that good three days running.

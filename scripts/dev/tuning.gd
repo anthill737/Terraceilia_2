@@ -35,7 +35,7 @@ const INPUTS: Array = [
 
 	{"k": "arrival_prosperity_bar", "g": "Newcomers", "t": "Prosperity needed for a newcomer (0 to 1)", "d": 0.7, "lo": 0.0, "hi": 1.0, "st": 0.05},
 	{"k": "arrival_wait_days", "g": "Newcomers", "t": "Fewest days between two newcomers", "d": 3, "lo": 0, "hi": 365, "st": 1},
-	{"k": "arrival_max_idle", "g": "Newcomers", "t": "Newcomers come only if this many or fewer lack work", "d": 1, "lo": 0, "hi": 999, "st": 1},
+	{"k": "arrival_max_idle", "g": "Newcomers", "t": "Old rule (switch off below): none come if more than this lack work", "d": 1, "lo": 0, "hi": 999, "st": 1},
 	{"k": "arrival_needs_free_house", "g": "Newcomers", "t": "A newcomer needs an empty house", "d": true},
 	{"k": "town_size_limit", "g": "Newcomers", "t": "Most people in one town", "d": 50, "lo": 1, "hi": 500, "st": 1},
 
@@ -43,6 +43,7 @@ const INPUTS: Array = [
 	{"k": "house_build_days", "g": "Houses", "t": "Days of work to build a house", "d": 5, "lo": 1, "hi": 365, "st": 1},
 	{"k": "houses_spare_at_start", "g": "Houses", "t": "Empty houses when the town starts", "d": 2, "lo": 0, "hi": 100, "st": 1},
 
+	{"k": "arrivals_follow_jobs", "g": "Switches", "t": "Who arrives follows jobs: workers, or people with coins", "d": true},
 	{"k": "gardens", "g": "Switches", "t": "Garden plots feed people without work", "d": true},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},

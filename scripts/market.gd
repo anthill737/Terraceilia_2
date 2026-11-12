@@ -27,8 +27,7 @@ var shock_extra_burn: int = 0
 var oven_mult: float = 1.0   # loaves per oven day
 
 const SEED_PRICE: float = 0.5
-const WHEAT_PRICE_CEILING: float = 5.00
-const BREAD_PRICE_CEILING: float = 10.00
+## Bread and wheat have a floor (1.00) and no ceiling: demand sets the price (docs/BREAD_MARKET.md).
 const PRICE_STEP: float = 0.10  # 10% adjustment per day
 
 # Price floors - stable lower bounds for staple goods
@@ -251,8 +250,8 @@ func set_tick(t: int) -> void:
 		])
 	
 	# Enforce price floors and ceilings
-	wheat_price = clamp(wheat_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
-	bread_price = clamp(bread_price, BREAD_PRICE_FLOOR, Tuning.f("bread_price_ceiling", BREAD_PRICE_CEILING))
+	wheat_price = maxf(wheat_price, WHEAT_PRICE_FLOOR)
+	bread_price = maxf(bread_price, BREAD_PRICE_FLOOR)
 	
 	# Update producer hysteresis state based on inventory bands
 	_update_producer_hysteresis("wheat", wheat, wheat_target)
@@ -1199,7 +1198,13 @@ func _adjust_wheat_price(day: int) -> void:
 	elif wheat_total_cleared == 0:
 		# PART 2: Distinguish market-blocked from no-demand
 		
-		if wheat_market_buy_blocked:
+		if wheat < lower_band and wheat_short_today > 0:
+			# Buyers went without and the shelf is low: the price rises (docs/BREAD_MARKET.md). It
+			# used to hold here, because nothing was bought from producers to set a clearing price,
+			# so an empty shelf left the price where it was while people starved.
+			new_price *= (1.0 + PRICE_STEP)
+			update_reason = "short: buyers went without"
+		elif wheat_market_buy_blocked:
 			# Market buying is intentionally blocked due to hysteresis
 			# HOLD price steady - no increase, no decrease
 			new_price = old_price
@@ -1216,7 +1221,13 @@ func _adjust_wheat_price(day: int) -> void:
 	else:
 		# Trades below threshold: allow only neutral or downward movement
 		
-		if wheat_market_buy_blocked:
+		if wheat < lower_band and wheat_short_today > 0:
+			# Buyers went without and the shelf is low: the price rises (docs/BREAD_MARKET.md). It
+			# used to hold here, because nothing was bought from producers to set a clearing price,
+			# so an empty shelf left the price where it was while people starved.
+			new_price *= (1.0 + PRICE_STEP)
+			update_reason = "short: buyers went without"
+		elif wheat_market_buy_blocked:
 			# Market buying is blocked - hold price steady
 			new_price = old_price
 			update_reason = "price held (market blocked)"
@@ -1237,7 +1248,7 @@ func _adjust_wheat_price(day: int) -> void:
 		new_price = old_price - max_change
 	
 	# Apply floor and ceiling
-	wheat_price = clamp(new_price, WHEAT_PRICE_FLOOR, WHEAT_PRICE_CEILING)
+	wheat_price = maxf(new_price, WHEAT_PRICE_FLOOR)
 	
 	# Calculate band status for logging
 	var bid_mult: float = get_bid_price("wheat") / wheat_price if wheat_price > 0 else 1.0
@@ -1306,7 +1317,13 @@ func _adjust_bread_price(day: int) -> void:
 	elif bread_total_cleared == 0:
 		# PART 2: Distinguish market-blocked from no-demand
 		
-		if bread_market_buy_blocked:
+		if bread < lower_band and bread_short_today > 0:
+			# Buyers went without and the shelf is low: the price rises (docs/BREAD_MARKET.md). It
+			# used to hold here, because nothing was bought from producers to set a clearing price,
+			# so an empty shelf left the price where it was while people starved.
+			new_price *= (1.0 + PRICE_STEP)
+			update_reason = "short: buyers went without"
+		elif bread_market_buy_blocked:
 			# Market buying is intentionally blocked due to hysteresis
 			# HOLD price steady - no increase, no decrease
 			new_price = old_price
@@ -1323,7 +1340,13 @@ func _adjust_bread_price(day: int) -> void:
 	else:
 		# Trades below threshold: allow only neutral or downward movement
 		
-		if bread_market_buy_blocked:
+		if bread < lower_band and bread_short_today > 0:
+			# Buyers went without and the shelf is low: the price rises (docs/BREAD_MARKET.md). It
+			# used to hold here, because nothing was bought from producers to set a clearing price,
+			# so an empty shelf left the price where it was while people starved.
+			new_price *= (1.0 + PRICE_STEP)
+			update_reason = "short: buyers went without"
+		elif bread_market_buy_blocked:
 			# Market buying is blocked - hold price steady
 			new_price = old_price
 			update_reason = "price held (market blocked)"
@@ -1344,7 +1367,7 @@ func _adjust_bread_price(day: int) -> void:
 		new_price = old_price - max_change
 	
 	# Apply floor and ceiling
-	bread_price = clamp(new_price, BREAD_PRICE_FLOOR, Tuning.f("bread_price_ceiling", BREAD_PRICE_CEILING))
+	bread_price = maxf(new_price, BREAD_PRICE_FLOOR)
 	
 	# Calculate band status for logging
 	var bid_mult: float = get_bid_price("bread") / bread_price if bread_price > 0 else 1.0

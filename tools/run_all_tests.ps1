@@ -112,6 +112,16 @@ if ($ec6 -ne 0) {
 }
 
 Write-Host ""
+Write-Host "=== Headless TestMarket.tscn (price rules, shortage, books) ===" -ForegroundColor Cyan
+$ec7 = Invoke-GodotHeadlessScene "res://scenes/TestMarket.tscn"
+if ($ec7 -ne 0) {
+    Write-Host "TestMarket FAILED (exit $ec7)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestMarket OK." -ForegroundColor Green
+}
+
+Write-Host ""
 if ($failed) {
     Write-Host "SUITE: FAIL" -ForegroundColor Red
     exit 1

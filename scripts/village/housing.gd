@@ -604,6 +604,9 @@ func _servants(day: int, wage: float) -> void:
 		for s in h.get("servants", []):
 			if s == null or not is_instance_valid(s) or not village.households.has(s) or s.get_meta("employer", null) != master:
 				continue   # died, left, or changed trade
+			if master == null or not is_instance_valid(master):
+				_release_servant(s, "the master of the house is gone")   # died or left town
+				continue
 			if kept.size() >= want or master.wallet.money < _reserve_of(master) or not _pay(master, s, wage):
 				_release_servant(s, "%s could no longer keep one" % master.name)
 				_log("[SERVANT] day=%d %s lets %s go ($%.1f in hand)" % [day, master.name, s.name, master.get_cash()])

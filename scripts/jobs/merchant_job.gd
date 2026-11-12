@@ -47,6 +47,7 @@ func activate() -> void:
 		route.max_travel_time = 600.0   # the walk to the other village is long (wall-clock limit)
 	var purse: float = Tuning.f("merchant_start_coins", OWNER_CASH)
 	if wallet and wallet.money < purse and not agent.has_meta("merchant_purse"):
+		Village.note_brought(agent, purse - wallet.money)
 		wallet.credit(purse - wallet.money)
 	agent.set_meta("merchant_purse", true)
 	agent.set_meta("merchant", true)

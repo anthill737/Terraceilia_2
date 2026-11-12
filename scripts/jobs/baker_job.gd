@@ -225,6 +225,7 @@ func _update_overhead() -> void:
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(Tuning.f("owner_start_coins", STARTING_CASH))
+		Village.note_brought(agent, Tuning.f("owner_start_coins", STARTING_CASH))
 	if inv:
 		inv.items = {"wheat": 0, "flour": 0, "bread": 5, "firewood": 6}
 	prod = agent.get_node_or_null("ProductionBatch") as ProductionBatch
@@ -780,8 +781,12 @@ func on_day_changed(_day: int) -> void:
 		else:
 			consecutive_days_negative_cashflow = 0
 	if wallet and maintenance_cost_per_day > 0.0:
-		wallet.debit(maintenance_cost_per_day)
-		agent.cashflow_today_expense += maintenance_cost_per_day
+		# Upkeep is paid to the town (the market's purse), not lost: coins only change hands.
+		var upkeep: float = minf(maintenance_cost_per_day, wallet.money)
+		if upkeep > 0.0 and wallet.debit(upkeep):
+			if market:
+				market.money += upkeep
+			agent.cashflow_today_expense += upkeep
 	day_money_start = wallet.money if wallet else 0.0
 	set_meta("output_ema", 0.3 * float(bread_produced_today) + 0.7 * float(get_meta("output_ema", float(bread_produced_today))))
 	set_meta("wheat_per_bread", float(WHEAT_PER_FLOUR) / float(BREAD_PER_FLOUR))

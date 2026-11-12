@@ -295,6 +295,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	add_child(_labor_svc)
 	_labor_svc.bind(pop_mgr, field_mgr, bus)
 	labor_market.migrate_requested.connect(_labor_svc.handle_migrate_requested)
+	labor_market.migrate_requested.connect(_note_leaver)
 	labor_market.role_switch_requested.connect(_labor_svc.handle_role_switch_requested)
 	labor_market.business_failed.connect(_on_business_failed)
 
@@ -959,6 +960,7 @@ func _spawn_first_woodworker() -> void:
 	_perform_role_conversion(h, "woodworker", true)
 	var owner_purse: float = Tuning.f("owner_start_coins", WoodworkerJob.OWNER_CASH)
 	if h.wallet and h.wallet.money < owner_purse:
+		Village.note_brought(h, owner_purse - h.wallet.money)
 		h.wallet.credit(owner_purse - h.wallet.money)
 	if h.inv:
 		h.inv.items["bread"] = maxi(2, h.inv.get_qty("bread"))
@@ -968,6 +970,26 @@ func _spawn_first_woodworker() -> void:
 ## What this village's merchant has done so far (tests and the HUD).
 var trade_stats := {"trips": 0, "units": 0, "profit": 0.0}
 var shocks: Shocks = null
+
+## The town's books (tests): coins that came in from outside (a newcomer's purse, a new owner's
+## or merchant's purse) and coins carried away by people who left. Everything else only moves
+## between people and the market, so people's coins plus the market's purse change by exactly
+## coins_brought minus coins_taken (across both towns, since merchants carry coins between them).
+var coins_brought: float = 0.0
+var coins_taken: float = 0.0
+
+static func note_brought(agent, amount: float) -> void:
+	if agent == null or amount == 0.0:
+		return
+	var v = agent.get("home_village_ref")
+	if v != null and is_instance_valid(v):
+		v.coins_brought += amount
+
+
+func _note_leaver(agent: Node, reason: String) -> void:
+	if reason != "starved" and agent != null and is_instance_valid(agent) and agent.has_method("get_cash"):
+		coins_taken += agent.get_cash()
+
 
 func _spawn_merchant() -> void:
 	if spawn_service == null or not Tuning.on("merchants", true):

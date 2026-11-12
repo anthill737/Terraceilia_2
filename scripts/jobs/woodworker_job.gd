@@ -39,6 +39,7 @@ func get_job_inspector_data() -> Dictionary:
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(Tuning.f("owner_start_coins", OWNER_CASH))
+		Village.note_brought(agent, Tuning.f("owner_start_coins", OWNER_CASH))
 	super.activate()
 	if inv:
 		inv.items = {"bread": 2, "firewood": 6}
@@ -155,8 +156,12 @@ func on_day_changed(day: int) -> void:
 			else:
 				consecutive_days_negative_cashflow = 0
 		if maintenance_cost_per_day > 0.0:
-			wallet.debit(minf(maintenance_cost_per_day, wallet.money))
-			agent.cashflow_today_expense += maintenance_cost_per_day
+			# Upkeep is paid to the town (the market's purse), not lost: coins only change hands.
+			var upkeep: float = minf(maintenance_cost_per_day, wallet.money)
+			if upkeep > 0.0 and wallet.debit(upkeep):
+				if market:
+					market.money += upkeep
+				agent.cashflow_today_expense += upkeep
 		day_money_start = wallet.money
 	set_meta("output_ema", 0.3 * float(firewood_made_today) + 0.7 * float(get_meta("output_ema", float(firewood_made_today))))
 	firewood_made_today = 0

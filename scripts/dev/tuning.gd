@@ -48,6 +48,9 @@ const INPUTS: Array = [
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},
 	{"k": "merchants", "g": "Switches", "t": "Each town has a travelling merchant", "d": true},
 	{"k": "troubles", "g": "Switches", "t": "Blight, fire, frost and rats can strike", "d": true},
+	{"k": "farm_takeover", "g": "Switches", "t": "An empty farm is taken over", "d": true},
+	{"k": "hunger_switch", "g": "Switches", "t": "Hungry people with coins turn to farming", "d": true},
+	{"k": "outside_help", "g": "Switches", "t": "Outside help: merchant grain, a farmer newcomer", "d": true},
 ]
 
 ## The town a game starts with. Left alone, the game starts the way it always has: one farmer,

@@ -132,14 +132,24 @@ static func level_name(level: int) -> String:
 ## What `a` keeps back before spending on an improvement: the cushion, and for a business
 ## owner the money the business runs on.
 func _reserve_of(a) -> float:
-	var r: float = cushion()
+	var r: float = _keep_back(a)
 	if not village.households.has(a):
 		r += OWNER_WAGE_DAYS * LaborMarket.daily_wage(market) * float(1 + LaborMarket.hands_of(a))
 	return r
 
 
+## What `a` holds back before putting coins into a house: the cushion, and for a merchant the
+## coins they trade with. Merchants used to spend their whole purse on houses and home
+## improvements, and then had 0 to 5 coins when the next town needed grain carried in.
+func _keep_back(a) -> float:
+	var k: float = cushion()
+	if a != null and is_instance_valid(a) and a.has_meta("merchant") and Tuning.on("outside_help", true):
+		k += Tuning.f("merchant_start_coins", MerchantJob.OWNER_CASH)
+	return k
+
+
 func can_afford_house(a) -> bool:
-	return a != null and a.wallet != null and a.wallet.money >= house_value() + cushion()
+	return a != null and a.wallet != null and a.wallet.money >= house_value() + _keep_back(a)
 
 
 ## A household with no employer can do its own building work.
@@ -155,7 +165,7 @@ func can_afford_to_build(a) -> bool:
 	if a == null or a.wallet == null:
 		return false
 	var cost: float = wood_cost() if _self_builder(a) else house_value()
-	return a.wallet.money >= cost + cushion()
+	return a.wallet.money >= cost + _keep_back(a)
 
 
 func _home_of(a) -> Dictionary:
@@ -466,8 +476,9 @@ func start_new_builds(day: int) -> void:
 		if builder == null and _vacant().is_empty() and pm and pm.prosperity_score >= pm.PROSPERITY_THRESHOLD_TO_GROW:
 			var best: float = house_value() + cushion()
 			for a in people:
-				if a.wallet and a.wallet.money >= best and not _building_by(a):
-					best = a.wallet.money
+				var spare: float = (a.wallet.money - (_keep_back(a) - cushion())) if a.wallet else 0.0
+				if a.wallet and spare >= best and not _building_by(a):
+					best = spare
 					builder = a
 					why = "to rent out"
 		if builder != null:

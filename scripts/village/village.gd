@@ -318,6 +318,8 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	shocks.market = market
 	shocks.event_bus = event_bus
 	shocks.rng.seed = (rng.seed if rng else 1) + 7919
+	recovery = Recovery.new()
+	recovery.village = self
 	# Drawing: ground, roads, buildings and houses under the people.
 	var art := VillageArt.new()
 	art.name = "VillageArt"
@@ -641,6 +643,8 @@ func _on_household_died(agent_node: Node) -> void:
 			market.bread if market else -1, market.bread_price if market else 0.0])
 	if prosperity_meter and calendar:
 		prosperity_meter.record_starvation_event(calendar.day_index)
+	if recovery:
+		recovery.remember_heirs(agent_node)   # a dead farmer's hands are first in line for the farm
 	if labor_market:
 		labor_market._release_hands(agent_node, "employer died")
 	var w = agent_node.get("wallet")
@@ -677,6 +681,8 @@ func _on_calendar_day_changed(day: int) -> void:
 		housing.start_new_builds(day)   # before employers hire (housing.gd)
 	if labor_market:
 		labor_market.update_daily(day)
+	if recovery:
+		recovery.on_day(day)   # an empty farm is taken over, hunger moves people, help from outside
 
 	for f in all_farmers:
 		if f and is_instance_valid(f):
@@ -970,6 +976,8 @@ func _spawn_first_woodworker() -> void:
 ## What this village's merchant has done so far (tests and the HUD).
 var trade_stats := {"trips": 0, "units": 0, "profit": 0.0}
 var shocks: Shocks = null
+## How the town gets a farmer back after losing its last one (scripts/village/recovery.gd).
+var recovery: Recovery = null
 
 ## The town's books (tests): coins that came in from outside (a newcomer's purse, a new owner's
 ## or merchant's purse) and coins carried away by people who left. Everything else only moves
@@ -987,6 +995,8 @@ static func note_brought(agent, amount: float) -> void:
 
 
 func _note_leaver(agent: Node, reason: String) -> void:
+	if recovery:
+		recovery.remember_heirs(agent)
 	if reason != "starved" and agent != null and is_instance_valid(agent) and agent.has_method("get_cash"):
 		coins_taken += agent.get_cash()
 

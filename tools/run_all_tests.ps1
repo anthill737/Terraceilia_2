@@ -122,6 +122,16 @@ if ($ec7 -ne 0) {
 }
 
 Write-Host ""
+Write-Host "=== Headless TestRecovery.tscn (a town gets its farmer back) ===" -ForegroundColor Cyan
+$ec8 = Invoke-GodotHeadlessScene "res://scenes/TestRecovery.tscn"
+if ($ec8 -ne 0) {
+    Write-Host "TestRecovery FAILED (exit $ec8)" -ForegroundColor Red
+    $failed = $true
+} else {
+    Write-Host "TestRecovery OK." -ForegroundColor Green
+}
+
+Write-Host ""
 if ($failed) {
     Write-Host "SUITE: FAIL" -ForegroundColor Red
     exit 1

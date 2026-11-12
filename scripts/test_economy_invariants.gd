@@ -83,7 +83,7 @@ class Probe extends Node:
 				tag, m.wheat, m.wheat_capacity, m.bread, m.bread_capacity, m.firewood, m.firewood_capacity])
 		for pair in [["wheat", m.wheat_price, m.WHEAT_PRICE_FLOOR, INF],   # no ceiling (docs/BREAD_MARKET.md)
 				["bread", m.bread_price, m.BREAD_PRICE_FLOOR, INF],
-				["firewood", m.firewood_price, m.FIREWOOD_PRICE_FLOOR, m.FIREWOOD_PRICE_CEILING]]:
+				["firewood", m.firewood_price, m.FIREWOOD_PRICE_FLOOR, INF]]:
 			if is_nan(pair[1]) or pair[1] < pair[2] - 0.001 or pair[1] > pair[3] + 0.001:
 				_fail("%s: %s price %s outside %.2f..%.2f" % [tag, pair[0], pair[1], pair[2], pair[3]])
 		var seen := {}

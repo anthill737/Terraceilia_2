@@ -46,11 +46,14 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   someone starves holding coins for a loaf, a market purse runs dry, a town goes 30 days without
   a farmer or baker, or the books do not balance. Run with `--fixed-fps 5`: 1,500 days take
   about two minutes.
-- `res://scenes/TestRecovery.tscn`: takes a town's farmer away three times, each time with only one
-  of the three recovery rules on (docs/RECOVERY.md), and checks (14 checks) that the farm is
-  taken over the next morning by someone who worked there, free; that a hungry woodworker with
-  coins turns to farming and the only baker does not; that a farmer comes from outside with an
-  owner's purse when wheat is dear; and that a merchant carries bread or wheat in.
+- `res://scenes/TestRecovery.tscn`: empty shops (docs/RECOVERY.md). Takes shop owners away on purpose
+  and checks (29 checks) that the farm, the bakery and the lumber yard each have a new owner the
+  next morning, someone who worked there first, who owes the town the shop fee and gets no purse;
+  that each shop is selling again within days and nobody starves; that a second farm stays empty
+  while there is wheat on the shelf and is taken after three days short, and that a farm that
+  closed for want of trade is not handed on; that a woodworker with
+  coins and no bread to buy takes the empty farm and the only baker does not; that merchants hold
+  back their trading coins and carry bread or wheat in; and that nobody is sent from outside.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

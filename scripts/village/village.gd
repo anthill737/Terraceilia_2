@@ -644,7 +644,7 @@ func _on_household_died(agent_node: Node) -> void:
 	if prosperity_meter and calendar:
 		prosperity_meter.record_starvation_event(calendar.day_index)
 	if recovery:
-		recovery.remember_heirs(agent_node)   # a dead farmer's hands are first in line for the farm
+		recovery.owner_gone(agent_node)   # their shop stands empty; the people who worked there are first in line
 	if labor_market:
 		labor_market._release_hands(agent_node, "employer died")
 	var w = agent_node.get("wallet")
@@ -682,7 +682,7 @@ func _on_calendar_day_changed(day: int) -> void:
 	if labor_market:
 		labor_market.update_daily(day)
 	if recovery:
-		recovery.on_day(day)   # an empty farm is taken over, hunger moves people, help from outside
+		recovery.on_day(day)   # empty shops are taken over; going without moves people
 
 	for f in all_farmers:
 		if f and is_instance_valid(f):
@@ -742,6 +742,8 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 	if household is Agent and (household as Agent).current_job != null:
 		var ag: Agent = household as Agent
 		var old_role: String = ag.current_role
+		if recovery and old_role.to_lower() != role:
+			recovery.owner_gone(ag, false)   # closing or changing trade leaves the old shop empty
 		var ce = ag.get_node_or_null("CareerEvaluator")
 		var u_cur: float = ce.utility_current if ce else 0.0
 		var u_best: float = maxf(ce.utility_farmer, ce.utility_baker) if ce else 0.0
@@ -910,6 +912,8 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 				ag.agent_died.connect(_on_household_died)
 			ag.switch_cooldown_days = 0
 			ag.days_in_role = LaborMarket.MIN_TENURE_DAYS
+		if recovery:
+			recovery.shop_opened(ag)   # a new owner fills an empty shop of that trade, if one stands
 
 
 ## Batch 3: the opening fee, from the new owner's purse to the town market's.
@@ -976,7 +980,7 @@ func _spawn_first_woodworker() -> void:
 ## What this village's merchant has done so far (tests and the HUD).
 var trade_stats := {"trips": 0, "units": 0, "profit": 0.0}
 var shocks: Shocks = null
-## How the town gets a farmer back after losing its last one (scripts/village/recovery.gd).
+## Empty shops and who takes them over, for every trade (scripts/village/recovery.gd).
 var recovery: Recovery = null
 
 ## The town's books (tests): coins that came in from outside (a newcomer's purse, a new owner's
@@ -995,8 +999,8 @@ static func note_brought(agent, amount: float) -> void:
 
 
 func _note_leaver(agent: Node, reason: String) -> void:
-	if recovery:
-		recovery.remember_heirs(agent)
+	if recovery and reason != "dev start":
+		recovery.owner_gone(agent)   # a shop owner leaving town leaves the shop
 	if reason != "starved" and agent != null and is_instance_valid(agent) and agent.has_method("get_cash"):
 		coins_taken += agent.get_cash()
 

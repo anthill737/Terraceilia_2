@@ -189,6 +189,14 @@ const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (househ
 ## flour makes the same bread, a busy bakery just gets through more of it in a day.
 ## The first hand adds half again, the second a quarter more (LaborMarket.hand_mult), and
 ## this figure is the oven's firm daily limit.
+## Coins a day of baking ties up at today's prices: a full wheat bin and the oven's firewood.
+## A new owner keeps this back before paying the town for the shop (Recovery._pay_owed).
+func shop_stock_cost() -> float:
+	if market == null:
+		return 0.0
+	return float(WHEAT_TARGET_STOCK) * market.wheat_price + ceilf(float(_oven_capacity()) / float(LOAVES_PER_FIREWOOD)) * market.firewood_price
+
+
 func _oven_capacity() -> int:
 	return maxi(1, roundi(float(Tuning.i("baker_loaves_per_day", oven_capacity_per_day)) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent)))
 

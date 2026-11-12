@@ -108,8 +108,7 @@ var wheat_price: float = 1.0
 var bread_price: float = 3.2   # batch 3: a loaf now takes 2 wheat and oven firewood (was 2.5)
 
 # Firewood (batch 3). Woodworkers sell it here; every hearth and every oven buys it here.
-const FIREWOOD_PRICE_FLOOR: float = 0.50
-const FIREWOOD_PRICE_CEILING: float = 5.00
+const FIREWOOD_PRICE_FLOOR: float = 0.50   # no ceiling (Anthony's rule: no price caps)
 var firewood: int = 30
 var firewood_price: float = 1.5
 var firewood_target: int = 30
@@ -118,6 +117,7 @@ var firewood_sold_today: int = 0
 var firewood_bought_today: int = 0
 var firewood_requested_today: int = 0
 var firewood_short_today: int = 0
+var firewood_wanted_today: int = 0   # asked for by buyers with the coins to pay for it
 var firewood_sold_ema: float = 6.0
 
 # PART 3: Targets aligned with actual throughput
@@ -1438,10 +1438,12 @@ func sell_firewood_to_agent(agent, requested: int) -> int:
 	if a_wallet == null:
 		return 0
 	firewood_requested_today += requested
-	var qty: int = mini(requested, firewood)
-	if qty < requested:
-		firewood_short_today += requested - qty   # the pile ran short (not: the buyer was poor)
-	qty = mini(qty, int(floor(a_wallet.money / firewood_price)))
+	# Demand is what buyers can pay for: a request with no coins behind it moves no price.
+	var can_pay: int = mini(requested, int(floor(a_wallet.money / firewood_price)))
+	firewood_wanted_today += can_pay
+	var qty: int = mini(can_pay, firewood)
+	if qty < can_pay:
+		firewood_short_today += can_pay - qty   # the pile ran short (not: the buyer was poor)
 	if qty <= 0:
 		return 0
 	var cost: float = float(qty) * firewood_price
@@ -1457,12 +1459,15 @@ func sell_firewood_to_agent(agent, requested: int) -> int:
 ## up, by at most MAX_DAILY_PRICE_CHANGE. The target pile follows about two days of sales.
 func _adjust_firewood_price() -> void:
 	var t: float = float(maxi(1, firewood_target))
-	if float(firewood) < t * (1.0 - TARGET_BAND_PCT) or firewood_short_today > 0:
+	# With no ceiling the price has to follow buyers: it rises only on a day somebody with coins
+	# asked for firewood. In a dead town with an empty pile it used to climb 12% a day for ever
+	# (27 billion a log by day 1,500).
+	if firewood_wanted_today > 0 and (float(firewood) < t * (1.0 - TARGET_BAND_PCT) or firewood_short_today > 0):
 		# An empty pile bids up fast (12% a day); it crept 5% a day while hearths went cold.
 		firewood_price *= 1.0 + (0.12 if firewood <= 0 else Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE) * clampf(1.0 - float(firewood) / t, 0.2, 1.0))
 	elif float(firewood) > t * (1.0 + TARGET_BAND_PCT):
 		firewood_price *= 1.0 - Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE) * clampf(float(firewood) / t - 1.0, 0.2, 1.0)
-	firewood_price = clampf(firewood_price, FIREWOOD_PRICE_FLOOR, FIREWOOD_PRICE_CEILING)
+	firewood_price = maxf(firewood_price, FIREWOOD_PRICE_FLOOR)
 	firewood_sold_ema = 0.3 * float(firewood_sold_today) + 0.7 * firewood_sold_ema
 	firewood_target = maxi(30, roundi(2.0 * firewood_sold_ema))
 	firewood_capacity = maxi(80, firewood_target * 2)
@@ -1470,3 +1475,4 @@ func _adjust_firewood_price() -> void:
 	firewood_bought_today = 0
 	firewood_requested_today = 0
 	firewood_short_today = 0
+	firewood_wanted_today = 0

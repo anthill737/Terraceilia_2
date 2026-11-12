@@ -37,7 +37,7 @@ Firewood
   sells it at the market. Each village starts with one.
 - Everyone burns one firewood a day. Four days without it and they leave town (the last farmer,
   baker or woodworker stays).
-- The market holds firewood with its own price (floor 0.50, ceiling 5.00, starts at 1.50). The
+- The market holds firewood with its own price (floor 0.50, starts at 1.50; the 5.00 ceiling was removed on 2026-11-12). The
   price rises when buyers go short and falls when the pile grows past its target.
 - Firewood does not take up pack space.
 

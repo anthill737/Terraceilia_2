@@ -174,8 +174,20 @@ class Probe extends Node:
 		pm2.firewood = 15
 		pm2.firewood_target = 30
 		pm2.firewood_price = 1.0
+		pm2.firewood_wanted_today = 4   # somebody with coins asked for firewood today
 		pm2._adjust_firewood_price()
 		_check("daily price limit reaches the price rule", _near(pm2.firewood_price, 1.0 + 0.2 * 0.5, 0.001), "1.00 -> %.3f" % pm2.firewood_price)
+		var pm3 := Market.new()
+		pm3.firewood = 0
+		pm3.firewood_target = 30
+		pm3.firewood_price = 7.0
+		pm3._adjust_firewood_price()
+		_check("firewood has no ceiling, and with nobody buying an empty pile does not bid itself up", _near(pm3.firewood_price, 7.0, 0.001), "7.00 -> %.3f" % pm3.firewood_price)
+		pm3.firewood_wanted_today = 2
+		pm3.firewood_short_today = 2
+		pm3._adjust_firewood_price()
+		_check("with buyers going short it rises past the old 5.00 ceiling", _near(pm3.firewood_price, 7.0 * 1.12, 0.001), "7.00 -> %.3f" % pm3.firewood_price)
+		pm3.free()
 		pm2.bread_price = 9.0
 		pm2.bread = 0
 		pm2.bread_total_cleared = 0

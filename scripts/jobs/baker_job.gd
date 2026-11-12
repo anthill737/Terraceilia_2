@@ -222,7 +222,7 @@ func _update_overhead() -> void:
 	if market == null:
 		return
 	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_oven_capacity()))
-	var over: float = (float(LaborMarket.hands_of(agent)) * LaborMarket.daily_wage(market) + maintenance_cost_per_day) / maxf(1.0, per_day)
+	var over: float = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day) / maxf(1.0, per_day)
 	over += market.firewood_price / float(LOAVES_PER_FIREWOOD)
 	if profit:
 		profit.overhead_per_unit = over

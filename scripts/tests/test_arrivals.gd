@@ -117,6 +117,11 @@ class Probe extends Node:
 			hooked_world = world
 			for vv in world.villages:
 				vv.event_bus.event_logged.connect(_on_bus)
+		if phase == 1 and day >= 2:
+			# Staged: bread dear and the shelf nearly bare, so the baker wants more hands than
+			# the town has (it starts with one person who has no shop).
+			v.market.bread_price = 7.0
+			v.market.bread = mini(v.market.bread, 6)
 		match phase:
 			1: _job_waiting(main, v, day)
 			2: _no_job(main, v, day)

@@ -878,4 +878,4 @@ func _update_overhead() -> void:
 	if market == null or profit == null:
 		return
 	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 10.0)
-	profit.overhead_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.daily_wage(market) + maintenance_cost_per_day) / per_day
+	profit.overhead_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day) / per_day

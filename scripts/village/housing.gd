@@ -295,16 +295,15 @@ func on_day(day: int) -> void:
 			_log("[HOUSING] day=%d %s rents house %d" % [day, a.name, h.id])
 	stats.homeless_max = maxi(stats.homeless_max, homeless)
 
-	# Rent. A household that can't pay for RENT_DAYS_TO_LEAVE days leaves town. Owners in
-	# business are not put out; their unpaid rent just isn't collected.
+	# Rent. Everyone who lives in a house they do not own pays it, whatever they do for a
+	# living (Anthony, 2026-11-13: "I only don't pay rent if I own the house"). Whoever can't
+	# pay for RENT_DAYS_TO_LEAVE days leaves town, shop owners included. Until then people
+	# with no work were asked no rent, and shop owners were never put out.
 	var rent: float = rent_per_day()
 	for h in houses:
 		if not h.done or h.occupant == null or h.occupant == h.owner or not is_instance_valid(h.occupant):
 			continue
 		if h.owner != null and not is_instance_valid(h.owner):
-			continue
-		if h.occupant.has_meta("cottager"):
-			h.unpaid = 0   # a cottager has no coin income: like a medieval cottar they owe labour, not rent
 			continue
 		if _pay(h.occupant, h.owner, rent):
 			stats.rent_paid += rent
@@ -312,14 +311,15 @@ func on_day(day: int) -> void:
 			continue
 		h.unpaid += 1
 		var a = h.occupant
-		if not a.is_in_group("households"):
-			h.unpaid = mini(int(h.unpaid), RENT_DAYS_TO_LEAVE - 1)
-		if h.unpaid >= RENT_DAYS_TO_LEAVE and a.is_in_group("households") and village.labor_market:
+		if h.unpaid >= RENT_DAYS_TO_LEAVE and village.labor_market:
 			stats.evicted += 1
 			_log("[HOUSING] day=%d %s leaving: %d days of rent unpaid ($%.1f)" % [day, a.name, h.unpaid, a.get_cash()])
 			h.occupant = null
 			h.unpaid = 0
+			var had_shop: bool = not a.is_in_group("households")
 			village.labor_market.migrate_requested.emit(a, "no_rent")
+			if had_shop:
+				village.labor_market._release_hands(a, "employer left")   # after the shop is noted empty (Recovery)
 
 	# A renter who has saved the price buys the town house they live in.
 	for h in houses:
@@ -791,8 +791,6 @@ func describe(a) -> String:
 		parts.append("Rents house %d from the town ($%.2f a day)." % [home.id, rent_per_day()])
 	else:
 		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, rent_per_day()])
-	if not home.is_empty() and home.owner != a and a.has_meta("cottager"):
-		parts.append("No rent is asked while they have no work.")
 	if not home.is_empty() and int(home.unpaid) > 0:
 		parts.append("[color=#ff8844]%d day(s) behind on rent.[/color]" % home.unpaid)
 	var let_out := 0

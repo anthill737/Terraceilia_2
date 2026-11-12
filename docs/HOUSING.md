@@ -38,7 +38,8 @@ work, went broke in about 12 days and left. Houses now limit arrivals, the way S
 - Farm, bakery and lumber-yard hands are still not on the map: being hired raises the owner's
   output, but the hand doesn't walk to the field or oven. House builders do walk to the site.
 - Logs for houses come from the firewood pile; there is no separate lumber good.
-- Business owners who can't pay rent are not put out; their rent just goes unpaid.
+- Everyone who does not own the house they live in pays rent, whatever they do for a living
+  (2026-11-13). Four days unpaid and they leave town, shop owners included.
 
 ## Survival test
 

@@ -17,8 +17,8 @@ const INPUTS: Array = [
 	{"k": "woodworker_logs_per_day", "g": "Production", "t": "Logs one woodworker cuts a day, working alone", "d": 12, "lo": 1, "hi": 200, "st": 1},
 	{"k": "farmer_harvest_percent", "g": "Production", "t": "Wheat from each harvest (percent of normal)", "d": 100.0, "lo": 5.0, "hi": 500.0, "st": 5.0},
 	{"k": "hand_output_1", "g": "Production", "t": "Output with one hired hand (1.5 = half again)", "d": 1.5, "lo": 1.0, "hi": 10.0, "st": 0.05},
-	{"k": "hand_output_2", "g": "Production", "t": "Output with two hired hands", "d": 1.75, "lo": 1.0, "hi": 10.0, "st": 0.05},
-	{"k": "max_hands_per_shop", "g": "Production", "t": "Most hired hands in one shop", "d": 2, "lo": 0, "hi": 10, "st": 1},
+	{"k": "hand_output_2", "g": "Production", "t": "Output with two hired hands (later hands fall off the same way)", "d": 1.9, "lo": 1.0, "hi": 10.0, "st": 0.05},
+	{"k": "max_hands_per_shop", "g": "Production", "t": "Hired hands a shop holds before it is extended", "d": 2, "lo": 0, "hi": 10, "st": 1},
 
 	{"k": "household_start_coins", "g": "Money", "t": "Coins a newcomer arrives with", "d": 60.0, "lo": 0.0, "hi": 100000.0, "st": 5.0},
 	{"k": "owner_start_coins", "g": "Money", "t": "Coins a new shop owner is set up with", "d": 150.0, "lo": 0.0, "hi": 100000.0, "st": 5.0},
@@ -44,6 +44,7 @@ const INPUTS: Array = [
 	{"k": "houses_spare_at_start", "g": "Houses", "t": "Empty houses when the town starts", "d": 2, "lo": 0, "hi": 100, "st": 1},
 
 	{"k": "arrivals_follow_jobs", "g": "Switches", "t": "Who arrives follows jobs: workers, or people with coins", "d": true},
+	{"k": "shop_extensions", "g": "Switches", "t": "Full shops are extended to hold more hands", "d": true},
 	{"k": "gardens", "g": "Switches", "t": "Garden plots feed people without work", "d": true},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},

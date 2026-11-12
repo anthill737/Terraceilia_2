@@ -48,14 +48,21 @@ const BROKE_LOAVES: float = 3.0
 ## Set by config ("labor": {"mode": ...}) or --labor-mode=<mode> after "--".
 var labor_mode: String = "wages"   # hiring (batch 2 default); "switching" lets producers change trade
 const WAGE_MARKUP: float = 1.25           # batch 3: wage = (1 loaf + 1 firewood at today's prices) x this
-const HAND_STEPS: Array = [1.0, 1.5, 1.75]  # baker/woodworker output with 0, 1, 2 hands
-const MAX_HANDS: int = 2
+## Output with 0, 1 and 2 hired hands, as a multiple of what the owner makes alone. Each
+## further hand adds the same share less again (here four fifths of the one before): see
+## hand_gain. The third number was 1.75 (a half less each time), which made a third hand
+## worth nothing and a bigger shop pointless.
+const HAND_STEPS: Array = [1.0, 1.5, 1.9]
+const MAX_HANDS: int = 2             # hired hands a shop holds at level 1
+const SHOP_MAX_LEVEL: int = 6        # each level above the first holds one more hand
 const HIRE_CASH_DAYS: float = 10.0        # employer keeps this many days of wages in hand
 const FIRE_LOSS_DAYS: int = 5             # days of falling cash before a hand is let go
 ## Producer trade switches: days between switches for one person.
 const PRODUCER_SWITCH_COOLDOWN_DAYS: int = 21
 ## Fields with no farmer (village sets it): a farmer can take one over instead of a new plot.
 var free_field_count: Callable = func() -> int: return 0
+## Asks the builders (Housing) to extend `p`'s shop by a level. Set by the village.
+var extend_shop: Callable = func(_p, _day: int) -> bool: return false
 
 # ─── Startup grace period ─────────────────────────────────────────────────────
 ## Days at sim start during which household migration is suppressed.
@@ -831,7 +838,12 @@ func _update_hands(day: int) -> void:
 			# A losing stretch: let one go.
 			_let_go(p, hands.pop_back(), day, "losing money")
 			falling = 0
-		elif hands.size() < Tuning.i("max_hands_per_shop", MAX_HANDS) and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
+		elif hands.size() >= staff_room(p):
+			# Full: a shop that would take another hand if it had the room is extended instead.
+			if Tuning.on("shop_extensions", true) and shop_level(p) < SHOP_MAX_LEVEL and p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) \
+					and not _overstocked(p) and _hand_value(p, hands.size()) > wage * 1.1:
+				extend_shop.call(p, day)
+		elif p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
 			var value: float = _hand_value(p, hands.size())
 			if value > wage * 1.1:
 				var h = _free_hand()
@@ -867,24 +879,21 @@ func _update_hands(day: int) -> void:
 			event_bus.emit_log(line)
 
 
-## Value per day of one more hand to `p`, who has `n` hands now, at today's prices.
-## Farmer: a hand works fields of its own, so it adds one farmer's worth of wheat.
-## Baker and woodworker: the next step of HAND_STEPS (half again, then a quarter more) of
-## what the owner makes alone; bread is counted less its wheat and oven firewood.
+## Value per day of one more hand to `p`, who has `n` hands now, at today's prices: what the
+## owner makes alone, times the share the next hand adds (hand_gain), times what a unit is
+## worth. Bread is counted less its wheat and oven firewood.
 func _hand_value(p: Node, n: int) -> float:
 	var job = p.current_job
 	if job == null or market == null:
 		return 0.0
 	var made: float = float(job.get_meta("output_ema", 0.0))
-	if p.current_role == "Farmer":
-		return made / float(1 + n) * market.wheat_price
-	var steps: Array = hand_steps()
-	var last: int = steps.size() - 1
-	var step: float = float(steps[mini(n + 1, last)]) - float(steps[mini(n, last)])
-	var alone: float = made / float(steps[mini(n, last)])
-	if p.current_role == "Woodworker":
-		return step * alone * market.firewood_bid()
-	return step * alone * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
+	var extra: float = made / hand_mult_n(p, n) * hand_gain(p, n + 1)
+	match str(p.current_role):
+		"Farmer":
+			return extra * market.wheat_price
+		"Woodworker":
+			return extra * market.firewood_bid()
+	return extra * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
 
 
 ## True when the employer's goods are already piling up at the market: more hands would only
@@ -903,15 +912,56 @@ func _overstocked(p: Node) -> bool:
 	return false
 
 
-## Output multiplier for a baker or woodworker with their current hands.
-## Output of a bakery or yard with 0, 1 and 2 hired hands (dev mode can change the two steps).
+## Output with 0, 1 and 2 hired hands (dev mode can change the two steps).
 static func hand_steps() -> Array:
 	return [float(HAND_STEPS[0]), Tuning.f("hand_output_1", float(HAND_STEPS[1])), Tuning.f("hand_output_2", float(HAND_STEPS[2]))]
 
 
-static func hand_mult(p: Node) -> float:
+## What the first hired hand adds, as a share of what the owner makes alone. A job can say
+## otherwise with hand_first_gain(): a farm hand works a field of their own (a whole share).
+static func _first_gain(p: Node) -> float:
+	var job = p.get("current_job") if p != null else null
+	if job != null and job.has_method("hand_first_gain"):
+		return float(job.hand_first_gain())
 	var steps: Array = hand_steps()
-	return float(steps[mini(hands_of(p), steps.size() - 1)])
+	return float(steps[1]) - float(steps[0])
+
+
+## What the k-th hired hand (1, 2, 3...) adds: less gain from each extra worker. The second
+## adds a fixed share of the first (hand_steps), the third the same share of the second, and
+## so on.
+static func hand_gain(p: Node, k: int) -> float:
+	if k <= 0:
+		return 0.0
+	var steps: Array = hand_steps()
+	var first: float = float(steps[1]) - float(steps[0])
+	var falloff: float = clampf((float(steps[2]) - float(steps[1])) / first, 0.0, 1.0) if first > 0.0 else 0.0
+	return _first_gain(p) * pow(falloff, float(k - 1))
+
+
+## Output multiplier of `p`'s shop with `n` hired hands.
+static func hand_mult_n(p: Node, n: int) -> float:
+	var m: float = 1.0
+	for k in range(1, n + 1):
+		m += hand_gain(p, k)
+	return m
+
+
+## Output multiplier of `p`'s shop with the hands it has today.
+static func hand_mult(p: Node) -> float:
+	return hand_mult_n(p, hands_of(p))
+
+
+## A shop's level (docs/SHOP_LEVELS.md): 1 as built, up to SHOP_MAX_LEVEL after extensions.
+static func shop_level(p: Node) -> int:
+	if p == null or not p.has_meta("shop_level"):
+		return 1
+	return clampi(int(p.get_meta("shop_level", 1)), 1, SHOP_MAX_LEVEL)
+
+
+## Hired hands `p`'s shop has room for: two as built, one more for each level.
+static func staff_room(p: Node) -> int:
+	return Tuning.i("max_hands_per_shop", MAX_HANDS) + shop_level(p) - 1
 
 
 ## A hand's daily wage in coins: one loaf plus one firewood at today's prices, times WAGE_MARKUP.

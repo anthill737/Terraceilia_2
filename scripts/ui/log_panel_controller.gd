@@ -178,6 +178,8 @@ static func news_line(msg: String) -> String:
 		out = _day_line(rest, "[DEATH] ")
 	elif rest.begins_with("[MERCHANT] "):
 		out = rest.substr(11)
+	elif rest.begins_with("[SHOP] day="):
+		out = _day_line(rest, "[SHOP] ")
 	elif rest.begins_with("[ARRIVAL] day="):
 		out = _day_line(rest, "[ARRIVAL] ")
 	elif rest.begins_with("POP GROWTH: spawning "):

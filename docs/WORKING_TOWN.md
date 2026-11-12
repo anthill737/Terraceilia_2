@@ -17,7 +17,8 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
 
 ## People and work
 
-- **Owners** (farmer, baker, woodworker) run a business and may hire up to 2 hands.
+- **Owners** (farmer, baker, woodworker) run a business and may hire up to 2 hands, more once
+  the shop is extended (six levels, docs/SHOP_LEVELS.md).
 - **Hands** are households paid a daily wage, from the day they are hired. A hand walks to the
   employer's field, bakery or yard and spends the day there.
 - **Builders** are households doing the work on a house or an improvement: for themselves, or
@@ -60,8 +61,9 @@ with them they reach 13 to 22.
 
 ## Output
 
-A master alone makes: farmer about 10 wheat a day (each hand adds as much again), baker 12 loaves
-(18 and 21 with hands), woodworker 12 logs (18 and 21). The baker made 15 alone before, which fed
+A master alone makes: farmer about 10 wheat a day, baker 12 loaves, woodworker 12 logs. Each hired
+hand adds less than the one before, and a full shop can be extended to hold more
+(docs/SHOP_LEVELS.md, 2026-11-13): 18 and 23 loaves or logs with one and two hands. The baker made 15 alone before, which fed
 the whole town with no help.
 
 ## Eating

@@ -10,7 +10,8 @@ extends RefCounted
 ##   - A shop that was working when it lost its owner (they died or left town) is taken over
 ##     once the market has been short of what it makes for LaborMarket.OPEN_SHORT_DAYS, the
 ##     same signal that lets anyone open a new shop.
-##   - A shop that closed for want of trade, or whose owner changed trade, is not handed on:
+##   - A shop that closed for want of trade, whose owner changed trade, or whose owner was
+##     broke when they died or left, is not handed on:
 ##     it is reopened the normal way, by someone with the savings to open a shop (they take
 ##     the empty one instead of building). Handing those on for nothing put 19 bakers in a
 ##     town of 46.
@@ -57,6 +58,8 @@ var empty: Dictionary = {}
 var orphaned: Dictionary = {}
 ## People who worked in a shop whose owner is gone, by trade: first in line for it.
 var heirs: Dictionary = {}
+## The levels of the shops standing empty, by trade: an extension stays with the shop.
+var levels: Dictionary = {}
 var stats := {"takeovers": 0, "hunger_switches": 0, "fees_paid": 0.0}
 
 
@@ -96,6 +99,16 @@ func owner_gone(gone, working: bool = true) -> void:
 		return
 	gone.set_meta("shop_left", true)
 	empty[role] = empty_shops(role) + 1
+	var lv: Array = levels.get(role, [])
+	lv.append(LaborMarket.shop_level(gone))
+	levels[role] = lv
+	if gone.has_meta("shop_level"):
+		gone.remove_meta("shop_level")
+	# A shop that had ruined its owner was not a going concern, whatever took them in the end.
+	# (Bakers who went broke and left town cold were counted as working shops and handed on
+	# for nothing, again and again: 577 takeovers in eight towns.)
+	if working and village.labor_market != null and village.labor_market._is_broke(gone):
+		working = false
 	if not working:
 		return
 	orphaned[role] = orphaned_shops(role) + 1
@@ -119,6 +132,13 @@ func shop_opened(who) -> void:
 	if not TRADES.has(role) or empty_shops(role) <= 0:
 		return
 	empty[role] = empty_shops(role) - 1
+	var lv: Array = levels.get(role, [])
+	if not lv.is_empty():
+		lv.sort()
+		var best: int = int(lv.pop_back())   # the biggest empty shop is taken first
+		levels[role] = lv
+		if best > 1:
+			who.set_meta("shop_level", best)
 	orphaned[role] = maxi(0, orphaned_shops(role) - 1)   # the shop that was working goes first
 	if orphaned_shops(role) == 0:
 		heirs[role] = []

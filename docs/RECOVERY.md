@@ -16,7 +16,8 @@ trade, the shop stands empty: the fields, the oven, the saws are still there.
 - A shop that was working when it lost its owner (they died or left town) is taken over once
   the market has been short of what it makes for three days. This is the same signal that
   already lets anyone open a new shop (LaborMarket.OPEN_SHORT_DAYS).
-- A shop that closed for want of trade, or whose owner changed trade, is not handed on. It is
+- A shop that closed for want of trade, whose owner changed trade, or whose owner was broke
+  when they died or left (2026-11-13), is not handed on. It is
   reopened the normal way, by someone with the savings to open a shop, who takes the empty one
   instead of building another. (Handing failed shops on for nothing was tried first: a town of
   46 ended up with 19 bakers and 655 bakery takeovers in 1,500 days.)

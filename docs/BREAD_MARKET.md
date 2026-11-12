@@ -18,7 +18,10 @@ engine converges"), so that attempt was dropped and only the changes below were 
   buy and could not, the price goes up (by up to the 5% daily limit). It used to hold still,
   because nothing had been bought from producers that day to set a clearing price.
 - **No ceiling on bread or wheat** (Anthony's rule: no price caps). The 1.00 floors stay.
-  Firewood keeps its 0.50 to 5.00 range for now.
+  Firewood lost its 5.00 ceiling on 2026-11-12 for the same reason; its 0.50 floor stays.
+  With no ceiling the firewood price follows buyers: it rises only on a day somebody with the
+  coins to pay asked for firewood. Before that an empty pile bid itself up 12% a day even in
+  a town with nobody left to buy.
 - **The town's books.** Each village records coins that came from outside (a newcomer's or new
   owner's purse) and coins carried off by people who left. People's coins plus the markets'
   purses must change by exactly that, across both towns.

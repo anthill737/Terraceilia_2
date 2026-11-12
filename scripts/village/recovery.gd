@@ -1,38 +1,63 @@
 class_name Recovery
 extends RefCounted
-## How a town gets a farmer back (docs/RECOVERY.md). Three ways, each with a dev-mode switch:
+## Empty shops (docs/RECOVERY.md). One mechanic for every trade a town has, now and later.
 ##
-## 1. farm_takeover: the land does not vanish with the farmer. The fields, the seed and the
-##    farmhouse are still there, so when a town has no farmer someone takes the farm over the
-##    next morning. No savings are needed, but the farm is not free (see "What the farm costs").
-##    People who worked for the farmer come first, then people without work, then anyone else
-##    with no shop.
-## 2. hunger_switch: hunger moves people. With no farmer, someone who has coins for a loaf and
-##    nothing to eat (none at home, none on the shelf) turns to farming. This is the only time
-##    a shop owner changes trade. A town's only baker never does.
-## 3. outside_help: when wheat stays dear, or a town has gone days with no farmer, a farmer
-##    comes from outside with an owner's purse. (The other half of outside help is in
-##    Housing._keep_back: merchants keep the coins they trade with, so they can carry grain in.)
+## A shop does not vanish with its owner. When an owner dies, leaves town, closes or changes
+## trade, the shop stands empty: the fields, the oven, the saws are still there.
 ##
-## What the farm costs: whoever takes it, by any of the three ways, pays the town the same fee
-## as for opening any shop (LaborMarket.STARTUP_COST, 50 coins), the way a new tenant paid an
-## entry fine for a holding. They pay what they can at once, keeping KEEP_DAYS of bread and
-## firewood in the purse, and the rest each morning out of what the farm earns.
+##   - When the town has nobody left in that trade, an empty shop is taken over the next
+##     morning.
+##   - A shop that was working when it lost its owner (they died or left town) is taken over
+##     once the market has been short of what it makes for LaborMarket.OPEN_SHORT_DAYS, the
+##     same signal that lets anyone open a new shop.
+##   - A shop that closed for want of trade, or whose owner changed trade, is not handed on:
+##     it is reopened the normal way, by someone with the savings to open a shop (they take
+##     the empty one instead of building). Handing those on for nothing put 19 bakers in a
+##     town of 46.
+##
+## Who takes it: people who worked in a shop of that trade whose owner is gone, then people
+## without work, then anyone else with no shop. Within a group, whoever has the most coins.
+## No savings are needed, because nothing has to be built, but it is not free: the new owner
+## pays the town the usual fee for opening a shop (LaborMarket.STARTUP_COST), what they can at
+## once, keeping KEEP_DAYS of bread and firewood in the purse plus what the shop needs to work
+## for a day (a job says so with shop_stock_cost(): a baker's wheat and oven wood), and the
+## rest each morning out of what the shop earns.
+##
+## Going without moves people: when the town has nobody in a trade and nobody without a shop
+## takes the empty one, a shop owner who has coins and cannot buy what that trade gives the
+## town (bread, firewood) takes it. This is the only time an owner changes trade.
+##
+## Nobody is sent from outside. Newcomers come the way they always do (the town's prosperity)
+## and take an empty shop like anyone else in town.
+##
+## Dev-mode switches: farm_takeover (empty shops are taken over), hunger_switch (going
+## without moves owners). Housing._keep_back (merchants keep the coins they trade with) is
+## under outside_help.
 
-const FARM_FIELDS: int = 2           # fields that go with a farm that is taken over
-const CALL_PRICE: float = 1.25       # wheat at this many times its floor counts as dear
-const CALL_DEAR_DAYS: int = 3        # dear this many days in a row before a farmer comes
-const CALL_NO_FARMER_DAYS: int = 5   # or this many days with no farmer at all
-const CALL_GAP_DAYS: int = 10        # at most one farmer from outside in this many days
-const KEEP_DAYS: float = 3.0         # days of bread and firewood a new farmer keeps before paying the fee
+## The trades a town has. A new trade is one more row; nothing else in this file names one.
+##   list:   the village's list of that trade's owners
+##   shop:   what its shop is called in the town news
+##   lack:   what people go without when the town has nobody in the trade
+##   rank:   food before warmth. The last owner of a trade leaves it only for an empty shop
+##           of a lower rank number.
+##   uses:   trades this shop cannot work without. The last owner of a trade never moves to a
+##           shop that uses their goods, or whose goods their own shop uses.
+##   fields: idle fields that go with the shop (a farm)
+const TRADES: Dictionary = {
+	"Farmer": {"list": "all_farmers", "shop": "farm", "lack": "bread", "rank": 0, "uses": [], "fields": 2},
+	"Baker": {"list": "all_bakers", "shop": "bakery", "lack": "bread", "rank": 0, "uses": ["Farmer", "Woodworker"], "fields": 0},
+	"Woodworker": {"list": "all_woodworkers", "shop": "lumber yard", "lack": "firewood", "rank": 1, "uses": [], "fields": 0},
+}
+const KEEP_DAYS: float = 3.0         # days of bread and firewood a new owner keeps before paying the fee
 
 var village = null
-## People who worked for a farmer who is gone: first in line for the farm.
-var heirs: Array = []
-var days_without_farmer: int = 0
-var dear_days: int = 0
-var last_call_day: int = -999
-var stats := {"takeovers": 0, "hunger_switches": 0, "farmers_called": 0, "fees_paid": 0.0}
+## Shops standing empty, by trade.
+var empty: Dictionary = {}
+## Of those, shops that were working when they lost their owner (the owner died or left).
+var orphaned: Dictionary = {}
+## People who worked in a shop whose owner is gone, by trade: first in line for it.
+var heirs: Dictionary = {}
+var stats := {"takeovers": 0, "hunger_switches": 0, "fees_paid": 0.0}
 
 
 func _log(line: String) -> void:
@@ -48,102 +73,162 @@ func _live(list: Array) -> Array:
 	return out
 
 
-## Called when someone dies or leaves, before their hands are released.
-func remember_heirs(gone) -> void:
-	if village == null or gone == null or not is_instance_valid(gone) or str(gone.current_role) != "Farmer":
+func owners_of(role: String) -> Array:
+	return _live(village.get(str(TRADES[role].list)))
+
+
+func empty_shops(role: String) -> int:
+	return int(empty.get(role, 0))
+
+
+func orphaned_shops(role: String) -> int:
+	return int(orphaned.get(role, 0))
+
+
+## An owner is going: their shop stands empty. `working` is true when they died or left town
+## (the shop was a going concern, and the people who worked there are remembered), false
+## when they closed it or changed trade. Call before their hands are released.
+func owner_gone(gone, working: bool = true) -> void:
+	if village == null or gone == null or not is_instance_valid(gone):
 		return
+	var role: String = str(gone.current_role)
+	if not TRADES.has(role) or gone.has_meta("shop_left"):
+		return
+	gone.set_meta("shop_left", true)
+	empty[role] = empty_shops(role) + 1
+	if not working:
+		return
+	orphaned[role] = orphaned_shops(role) + 1
+	var line: Array = heirs.get(role, [])
 	for h in village.households:
 		if h == null or not is_instance_valid(h) or h == gone or bool(h.get_meta("servant", false)):
 			continue
-		if h.has_meta("employer") and h.get_meta("employer") == gone and not heirs.has(h):
-			heirs.append(h)
+		if h.has_meta("employer") and h.get_meta("employer") == gone and not line.has(h):
+			line.append(h)
+	heirs[role] = line
+
+
+## Someone has a shop of their own from today, by any road: one empty shop of that trade,
+## if there is one, is empty no longer.
+func shop_opened(who) -> void:
+	if who == null or not is_instance_valid(who):
+		return
+	if who.has_meta("shop_left"):
+		who.remove_meta("shop_left")
+	var role: String = str(who.current_role)
+	if not TRADES.has(role) or empty_shops(role) <= 0:
+		return
+	empty[role] = empty_shops(role) - 1
+	orphaned[role] = maxi(0, orphaned_shops(role) - 1)   # the shop that was working goes first
+	if orphaned_shops(role) == 0:
+		heirs[role] = []
+
+
+## Does the town have use for an empty shop of this trade today?
+func _wanted(role: String, owners: int) -> bool:
+	if owners == 0:
+		return true
+	if orphaned_shops(role) <= 0:
+		return false   # closed for want of trade: reopened the normal way, with savings
+	var lm = village.labor_market
+	return lm != null and int(lm._short_days.get(role, 0)) >= LaborMarket.OPEN_SHORT_DAYS
 
 
 ## Once a day, after the labour market's own update.
 func on_day(day: int) -> void:
 	if village == null or village.market == null:
 		return
-	var m = village.market
-	for f in _live(village.all_farmers):
-		if f.has_meta("farm_owed"):
-			_pay_owed(f)
-	var farmers: int = _live(village.all_farmers).size()
-	days_without_farmer = days_without_farmer + 1 if farmers == 0 else 0
-	dear_days = dear_days + 1 if m.wheat_price >= Market.WHEAT_PRICE_FLOOR * CALL_PRICE else 0
-	heirs = _live(heirs)
-	if farmers == 0:
-		if Tuning.on("farm_takeover", true) and not village._free_fields().is_empty():
-			var who = _takeover_candidate()
+	for role in TRADES:
+		for o in owners_of(role):
+			if o.has_meta("shop_owed"):
+				_pay_owed(o)
+	for role in TRADES:
+		heirs[role] = _live(heirs.get(role, []))
+		if empty_shops(role) <= 0:
+			continue
+		var owners: int = owners_of(role).size()
+		if not _wanted(role, owners):
+			continue
+		var shop: String = str(TRADES[role].shop)
+		if Tuning.on("farm_takeover", true):
+			var who = _takeover_candidate(role)
 			if who != null:
-				var was_heir: bool = heirs.has(who)
+				var why: String = "the town was short"
+				if (heirs[role] as Array).has(who):
+					why = "they worked there"
+				elif owners == 0:
+					why = "the town had no %s" % role.to_lower()
 				var who_name: String = str(who.name)
-				if _give_farm(who):
+				if _give_shop(who, role):
 					_pay_owed(who)
 					stats.takeovers += 1
-					_log("[RECOVERY] day=%d %s takes over the empty farm (%s) and %s" % [day, who_name,
-						"they worked those fields" if was_heir else "nobody was farming", _fee_words(who)])
-					return
-		if Tuning.on("hunger_switch", true):
-			var hungry = _hungry_candidate()
-			if hungry != null:
-				var old_role: String = str(hungry.current_role).to_lower()
-				var hungry_name: String = str(hungry.name)
-				if _give_farm(hungry):
-					_pay_owed(hungry)
+					_log("[RECOVERY] day=%d %s takes over the empty %s (%s) and %s" % [day, who_name, shop, why, _fee_words(who)])
+					continue
+		if owners == 0 and Tuning.on("hunger_switch", true):
+			var needy = _going_without_candidate(role)
+			if needy != null:
+				var lack: String = str(TRADES[role].lack)
+				var old_role: String = str(needy.current_role).to_lower()
+				var needy_name: String = str(needy.name)
+				if _give_shop(needy, role):
+					_pay_owed(needy)
 					stats.hunger_switches += 1
-					_log("[RECOVERY] day=%d %s, a %s with coins and nothing to eat, turns to farming and %s" % [day, hungry_name, old_role, _fee_words(hungry)])
-					return
-	if Tuning.on("outside_help", true) and day - last_call_day >= CALL_GAP_DAYS \
-			and (dear_days >= CALL_DEAR_DAYS or days_without_farmer >= CALL_NO_FARMER_DAYS) and _room_for_farmer():
-		_call_farmer(day)
+					_log("[RECOVERY] day=%d %s, a %s with coins and no %s to buy, takes the empty %s and %s" % [
+						day, needy_name, old_role, lack, shop, _fee_words(needy)])
 
 
-## Hand `who` the farm: they become a farmer (free: nothing is built) and get the idle fields.
-func _give_farm(who) -> bool:
+## Hand `who` an empty shop: they change trade (nothing is built, so no opening fee up front)
+## and owe the town the fee.
+func _give_shop(who, role: String) -> bool:
 	if who == null or not is_instance_valid(who) or who.has_meta("merchant"):
 		return false
-	village._perform_role_conversion(who, "farmer", true)
-	if not village.all_farmers.has(who):
+	var t: Dictionary = TRADES[role]
+	village._perform_role_conversion(who, role.to_lower(), true)
+	if not (village.get(str(t.list)) as Array).has(who):
 		return false
-	var job = who.current_job
-	var have: int = job.get_field_count() if job != null and job.has_method("get_field_count") else 1
-	for fn in village._free_fields():
-		if have >= FARM_FIELDS:
-			break
-		village._assign_field_to_farmer(fn, who)
-		have += 1
-	heirs.erase(who)
-	who.set_meta("farm_owed", Tuning.f("shop_opening_fee", LaborMarket.STARTUP_COST))
-	who.set_meta("farm_paid", 0.0)
+	var want: int = int(t.fields)
+	if want > 0:
+		var job = who.current_job
+		var have: int = job.get_field_count() if job != null and job.has_method("get_field_count") else 1
+		for fn in village._free_fields():
+			if have >= want:
+				break
+			village._assign_field_to_farmer(fn, who)
+			have += 1
+	who.set_meta("shop_owed", Tuning.f("shop_opening_fee", LaborMarket.STARTUP_COST))
+	who.set_meta("shop_paid", 0.0)
 	return true
 
 
-## Pay the town what is owed for the farm, as far as the purse allows today.
+## Pay the town what is owed for the shop, as far as the purse allows today.
 func _pay_owed(who) -> void:
-	var owed: float = float(who.get_meta("farm_owed", 0.0))
+	var owed: float = float(who.get_meta("shop_owed", 0.0))
 	var m = village.market
 	if owed <= 0.0 or who.wallet == null or m == null:
-		who.remove_meta("farm_owed")
+		who.remove_meta("shop_owed")
 		return
 	var keep: float = KEEP_DAYS * (m.bread_price + m.firewood_price)
+	var job = who.get("current_job")
+	if job != null and job.has_method("shop_stock_cost"):
+		keep += float(job.shop_stock_cost())   # the coins the shop needs to work are not the town's to take
 	var pay: float = clampf(who.wallet.money - keep, 0.0, owed)
 	if pay > 0.0 and who.wallet.debit(pay):
 		m.money += pay
 		who.cashflow_today_expense += pay
 		stats.fees_paid += pay
-		who.set_meta("farm_paid", float(who.get_meta("farm_paid", 0.0)) + pay)
+		who.set_meta("shop_paid", float(who.get_meta("shop_paid", 0.0)) + pay)
 		owed -= pay
 	if owed <= 0.005:
-		who.remove_meta("farm_owed")
+		who.remove_meta("shop_owed")
 		if who.has_method("log_event"):
-			who.log_event("Paid off the fee for the farm.")
+			who.log_event("Paid off the fee for the shop.")
 	else:
-		who.set_meta("farm_owed", owed)
+		who.set_meta("shop_owed", owed)
 
 
 func _fee_words(who) -> String:
-	var paid: float = float(who.get_meta("farm_paid", 0.0))
-	var owed: float = float(who.get_meta("farm_owed", 0.0))
+	var paid: float = float(who.get_meta("shop_paid", 0.0))
+	var owed: float = float(who.get_meta("shop_owed", 0.0))
 	if owed <= 0.005:
 		return "pays the town $%.0f for it" % paid
 	return "pays the town $%.0f for it now, with $%.0f still owed" % [paid, owed]
@@ -153,18 +238,15 @@ static func _richest_first(a, b) -> bool:
 	return a.get_cash() > b.get_cash()
 
 
-## Who takes over an empty farm: the old farmer's hands, then people without work, then anyone
-## else with no shop of their own. Within each group, whoever has the most coins.
-func _takeover_candidate():
-	var pool: Array = []
-	for h in _live(village.households):
-		if not h.has_meta("merchant"):
-			pool.append(h)
-	if pool.is_empty():
-		return null
+## Who takes over an empty shop: people who worked there, then people without work, then
+## anyone else with no shop of their own. Within each group, whoever has the most coins.
+func _takeover_candidate(role: String):
+	var line: Array = heirs.get(role, [])
 	var groups: Array = [[], [], []]
-	for h in pool:
-		if heirs.has(h):
+	for h in _live(village.households):
+		if h.has_meta("merchant"):
+			continue
+		if line.has(h):
 			groups[0].append(h)
 		elif village.labor_market != null and village.labor_market.is_idle(h):
 			groups[1].append(h)
@@ -177,61 +259,38 @@ func _takeover_candidate():
 	return null
 
 
-func _nothing_to_eat(a) -> bool:
+## True when `a` has coins for `good` and there is none to be had: none at home, none on
+## the market.
+func _going_without(a, good: String) -> bool:
 	var m = village.market
-	if m == null or m.bread > 0 or a.inv == null or a.inv.get_qty("bread") > 0:
+	if m == null or a.inv == null or int(m.get(good)) > 0 or a.inv.get_qty(good) > 0:
 		return false
-	return a.get_cash() >= m.bread_price
+	return a.get_cash() >= float(m.get(good + "_price"))
 
 
-## Someone with coins for a loaf and nothing to eat. People with no shop first, then a
-## woodworker or a baker when the town has another, then the last woodworker. Never the town's
-## only baker: wheat is no use without one.
-func _hungry_candidate():
-	var groups: Array = [[], [], [], []]
+## Someone going without what the empty shop's trade gives the town. People with no shop
+## first, then owners in a trade the town has another of, then the last owner of a trade that
+## ranks below the empty shop's and has no tie to it (see TRADES).
+func _going_without_candidate(role: String):
+	var t: Dictionary = TRADES[role]
+	var lack: String = str(t.lack)
+	var groups: Array = [[], [], []]
 	for h in _live(village.households):
-		if not h.has_meta("merchant") and _nothing_to_eat(h):
+		if not h.has_meta("merchant") and _going_without(h, lack):
 			groups[0].append(h)
-	var woods: Array = _live(village.all_woodworkers)
-	var bakers: Array = _live(village.all_bakers)
-	for w in woods:
-		if _nothing_to_eat(w):
-			groups[1 if woods.size() >= 2 else 3].append(w)
-	if bakers.size() >= 2:
-		for b in bakers:
-			if _nothing_to_eat(b):
-				groups[2].append(b)
+	for other in TRADES:
+		if other == role:
+			continue
+		var o: Dictionary = TRADES[other]
+		var own: Array = owners_of(other)
+		var last: bool = own.size() <= 1
+		if last and (int(o.rank) <= int(t.rank) or (t.uses as Array).has(other) or (o.uses as Array).has(role)):
+			continue
+		for a in own:
+			if _going_without(a, lack):
+				groups[2 if last else 1].append(a)
 	for g in groups:
 		if not g.is_empty():
 			g.sort_custom(_richest_first)
 			return g[0]
 	return null
-
-
-func _room_for_farmer() -> bool:
-	if village.pop_mgr != null and village.pop_mgr.is_at_pop_cap():
-		return false
-	if village._free_fields().is_empty() and village.all_field_nodes.size() >= int(village.MAX_FIELDS):
-		return false
-	if village.housing != null and Tuning.on("arrival_needs_free_house", true) and village.housing.free_slots() <= 0:
-		return false
-	return true
-
-
-## A farmer comes from outside, with an owner's purse, and takes the idle fields (or ploughs one).
-func _call_farmer(day: int) -> void:
-	last_call_day = day
-	var h = await village.spawn_household_at(village.get_spawn_point_for_role("farmer"))
-	if h == null or not is_instance_valid(h):
-		return
-	var h_name: String = str(h.name)
-	if not _give_farm(h):
-		return
-	var purse: float = Tuning.f("owner_start_coins", FarmerJob.STARTING_CASH)
-	if h.wallet != null and h.wallet.money < purse:
-		Village.note_brought(h, purse - h.wallet.money)
-		h.wallet.credit(purse - h.wallet.money)
-	_pay_owed(h)
-	stats.farmers_called += 1
-	_log("[RECOVERY] day=%d %s comes from outside to farm (wheat is $%.2f, %d days without a farmer) and %s" % [
-		day, h_name, village.market.wheat_price, days_without_farmer, _fee_words(h)])

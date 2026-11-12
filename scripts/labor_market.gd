@@ -944,8 +944,7 @@ var rent_per_day: Callable = func() -> float: return 0.0
 var wage_stats := {"raises": 0, "cuts": 0, "moves": 0, "quits_unpaid": 0}
 
 
-## What a hired hand has to clear to be better off than on a garden plot, where food and wood
-## are free and no rent is asked: a loaf, a log and a day's rent.
+## A living wage: what it costs a hired hand to eat, keep warm and pay the rent for a day.
 func wage_floor() -> float:
 	if market == null:
 		return 5.0

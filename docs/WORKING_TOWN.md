@@ -28,8 +28,8 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
 - **Merchants** (one per village) carry goods between the two markets with their own coins.
 - **Cottagers** are households with no work. They do not sit and go broke. Like medieval
   cottagers they keep a garden plot (enough to eat, and to catch up a missed meal) and gather
-  deadwood for their own hearth. They spend no coins on bread or firewood, sell nothing, and no
-  rent is asked while they have no work. A wage is better, and anyone hired stops gardening and
+  deadwood for their own hearth. They spend no coins on bread or firewood, sell nothing, and they
+  pay rent like anyone else (2026-11-13). A wage is better, and anyone hired stops gardening and
   buys from the market like everyone else. Someone building their own house, and a merchant
   with no deal for two days, live the same way meanwhile. (Victoria 3 does this with peasants on
   subsistence farms, Banished with labourers, SAELIG with a free bunkhouse.)

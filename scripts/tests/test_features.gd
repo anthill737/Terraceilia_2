@@ -14,7 +14,7 @@ extends Node
 ##      home, walks it to village 2 and sells it there at a profit.
 ##   7. hands: a hired hand walks to the employer's field, bakery or yard.
 ##   8. improving: an owner with money to spare improves their home with logs and a builder.
-##   9. cottagers: someone with no work eats from a garden plot and is not put out for rent.
+##   9. cottagers: someone with no work eats from a garden plot, and pays rent like anyone else.
 ##  10. servants: an owner with a proper house and money to spare keeps a paid servant, who
 ##      spends the day at the master's house.
 ##

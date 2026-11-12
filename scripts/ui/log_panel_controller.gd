@@ -3,6 +3,10 @@ extends Node
 
 # ── State ──────────────────────────────────────────────────────────────────────
 var event_log: RichTextLabel = null
+## The whole right-hand panel. It is hidden: the log is kept in the background (tests, Export)
+## and nothing is drawn. Nobody reads a fast-scrolling wall of text while playing. L shows it
+## for debugging: town news, then everything, then hidden again.
+var panel_root: Control = null
 var export_log_button: Button = null
 var jump_to_bottom_button: Button = null
 var log_lines: Array[String] = []
@@ -32,10 +36,13 @@ const SCROLL_THRESHOLD: int = 50
 
 ## Wire the controller to the log panel UI nodes found under log_vbox.
 ## Call this once from main._ready() after the UI tree is built.
-func setup(log_vbox: Node) -> void:
+func setup(log_vbox: Node, root: Control = null) -> void:
 	if log_vbox == null:
 		push_warning("LogPanelController.setup: log_vbox is null — log panel disabled")
 		return
+	panel_root = root
+	if panel_root:
+		panel_root.visible = false
 
 	event_log = log_vbox.get_node_or_null("EventLog")
 	export_log_button = log_vbox.get_node_or_null("ExportLogButton")
@@ -103,6 +110,27 @@ func _process(_delta: float) -> void:
 		event_log.append_text("Town news (press L for everything)\n\n" + "\n".join(news_lines) + "\n")
 	if user_at_bottom:
 		event_log.scroll_to_line(event_log.get_line_count())
+
+
+## L: hidden -> town news -> everything -> hidden.
+func cycle_view() -> void:
+	if panel_root and not panel_root.visible:
+		panel_root.visible = true
+		show_everything = false
+	elif not show_everything:
+		show_everything = true
+	elif panel_root:
+		panel_root.visible = false
+		return
+	else:
+		show_everything = false
+	user_at_bottom = true
+	_log_dirty = true
+	_last_redraw_ms = -100000   # show it at once
+
+
+func is_shown() -> bool:
+	return event_log != null and event_log.is_visible_in_tree()
 
 
 ## Switch the panel between town news and the full log.

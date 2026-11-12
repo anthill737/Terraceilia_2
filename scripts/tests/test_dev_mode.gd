@@ -245,8 +245,7 @@ class Probe extends Node:
 		for a in v.households:
 			if a != null and is_instance_valid(a) and a.has_meta("merchant"):
 				merchant = a
-		Tuning.set_value("merchants", false)
-		_check("merchant switch stops trading", merchant != null and not merchant.current_job._trading_allowed())
+		_check("a normal game has no merchant (switched off for now)", merchant == null)
 		Tuning.set_value("troubles", false)
 		v.shocks.active = {}
 		for n in 400:
@@ -288,7 +287,7 @@ class Probe extends Node:
 				["market_coins", 4321.0], ["market_wheat", 85], ["market_bread", 95], ["market_firewood", 75], ["bread_price", 2.9],
 				["wheat_price", 1.2], ["firewood_price", 1.1], ["prosperity", 0.9], ["v2.others", 4], ["v2.market_coins", 999.0],
 				["houses_spare_at_start", 3], ["gardens", false], ["servants", false], ["home_improvements", false], ["troubles", false],
-				["town_size_limit", 40], ["merchant_start_coins", 222.0]]:
+				["town_size_limit", 40], ["merchants", true], ["merchant_start_coins", 222.0]]:
 			Tuning.set_value(str(pair[0]), pair[1])
 		Tuning.source = "test"
 		var dm = main.get_node_or_null("DevMenu")
@@ -331,6 +330,9 @@ class Probe extends Node:
 				if a != null and is_instance_valid(a) and a.has_meta("merchant"):
 					merchant = a
 			_check("the merchant got the purse set by the input", merchant != null and _near(merchant.get_cash(), 222.0, 0.05), "%.1f" % (merchant.get_cash() if merchant else -1.0))
+			Tuning.set_value("merchants", false)
+			_check("merchant switch stops trading", merchant != null and not merchant.current_job._trading_allowed())
+			Tuning.set_value("merchants", true)
 			_check("market purse and shelves are as asked", _near(m.money, 4321.0) and m.wheat == 85 and m.bread == 95 and m.firewood == 75,
 				"%.0f coins, wheat %d, bread %d, wood %d" % [m.money, m.wheat, m.bread, m.firewood])
 			_check("prices are as asked", _near(m.bread_price, 2.9) and _near(m.wheat_price, 1.2) and _near(m.firewood_price, 1.1))

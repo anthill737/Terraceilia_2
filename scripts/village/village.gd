@@ -1005,8 +1005,10 @@ func _note_leaver(agent: Node, reason: String) -> void:
 		coins_taken += agent.get_cash()
 
 
+## Merchants are switched off for now (Anthony, 2026-11-13). The code stays; dev mode (F1,
+## Switches) or `--set merchants=true` brings them back.
 func _spawn_merchant() -> void:
-	if spawn_service == null or not Tuning.on("merchants", true):
+	if spawn_service == null or not Tuning.on("merchants", false):
 		return
 	var h = await spawn_household_at(get_spawn_point_for_role("household"))
 	if h == null or not is_instance_valid(h):

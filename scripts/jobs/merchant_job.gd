@@ -67,7 +67,7 @@ func _world() -> Node:
 
 func _trading_allowed() -> bool:
 	var w = _world()
-	return Tuning.on("merchants", true) and w != null and w.get("trade_enabled") == true and not w.get_meta("no_merchants", false)
+	return Tuning.on("merchants", false) and w != null and w.get("trade_enabled") == true and not w.get_meta("no_merchants", false)
 
 
 func _other_village():

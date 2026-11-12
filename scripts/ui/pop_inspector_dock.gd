@@ -252,7 +252,7 @@ func refresh(selected_pop: Node) -> void:
 	if home_village != null and is_instance_valid(home_village) and home_village.get("housing") != null:
 		extras.append(home_village.housing.describe(selected_pop))
 	if Recovery.TRADES.has(str(selected_pop.current_role)):
-		extras.append("Shop level %d: employs %d of %d hands." % [LaborMarket.shop_level(selected_pop), LaborMarket.hands_of(selected_pop), LaborMarket.staff_room(selected_pop)])
+		extras.append("Shop level %d: employs %d of %d hands at $%.2f a day." % [LaborMarket.shop_level(selected_pop), LaborMarket.hands_of(selected_pop), LaborMarket.staff_room(selected_pop), LaborMarket.wage_of(selected_pop)])
 
 	# What this person does for a living (metas kept by the labour market and the trade code).
 	var living: String = ""

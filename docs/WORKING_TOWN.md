@@ -19,7 +19,8 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
 
 - **Owners** (farmer, baker, woodworker) run a business and may hire up to 2 hands, more once
   the shop is extended (six levels, docs/SHOP_LEVELS.md).
-- **Hands** are households paid a daily wage, from the day they are hired. A hand walks to the
+- **Hands** are households paid a daily wage, from the day they are hired. Each owner sets
+  their own wage (docs/WAGES.md, 2026-11-13). A hand walks to the
   employer's field, bakery or yard and spends the day there.
 - **Builders** are households doing the work on a house or an improvement: for themselves, or
   hired by the owner at the daily wage.

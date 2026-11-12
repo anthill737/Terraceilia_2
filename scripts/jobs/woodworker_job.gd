@@ -177,4 +177,4 @@ func _update_cost() -> void:
 		return
 	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_capacity()))
 	var keep: float = float(market.bread_price) + float(market.firewood_price)
-	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.daily_wage(market) + maintenance_cost_per_day + keep) / maxf(1.0, per_day)
+	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / maxf(1.0, per_day)

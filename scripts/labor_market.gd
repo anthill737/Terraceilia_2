@@ -812,14 +812,21 @@ const GATHERED_WOOD_KEEP: int = 3    # (selling it flooded the firewood market a
 
 func _update_hands(day: int) -> void:
 	open_jobs = 0
-	var wage: float = daily_wage(market)
+	var own: bool = Tuning.on("owner_wages", true)
+	var base: float = daily_wage(market)
+	var need: float = wage_floor()
+	var step: float = Tuning.f("price_daily_limit", 0.05)   # a wage moves by at most what a price may in a day
 	var paid: float = 0.0
 	var employed: int = 0
+	var wanting: Array = []   # employers who wanted a hand today and found nobody willing
 	for p in all_farmers + all_bakers + all_woodworkers:
 		if not (p and is_instance_valid(p)):
 			continue
 		var hands: Array = p.get_meta("hands", [])
 		hands = hands.filter(func(h): return is_instance_valid(h) and all_households.has(h))
+		if own and not p.has_meta("wage_offer"):
+			p.set_meta("wage_offer", base)
+		var wage: float = maxf(float(p.get_meta("wage_offer", base)), need) if own else base
 		var cash_now: float = p.get_cash() + float(p.get_meta("invested_total", 0.0))
 		var prev: float = float(p.get_meta("hand_prev_cash", cash_now))
 		var falling: int = int(p.get_meta("hand_falling_days", 0))
@@ -834,14 +841,36 @@ func _update_hands(day: int) -> void:
 				h.cashflow_today_income += wage
 				paid += wage
 				wages_paid_total += wage
+				h.set_meta("boss_bond", mini(BOND_DAYS, int(h.get_meta("boss_bond", 0)) + 1))
+				h.set_meta("wage_unpaid", 0)
 				kept.append(h)
 				_send_to_work(h, p)
+			elif own:
+				# Not paid today. They stay for now, think less of the boss, and quit if it goes on.
+				var missed: int = int(h.get_meta("wage_unpaid", 0)) + 1
+				h.set_meta("wage_unpaid", missed)
+				h.set_meta("boss_bond", int(h.get_meta("boss_bond", 0)) / 2)
+				if missed >= UNPAID_DAYS_TO_QUIT:
+					wage_stats.quits_unpaid += 1
+					_leave_job(p, h, day, "[HANDS] day=%d %s quits %s: not paid for %d days" % [day, h.name, p.name, missed], "Quit %s: not paid for %d days." % [p.name, missed])
+				else:
+					kept.append(h)
+					_send_to_work(h, p)
 			else:
 				_let_go(p, h, day, "could not pay")
 		hands = kept
+		var raised: bool = false
 		if not hands.is_empty() and falling >= FIRE_LOSS_DAYS:
-			# A losing stretch: let one go.
-			_let_go(p, hands.pop_back(), day, "losing money")
+			# A losing stretch: the owner cuts the wage if there is anything to cut, and only
+			# then lets someone go.
+			if own and wage > need + 0.005:
+				wage = maxf(need, wage * (1.0 - step))
+				wage_stats.cuts += 1
+				if event_bus:
+					event_bus.emit_log("[HANDS] day=%d %s cuts the wage to $%.2f a day (losing money)" % [day, p.name, wage])
+				raised = true
+			else:
+				_let_go(p, hands.pop_back(), day, "losing money")
 			falling = 0
 		elif hands.size() >= staff_room(p):
 			# Full: a shop that would take another hand if it had the room is extended instead.
@@ -851,10 +880,12 @@ func _update_hands(day: int) -> void:
 		elif p.get_cash() >= HIRE_CASH_DAYS * wage * (hands.size() + 1) and not _overstocked(p):
 			var value: float = _hand_value(p, hands.size())
 			if value > wage * 1.1:
-				var h = _free_hand_for(p)
+				var h = _willing_hand_for(p, wage, need)
 				if h != null:
 					hands.append(h)
 					h.set_meta("employer", p)
+					h.set_meta("boss_bond", 0)
+					h.set_meta("wage_unpaid", 0)
 					_send_to_work(h, p)
 					# Paid from the first day: a cottager taken on today stops gardening today, and
 					# with the first wage a day late a hungry one starved on the way to the job.
@@ -870,18 +901,166 @@ func _update_hands(day: int) -> void:
 					if h.has_method("log_event"):
 						h.log_event("Taken on as a hand by %s at $%.2f a day." % [p.name, wage])
 				else:
-					open_jobs += 1   # work waiting and nobody free: a newcomer may come for it
+					open_jobs += 1   # work waiting and nobody willing: a newcomer may come for it
+					if own:
+						# Nobody will come for this wage: the owner offers more, but never more
+						# than the hand would bring in.
+						wanting.append(p)
+						var top: float = value / 1.1
+						if wage < top - 0.005:
+							wage = minf(top, wage * (1.0 + step))
+							wage_stats.raises += 1
+						raised = true
+		if own and not raised and not hands.is_empty() and idle_count > 0:
+			# People in town lack work and nobody is being sought: the wage settles back toward
+			# the floor, the least anyone works for.
+			if wage > need + 0.005:
+				wage = maxf(need, wage * (1.0 - step))
+		if own:
+			p.set_meta("wage_offer", wage)
 		p.set_meta("hands", hands)
 		p.set_meta("hand_prev_cash", p.get_cash() + float(p.get_meta("invested_total", 0.0)))
 		p.set_meta("hand_falling_days", falling)
 		employed += hands.size()
+	if own:
+		_better_offers(day, wanting)
 	if open_jobs > 0:
 		last_open_job_day = day
 	if day % 5 == 0:
-		var line: String = "[HANDS] day=%d employed=%d wage=$%.2f paid_today=$%.2f" % [day, employed, wage, paid]
+		var line: String = "[HANDS] day=%d employed=%d wage=$%.2f paid_today=$%.2f" % [day, employed, (paid / float(employed)) if employed > 0 else base, paid]
 		print(line)
 		if event_bus:
 			event_bus.emit_log(line)
+
+
+# ── Wages set by each owner (docs/WAGES.md) ──────────────────────────────────────
+
+const UNPAID_DAYS_TO_QUIT: int = 2   # a hand not paid this many days running quits
+const BOND_DAYS: int = 30            # paid days after which a hand is as attached to a boss as they get
+const BOND_WORTH: float = 0.2        # what that attachment is worth to them, as a share of the wage
+const WALK_SPEED: float = 100.0      # px a second: how fast people walk (the jobs' SPEED)
+## A day's rent (Housing). Set by the village.
+var rent_per_day: Callable = func() -> float: return 0.0
+var wage_stats := {"raises": 0, "cuts": 0, "moves": 0, "quits_unpaid": 0}
+
+
+## What a hired hand has to clear to be better off than on a garden plot, where food and wood
+## are free and no rent is asked: a loaf, a log and a day's rent.
+func wage_floor() -> float:
+	if market == null:
+		return 5.0
+	return float(market.bread_price) + float(market.firewood_price) + float(rent_per_day.call())
+
+
+## The wage `p` pays a hand today: their own offer, or the town's going rate (daily_wage)
+## when owners do not set wages.
+static func wage_of(p) -> float:
+	if p == null or not is_instance_valid(p):
+		return daily_wage(null)
+	if Tuning.on("owner_wages", true) and p.has_meta("wage_offer"):
+		return float(p.get_meta("wage_offer"))
+	return daily_wage(p.get("market"))
+
+
+## Where `p`'s hands spend the day: a field, the bakery or the lumber yard.
+func _work_spot(p) -> Node2D:
+	var pj = p.get("current_job") if p != null and is_instance_valid(p) else null
+	if pj == null:
+		return null
+	if pj is FarmerJob:
+		for f in pj.fields:
+			if f != null and is_instance_valid(f) and f is Node2D:
+				return f
+		return pj.house_node
+	if pj is BakerJob:
+		return pj.bakery_location
+	if pj is WoodworkerJob:
+		return pj.yard_location
+	return null
+
+
+## The share of the day `h` would spend walking to `p`'s shop and home again.
+func commute_share(h, p) -> float:
+	var j = h.get("current_job") if h != null and is_instance_valid(h) else null
+	var home = j.get("home_location") if j != null else null
+	var spot = _work_spot(p)
+	if home == null or spot == null or not is_instance_valid(home) or not is_instance_valid(spot):
+		return 0.0
+	var secs: float = 2.0 * home.global_position.distance_to(spot.global_position) / WALK_SPEED
+	return clampf(secs / Tuning.f("day_seconds", SimulationClock.TICK_SECONDS * 10.0), 0.0, 0.9)
+
+
+## What a day working for `p` at `wage` is worth to `h`: the wage, less the share of the day
+## lost walking there and back, plus (when they already work there) how they get on with the
+## boss, which grows with every day paid on time and halves with every day unpaid.
+func job_worth(h, p, wage: float) -> float:
+	var w: float = wage * (1.0 - commute_share(h, p))
+	if h.has_meta("employer") and h.get_meta("employer") == p:
+		w += wage * BOND_WORTH * clampf(float(int(h.get_meta("boss_bond", 0))) / float(BOND_DAYS), 0.0, 1.0)
+	return w
+
+
+## Who `p` takes on: anyone free takes a job that pays the floor (wage_floor), and of them
+## the owner picks the most skilled, then the poorest (_free_hand_for). The walk and the
+## boss are weighed when a hand chooses between two employers (_better_offers), not when
+## someone with no work is offered one. Tried the other way first, with the walk taken off
+## the wage before anyone would accept: the farms, which are a long walk from every house,
+## could hardly hire, and hired hands per town fell from 16 to 11.
+func _willing_hand_for(p: Node, _wage: float, _need: float):
+	return _free_hand_for(p)
+
+
+## Hands change employer for a better offer: each employer who wanted a hand today and found
+## nobody free takes the person working elsewhere who gains most by coming, if the new job is
+## worth IMPROVEMENT_MARGIN more to them than the one they have (wage, walk and boss).
+func _better_offers(day: int, wanting: Array) -> void:
+	for p in wanting:
+		if not is_instance_valid(p):
+			continue
+		var offer: float = wage_of(p)
+		var best = null
+		var best_from = null
+		var best_gain: float = 0.0
+		for e in all_farmers + all_bakers + all_woodworkers:
+			if e == p or not (e and is_instance_valid(e)):
+				continue
+			for h in e.get_meta("hands", []):
+				if not is_instance_valid(h):
+					continue
+				var now: float = job_worth(h, e, wage_of(e))
+				var then: float = job_worth(h, p, offer)
+				if then > now * (1.0 + IMPROVEMENT_MARGIN) and then - now > best_gain:
+					best = h
+					best_from = e
+					best_gain = then - now
+		if best == null:
+			continue
+		var old: Array = best_from.get_meta("hands", [])
+		old.erase(best)
+		best_from.set_meta("hands", old)
+		var mine: Array = p.get_meta("hands", [])
+		mine.append(best)
+		p.set_meta("hands", mine)
+		best.set_meta("employer", p)
+		best.set_meta("boss_bond", 0)
+		best.set_meta("wage_unpaid", 0)
+		_send_to_work(best, p)
+		wage_stats.moves += 1
+		if event_bus:
+			event_bus.emit_log("[HANDS] day=%d %s leaves %s for %s: $%.2f a day against $%.2f" % [day, best.name, best_from.name, p.name, offer, wage_of(best_from)])
+		if best.has_method("log_event"):
+			best.log_event("Left %s for %s: $%.2f a day against $%.2f." % [best_from.name, p.name, offer, wage_of(best_from)])
+
+
+## A hand walks out (quits): the same tidy-up as being let go, with their own words.
+func _leave_job(p: Node, h, _day: int, news: String, diary: String) -> void:
+	if is_instance_valid(h):
+		h.remove_meta("employer")
+		_send_to_work(h, null)
+		if h.has_method("log_event"):
+			h.log_event(diary)
+	if event_bus:
+		event_bus.emit_log(news)
 
 
 ## Value per day of one more hand to `p`, who has `n` hands now, at today's prices: what the

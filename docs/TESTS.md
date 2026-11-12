@@ -68,6 +68,12 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   place times how good they are, with the most skilled counted first; that an employer takes
   the most skilled person free, and among equals the poorest; that the owner's skill counts at
   the lumber yard; and that with the switch off every hand counts the same.
+- `res://scenes/TestWages.tscn`: each owner sets the wage (docs/WAGES.md). Checks (16 checks) the
+  floor (a loaf, a log and the rent); that a job is worth its wage less the walk plus how the
+  hand gets on with the boss; that only an offer worth 15% more moves a hand; that an unpaid
+  hand stays a day and quits on the second; that an owner who finds nobody raises the wage a
+  little each day, never above what the hand brings in, and lets it settle back; and that with
+  the switch off everyone pays the town's rate.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

@@ -138,7 +138,7 @@ static func level_name(level: int) -> String:
 func _reserve_of(a) -> float:
 	var r: float = _keep_back(a)
 	if not village.households.has(a):
-		r += OWNER_WAGE_DAYS * LaborMarket.daily_wage(market) * float(1 + LaborMarket.hands_of(a))
+		r += OWNER_WAGE_DAYS * LaborMarket.wage_of(a) * float(1 + LaborMarket.hands_of(a))
 	return r
 
 

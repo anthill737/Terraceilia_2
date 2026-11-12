@@ -172,6 +172,8 @@ static func news_line(msg: String) -> String:
 		out = _day_line(rest, "[SERVANT] ")
 	elif rest.begins_with("[SHOCK] day="):
 		out = _day_line(rest, "[SHOCK] ")
+	elif rest.begins_with("[RECOVERY] day="):
+		out = _day_line(rest, "[RECOVERY] ")
 	elif rest.begins_with("[DEATH] day="):
 		out = _day_line(rest, "[DEATH] ")
 	elif rest.begins_with("[MERCHANT] "):

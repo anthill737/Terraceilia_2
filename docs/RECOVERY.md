@@ -13,7 +13,12 @@ The code is in scripts/village/recovery.gd.
 The land does not vanish with the farmer. The fields, the seed and the farmhouse are still
 there. When a town has no farmer, someone takes the farm over the next morning:
 
-- No savings needed and no fee, because nothing has to be built. No purse is handed out either.
+- No savings are needed, because nothing has to be built. No purse is handed out either.
+- It is not free. Whoever takes the farm pays the town the usual fee for opening a shop (50
+  coins), the way a new tenant paid an entry fine for a holding. They pay what they can at
+  once, keeping three days of bread and firewood in the purse, and the rest each morning out
+  of what the farm earns. The same goes for a hungry person who turns to farming and for a
+  farmer who comes from outside.
 - First in line: people who worked for the farmer who is gone. Then people without work. Then
   anyone else with no shop. Within a group, whoever has the most coins.
 - The farm's fields (up to two) go with it.
@@ -40,8 +45,10 @@ the shelf) turns to farming. This is the one case where a shop owner changes tra
 
 ## Choices that were Claude's
 
-The order of who takes the farm, "most coins first", two fields per farm, and the numbers for
-the farmer from outside (a quarter over the floor, three days, five days, ten days).
+The order of who takes the farm, "most coins first", two fields per farm, the numbers for
+the farmer from outside (a quarter over the floor, three days, five days, ten days), and that
+the price of the farm is the shop fee, paid over time with three days of keep held back.
+(Anthony's rule: whoever picks up the farm pays at least something.)
 
 ## Measured
 

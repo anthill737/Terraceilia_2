@@ -39,6 +39,13 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
 - `res://scenes/TestLogPanel.tscn`: runs the game at 10x and checks that the Event Log is hidden
   and never drawn while the game keeps recording it, and that L shows town news, then everything
   (rewritten at most 4 times a second, newest line shown), then hides it again.
+- `res://scenes/TestMarket.tscn`: the bread and wheat price rules (docs/BREAD_MARKET.md), a staged
+  shortage and overfull shelf in the real game, and that the books balance to the coin.
+- `res://scenes/TestLongRun.tscn -- [--days=1500] [--scenario=x] [--set k=v] [--wipe-day=N]
+  [--rows=x.jsonl] [--news=x.txt]`: plays the game for a long time and fails when a town empties,
+  someone starves holding coins for a loaf, a market purse runs dry, a town goes 30 days without
+  a farmer or baker, or the books do not balance. Run with `--fixed-fps 5`: 1,500 days take
+  about two minutes.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

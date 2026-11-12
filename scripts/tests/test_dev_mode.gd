@@ -101,7 +101,7 @@ class Probe extends Node:
 			"shop_opening_fee": LaborMarket.STARTUP_COST,
 			"upkeep_farmer": float(farmer.current_job.maintenance_cost_per_day), "upkeep_baker": float(baker.current_job.maintenance_cost_per_day),
 			"upkeep_woodworker": float(wood.current_job.maintenance_cost_per_day),
-			"price_daily_limit": Market.MAX_DAILY_PRICE_CHANGE, "bread_price_ceiling": Market.BREAD_PRICE_CEILING,
+			"price_daily_limit": Market.MAX_DAILY_PRICE_CHANGE,
 			"arrival_prosperity_bar": float(v.prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW), "arrival_wait_days": float(v.prosperity_meter.GROWTH_COOLDOWN_DAYS),
 			"arrival_max_idle": float(v.MAX_IDLE_FOR_ARRIVAL), "town_size_limit": float(PopulationManager.MAX_TOTAL_POP),
 			"house_logs": float(Housing.HOUSE_WOOD), "house_build_days": float(Housing.BUILD_DAYS), "houses_spare_at_start": float(Housing.START_SPARE),
@@ -176,11 +176,12 @@ class Probe extends Node:
 		pm2.firewood_price = 1.0
 		pm2._adjust_firewood_price()
 		_check("daily price limit reaches the price rule", _near(pm2.firewood_price, 1.0 + 0.2 * 0.5, 0.001), "1.00 -> %.3f" % pm2.firewood_price)
-		Tuning.set_value("bread_price_ceiling", 4.0)
 		pm2.bread_price = 9.0
+		pm2.bread = 0
 		pm2.bread_total_cleared = 0
+		pm2.bread_short_today = 3
 		pm2._adjust_bread_price(1)
-		_check("bread ceiling reaches the price rule", pm2.bread_price <= 4.0 + 0.001, "9.00 -> %.2f" % pm2.bread_price)
+		_check("daily price limit reaches the bread price, with no ceiling", _near(pm2.bread_price, 9.9, 0.001), "9.00 -> %.2f with an empty shelf" % pm2.bread_price)
 		pm2.free()
 		# Harvest: the same ripe field at 100% and at 50%.
 		var gains: Array = []
@@ -275,7 +276,7 @@ class Probe extends Node:
 				["market_coins", 4321.0], ["market_wheat", 85], ["market_bread", 95], ["market_firewood", 75], ["bread_price", 2.9],
 				["wheat_price", 1.2], ["firewood_price", 1.1], ["prosperity", 0.9], ["v2.others", 4], ["v2.market_coins", 999.0],
 				["houses_spare_at_start", 3], ["gardens", false], ["servants", false], ["home_improvements", false], ["troubles", false],
-				["town_size_limit", 40], ["merchant_start_coins", 222.0], ["bread_price_ceiling", 3.0]]:
+				["town_size_limit", 40], ["merchant_start_coins", 222.0]]:
 			Tuning.set_value(str(pair[0]), pair[1])
 		Tuning.source = "test"
 		var dm = main.get_node_or_null("DevMenu")
@@ -373,7 +374,6 @@ class Probe extends Node:
 			_check("servants stay off", v.housing.servant_count() == 0)
 			_check("home improvements stay off", improving == 0 and int(v.housing.stats.improve_started) == 0)
 			_check("troubles stay off", v.shocks.active.is_empty())
-			_check("bread stays under the ceiling that was set", m.bread_price <= 3.0 + 0.001, "%.2f" % m.bread_price)
 			_check("the town ran %d days with nobody starving" % RUN_DAYS, v.starved_deaths == 0 and v.pop_mgr.count() >= 20, "%d people, %d starved" % [v.pop_mgr.count(), v.starved_deaths])
 			# 3. No merchant when the switch is off at the start.
 			Tuning.clear()

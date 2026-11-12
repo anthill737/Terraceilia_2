@@ -32,7 +32,6 @@ const INPUTS: Array = [
 	{"k": "upkeep_woodworker", "g": "Money", "t": "Lumber yard upkeep a day (coins)", "d": 0.2, "lo": 0.0, "hi": 1000.0, "st": 0.1},
 
 	{"k": "price_daily_limit", "g": "Prices", "t": "Most a price may move in one day (0.05 = 5%)", "d": 0.05, "lo": 0.01, "hi": 1.0, "st": 0.01},
-	{"k": "bread_price_ceiling", "g": "Prices", "t": "Highest price bread may reach", "d": 10.0, "lo": 1.0, "hi": 1000000.0, "st": 1.0},
 
 	{"k": "arrival_prosperity_bar", "g": "Newcomers", "t": "Prosperity needed for a newcomer (0 to 1)", "d": 0.7, "lo": 0.0, "hi": 1.0, "st": 0.05},
 	{"k": "arrival_wait_days", "g": "Newcomers", "t": "Fewest days between two newcomers", "d": 3, "lo": 0, "hi": 365, "st": 1},

@@ -4,7 +4,8 @@ extends Node
 ## on purpose, and checks that way works on its own:
 ##
 ##   1. farm_takeover: the next morning someone has the farm. A person who worked for the old
-##      farmer comes first. Nothing is paid and no purse is handed out; both fields go with it;
+##      farmer comes first. They pay the town's shop fee for it, what they can at once and the
+##      rest out of the farm's earnings, and no purse is handed out; both fields go with it;
 ##      wheat is being sold again within days.
 ##   2. hunger_switch: in a town of owners only, with no bread anywhere, a woodworker with coins
 ##      turns to farming. The town's only baker stays a baker.
@@ -151,8 +152,13 @@ class Probe extends Node:
 						_check("a person who worked for the old farmer comes first", not hands.is_empty() and hands.has(nf),
 							"%d had worked there; %s got it" % [hands.size(), nf.name])
 						var before: float = float(cash_then.get(nf.get_instance_id(), -999.0))
-						_check("nothing is paid and no purse is handed out", absf(nf.get_cash() - before) < 20.0 and absf(v.coins_brought - brought_then) < 0.01,
-							"%.1f coins before, %.1f after" % [before, nf.get_cash()])
+						var fee: float = LaborMarket.STARTUP_COST
+						var paid: float = float(nf.get_meta("farm_paid", 0.0))
+						var owed: float = float(nf.get_meta("farm_owed", 0.0))
+						_check("they pay the town for the farm: something now, the rest owed", paid > 0.0 and absf(paid + owed - fee) < 0.01
+							and absf((before - nf.get_cash()) - paid) < 12.0 and absf(float(v.recovery.stats.fees_paid) - paid) < 0.01,
+							"had %.1f coins, paid %.1f at once, %.1f still owed of a fee of %.0f" % [before, paid, owed, fee])
+						_check("no purse is handed out", absf(v.coins_brought - brought_then) < 0.01)
 						_check("both fields go with the farm", v._free_fields().is_empty() and nf.current_job.get_field_count() == 2,
 							"%d fields, %d left idle" % [nf.current_job.get_field_count(), v._free_fields().size()])
 					stage = 2
@@ -161,6 +167,9 @@ class Probe extends Node:
 					var grown: int = int(v.market.totals.wheat_from_farmers) - wheat_then
 					_check("wheat is being sold again", grown > 0 and v.all_farmers.size() >= 1, "%d wheat sold to the market since" % grown)
 					_check("nobody starved", v.starved_deaths == 0, "%d" % v.starved_deaths)
+					var f2 = v.all_farmers[0] if not v.all_farmers.is_empty() else null
+					_check("the fee is paid off out of the farm's earnings", f2 != null and not f2.has_meta("farm_owed") and absf(float(v.recovery.stats.fees_paid) - LaborMarket.STARTUP_COST) < 0.01,
+						"%.1f paid to the town in all" % float(v.recovery.stats.fees_paid))
 					_next_phase(main)
 
 	# ── 2. Hunger moves people ──────────────────────────────────────────────
@@ -220,8 +229,10 @@ class Probe extends Node:
 					_check("with wheat dear, a farmer comes from outside", nf != null and int(v.recovery.stats.farmers_called) == 1 and day <= day0 + 5,
 						"day %d, farmer gone on day %d" % [day, day0])
 					if nf != null:
-						_check("they bring an owner's purse", nf.get_cash() >= FarmerJob.STARTING_CASH - 15.0 and v.coins_brought - brought_then >= FarmerJob.STARTING_CASH - 0.01,
-							"%.1f coins in hand, %.1f brought into town" % [nf.get_cash(), v.coins_brought - brought_then])
+						_check("they bring an owner's purse and pay the town's fee from it", v.coins_brought - brought_then >= FarmerJob.STARTING_CASH - 0.01
+							and not nf.has_meta("farm_owed") and absf(float(nf.get_meta("farm_paid", 0.0)) - LaborMarket.STARTUP_COST) < 0.01
+							and nf.get_cash() >= FarmerJob.STARTING_CASH - LaborMarket.STARTUP_COST - 15.0,
+							"%.1f brought into town, %.0f paid for the farm, %.1f in hand" % [v.coins_brought - brought_then, float(nf.get_meta("farm_paid", 0.0)), nf.get_cash()])
 					stage = 2
 			2:
 				if not merchant_lines.is_empty() or day > day0 + 10:

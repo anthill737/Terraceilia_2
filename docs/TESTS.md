@@ -36,9 +36,9 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   house on the first morning, that each switch holds for 12 days, the menu's rows, readout and
   reset, and that scenario files save and load. Any game test also takes `--scenario=name` and
   `--set key=value` after `--`.
-- `res://scenes/TestLogPanel.tscn`: runs the game at 10x and checks (8 checks) that the Event Log
-  is rewritten at most 4 times a second and no more often than town news comes in, that it
-  shows the newest news line, and that L switches to everything and back at once.
+- `res://scenes/TestLogPanel.tscn`: runs the game at 10x and checks that the Event Log is hidden
+  and never drawn while the game keeps recording it, and that L shows town news, then everything
+  (rewritten at most 4 times a second, newest line shown), then hides it again.
 - `res://scenes/TestMarket.tscn`: the bread and wheat price rules (docs/BREAD_MARKET.md), a staged
   shortage and overfull shelf in the real game, and that the books balance to the coin.
 - `res://scenes/TestLongRun.tscn -- [--days=1500] [--scenario=x] [--set k=v] [--wipe-day=N]

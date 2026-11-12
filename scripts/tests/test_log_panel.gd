@@ -1,18 +1,17 @@
 extends Node
-## Event Log test: runs the real game (Main.tscn) at 10x and checks that the Event Log panel
-## shows the right text without being rewritten every frame (it used to be, which took most
-## of the frame time at high speed):
+## Event Log test: runs the real game (Main.tscn) at 10x. The Event Log is not shown in play;
+## the game keeps it in the background, and L brings it up for debugging.
 ##
-##   1. Town news (the default): the panel is rewritten at most 4 times a second of real time
-##      and never more often than news lines come in, and it shows the newest news line.
-##   2. L (everything): the switch shows at once, the panel is rewritten at most 4 times a
-##      second, and it shows the newest log line.
-##   3. L again: back to town news.
+##   1. Hidden: the panel is not on screen and is never drawn, while the game keeps recording
+##      every message, the town news and the export buffer.
+##   2. L shows town news at once, with the newest news line.
+##   3. L again shows everything, rewritten at most 4 times a second, with the newest log line.
+##   4. L again hides it.
 ##
 ##   godot --headless --path . res://scenes/TestLogPanel.tscn
 ## Exit code 0 when every check passes.
 
-const NEWS_SECONDS := 8.0
+const HIDDEN_SECONDS := 6.0
 const ALL_SECONDS := 3.0
 
 
@@ -23,11 +22,11 @@ class Probe extends Node:
 	var done := false
 	var busy := false
 	var lp: LogPanelController = null
+	var main_node: Node = null
 	var redraws_at_start := 0
+	var buffer_at_start := 0
 	var messages := 0
 	var news := 0
-	var messages_at_start := 0
-	var news_at_start := 0
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -43,6 +42,13 @@ class Probe extends Node:
 
 	func _shown() -> String:
 		return lp.event_log.get_parsed_text() if lp and lp.event_log else ""
+
+	## Press L the way the player does.
+	func _press_l() -> void:
+		var ev := InputEventKey.new()
+		ev.keycode = KEY_L
+		ev.pressed = true
+		main_node._input(ev)
 
 	## Stop the game (nothing new is logged), let the panel catch up, and return what it shows.
 	func _settled_text() -> String:
@@ -67,46 +73,43 @@ class Probe extends Node:
 			lp = main.get("_log_panel_ctrl")
 			if lp == null or lp.event_log == null:
 				return
+			main_node = main
 			for v in main.get_node("World").villages:
 				v.event_bus.event_logged.connect(_on_msg)
 			t0 = Time.get_ticks_msec()
 			redraws_at_start = lp.redraws
+			buffer_at_start = lp.log_buffer.size()
 			stage = 1
 			return
 		var secs: float = float(Time.get_ticks_msec() - t0) / 1000.0
 		busy = true
 		match stage:
 			1:
-				if secs >= NEWS_SECONDS:
-					var redraws: int = lp.redraws - redraws_at_start
-					_check("town news is rewritten at most 4 times a second", redraws <= int(ceil(secs * 4.0)) + 1, "%d rewrites in %.1f s while %d messages came in" % [redraws, secs, messages])
-					_check("town news is not rewritten more often than news comes in", redraws <= news + 1, "%d rewrites, %d news lines" % [redraws, news])
-					_check("the game logged plenty while it ran", messages > 200, "%d messages" % messages)
+				if secs >= HIDDEN_SECONDS:
+					_check("the Event Log is not on screen", not lp.is_shown() and lp.panel_root != null and not lp.panel_root.visible)
+					_check("it was never drawn while hidden", lp.redraws == redraws_at_start, "%d rewrites while %d messages came in" % [lp.redraws - redraws_at_start, messages])
+					_check("the game kept recording every message in the background", messages > 200 and lp.log_buffer.size() >= buffer_at_start + mini(messages, 1000),
+						"%d messages, export buffer %d -> %d" % [messages, buffer_at_start, lp.log_buffer.size()])
+					_check("and the town news", news > 0 and not lp.news_lines.is_empty(), "%d news lines" % news)
+					_press_l()
 					var shown: String = await _settled_text()
 					var newest: String = lp.news_lines[lp.news_lines.size() - 1] if not lp.news_lines.is_empty() else ""
-					_check("the panel shows the newest town news", newest != "" and shown.begins_with("Town news") and shown.contains(newest), newest)
-					lp.toggle_everything()
+					_check("L shows town news at once, with the newest line", lp.is_shown() and shown.begins_with("Town news") and newest != "" and shown.contains(newest), newest)
+					_press_l()
 					t0 = Time.get_ticks_msec()
+					redraws_at_start = lp.redraws
 					stage = 2
 			2:
-				if _shown().begins_with("Everything") or secs > 1.0:
-					_check("L shows everything at once", _shown().begins_with("Everything"), "after %.2f s" % secs)
-					redraws_at_start = lp.redraws
-					t0 = Time.get_ticks_msec()
-					stage = 3
-			3:
 				if secs >= ALL_SECONDS:
 					var redraws2: int = lp.redraws - redraws_at_start
-					_check("everything is rewritten at most 4 times a second", redraws2 <= int(ceil(secs * 4.0)) + 1, "%d rewrites in %.1f s" % [redraws2, secs])
+					_check("L again shows everything, rewritten at most 4 times a second", _shown().begins_with("Everything") and redraws2 <= int(ceil(secs * 4.0)) + 1,
+						"%d rewrites in %.1f s" % [redraws2, secs])
 					var shown2: String = await _settled_text()
 					var last: String = lp.log_lines[lp.log_lines.size() - 1]
-					_check("the panel shows the newest log line", shown2.contains(last), last.substr(0, 80))
-					lp.toggle_everything()
-					t0 = Time.get_ticks_msec()
-					stage = 4
-			4:
-				if _shown().begins_with("Town news") or secs > 1.0:
-					_check("L goes back to town news", _shown().begins_with("Town news"), "after %.2f s" % secs)
+					_check("with the newest log line", shown2.contains(last), last.substr(0, 80))
+					_press_l()
+					await get_tree().process_frame
+					_check("L a third time hides it again", not lp.is_shown())
 					_finish()
 		busy = false
 

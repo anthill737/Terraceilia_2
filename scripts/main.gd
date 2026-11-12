@@ -201,7 +201,7 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_L and not event.ctrl_pressed and not event.alt_pressed and _log_panel_ctrl != null:
-			_log_panel_ctrl.toggle_everything()
+			_log_panel_ctrl.cycle_view()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_M and not event.ctrl_pressed and not event.alt_pressed:
@@ -291,10 +291,10 @@ func _on_village_nav_selected(v: Node) -> void:
 		center = _world_node.get_village_center(v)
 	else:
 		center = (v as Node2D).global_position + Vector2(400.0, 300.0)
-	# The stats panel covers the top ~290 px and the event log the right 300 px, so aim the
-	# camera up and right of the village centre to show the village in the open part.
+	# The stats panel covers the top ~290 px, so aim the camera a little above the village centre
+	# to show the village in the open part. (The event log on the right is hidden now.)
 	var z: float = maxf(_camera.zoom.x, 0.1)
-	_camera.fly_to(center + Vector2(150.0, -150.0) / z, _camera.zoom.x)
+	_camera.fly_to(center + Vector2(0.0, -150.0) / z, _camera.zoom.x)
 
 
 ## Zoom camera out so both villages are visible simultaneously.
@@ -442,7 +442,7 @@ func _show_sim_fail_banner(day: int, village_name: String = "") -> void:
 
 func get_ui_labels() -> void:
 	var log_vbox = get_node_or_null("UI/HUDRoot/Layout/Sidebar/SidebarVBox/LogPanel/LogVBox")
-	_log_panel_ctrl.setup(log_vbox)
+	_log_panel_ctrl.setup(log_vbox, get_node_or_null("UI/HUDRoot/Layout/Sidebar") as Control)   # hidden; L shows it
 
 	var inspector_dock := get_node_or_null("UI/PopInspectorDock") as PopInspectorDock
 	_inspector_ctrl.set_world(_world_node)

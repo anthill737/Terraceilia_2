@@ -366,6 +366,9 @@ class Probe extends Node:
 func _ready() -> void:
 	Engine.physics_ticks_per_second = 240
 	Engine.max_physics_steps_per_frame = 64
+	Tuning.clear()
+	Tuning.set_value("merchants", true)   # off in the game for now; this test checks them
+	Tuning.keep_on_restart = true
 	var probe := Probe.new()
 	probe.name = "FeatureProbe"
 	get_tree().root.add_child.call_deferred(probe)

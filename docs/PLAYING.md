@@ -3,8 +3,9 @@
 1. Open Godot 4.6.1 and import `project.godot` from this folder.
 2. Press F5 (or the play button). The main scene is `scenes/Main.tscn`.
 
-The window opens on village 1. Two villages run at once and their merchants trade between
-them from the start (the Trade button turns that off).
+The window opens on village 1. Two villages run at once. Merchants are switched off for now
+(2026-11-13), so nothing moves between the towns; dev mode (F1, Switches, then Restart town)
+brings them back.
 
 The game behaves the same at every speed. A day is about 27 seconds at 1x and about 3 seconds
 at 10x. How the town works is in docs/WORKING_TOWN.md.

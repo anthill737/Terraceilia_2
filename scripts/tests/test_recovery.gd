@@ -69,6 +69,7 @@ class Probe extends Node:
 					Tuning.set_value(str(pair[0]), pair[1])
 			5:
 				Tuning.set_value("outside_help", true)
+				Tuning.set_value("merchants", true)   # off in the game for now
 				for pair in [["farmers", 1], ["bakers", 1], ["woodworkers", 1], ["others", 5], ["market_bread", 60]]:
 					Tuning.set_value(str(pair[0]), pair[1])
 		Tuning.source = "TestRecovery"

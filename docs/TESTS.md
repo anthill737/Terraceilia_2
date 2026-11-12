@@ -58,6 +58,11 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   with a job waiting and nobody free the newcomer comes looking for work with a newcomer's purse
   and is taken on; that with no job waiting the newcomer brings the coins a shop takes and puts
   them into a shop or a house; and that with the switch off nobody comes while people lack work.
+- `res://scenes/TestShops.tscn`: shops that grow (docs/SHOP_LEVELS.md). Checks (12 checks) that each
+  extra hand adds less than the one before; that a full bakery whose owner wants another hand is
+  extended with logs from the market and a builder paid by the day; that the third hand is then
+  taken on and the bakery makes more; that the level stays with the shop when someone takes it
+  over; and that with the switch off a full shop is not extended.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

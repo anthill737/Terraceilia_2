@@ -56,6 +56,10 @@ var village = null
 var market = null
 var event_bus = null
 var houses: Array = []                # {id, owner, occupant, wood, work, done, unpaid, pos, node}
+## Shop extensions under way (docs/SHOP_LEVELS.md): {id, owner, to_level, wood, wood_need,
+## work, days_need, stall, idle_days, worker, node}. Built like a home improvement.
+var shop_works: Array = []
+var _next_shop_work: int = 1
 var next_id: int = 1
 var initialized: bool = false
 var stats := {"servant_days": 0, "servant_wages": 0.0, "improve_started": 0, "improved": 0, "abandoned": 0, "idle_days": 0, "self_days": 0, "hired_days": 0, "moved_into_own": 0, "wages_paid": 0.0, "built": 0, "started": 0, "sold": 0, "rented_out": 0, "rent_paid": 0.0, "evicted": 0, "homeless_max": 0}
@@ -436,6 +440,8 @@ func on_day(day: int) -> void:
 			stats.improved += 1
 			_log("[HOUSING] day=%d %s finished improving house %d: it is now a %s" % [day, ob.name, h.id, level_name(int(h.level))])
 
+	_shop_works(day, wage)
+
 	_servants(day, wage)
 
 	_sync_homes()
@@ -445,6 +451,94 @@ func on_day(day: int) -> void:
 			day, summary().houses, summary().empty, summary().building, summary().renters, homeless, stats.built, stats.evicted]
 		print(line)
 		_log(line)
+
+
+# ── Shop extensions ──────────────────────────────────────────────────────────
+
+## What it costs to take a shop from `level` to the next: the same logs and builder's days as
+## improving a home from that level.
+func shop_extend_cost(level: int) -> float:
+	return improve_cost(level)
+
+
+func extending_shop(owner) -> bool:
+	for w in shop_works:
+		if w.owner == owner:
+			return true
+	return false
+
+
+## The owner of a full shop wants one more hand (LaborMarket._update_hands). They start an
+## extension if they can pay for it and still keep the money the business runs on.
+func start_shop_extension(owner, day: int) -> bool:
+	if market == null or owner == null or not is_instance_valid(owner) or owner.wallet == null or extending_shop(owner):
+		return false
+	var lvl: int = LaborMarket.shop_level(owner)
+	if lvl >= LaborMarket.SHOP_MAX_LEVEL or owner.wallet.money < shop_extend_cost(lvl) + _reserve_of(owner):
+		return false
+	var site = null
+	var job = owner.get("current_job")
+	if job != null:
+		for key in ["bakery_location", "yard_location", "house_node"]:
+			var spot = job.get(key)
+			if spot != null and is_instance_valid(spot):
+				site = spot
+				break
+	shop_works.append({"id": -_next_shop_work, "owner": owner, "to_level": lvl + 1, "node": site, "wood": 0, "work": 0, "worker": null, "idle_days": 0, "stall": 0,
+		"wood_need": int(UP_WOOD[mini(lvl, UP_WOOD.size() - 1)]), "days_need": int(UP_DAYS[mini(lvl, UP_DAYS.size() - 1)])})
+	_next_shop_work += 1
+	stats["shops_started"] = int(stats.get("shops_started", 0)) + 1
+	_log("[SHOP] day=%d %s starts extending the %s to hold %d hands ($%.1f in hand, about $%.0f to spend)" % [
+		day, owner.name, shop_name(owner), LaborMarket.staff_room(owner) + 1, owner.get_cash(), shop_extend_cost(lvl)])
+	return true
+
+
+static func shop_name(owner) -> String:
+	var role: String = str(owner.current_role) if owner != null and is_instance_valid(owner) else ""
+	return str(Recovery.TRADES[role].shop) if Recovery.TRADES.has(role) else "shop"
+
+
+## Extensions under way: logs from what heating leaves, then a builder's days, as for homes.
+func _shop_works(day: int, wage: float) -> void:
+	for w in shop_works.duplicate():
+		var ob = w.owner
+		if ob == null or not is_instance_valid(ob) or ob.is_queued_for_deletion() or not Recovery.TRADES.has(str(ob.current_role)):
+			_release_worker(w)
+			shop_works.erase(w)   # the owner is gone or closed the shop: the work is dropped
+			continue
+		if int(w.wood) < int(w.wood_need):
+			var spare: int = int(market.firewood - float(market.firewood_target) * WOOD_PILE_KEEP)
+			var want: int = mini(int(w.wood_need) - int(w.wood), spare)
+			var got: int = 0
+			if want > 0:
+				var wp: float = market.firewood_price
+				got = market.sell_firewood_to_agent(ob, want)
+				w.wood = int(w.wood) + got
+				ob.cashflow_today_expense += float(got) * wp
+				_invested(ob, float(got) * wp)
+			w.stall = 0 if got > 0 else int(w.stall) + 1
+			if int(w.stall) >= STALL_DAYS:
+				_log("[SHOP] day=%d %s gives up extending the %s (no wood for %d days)" % [day, ob.name, shop_name(ob), STALL_DAYS])
+				_release_worker(w)
+				shop_works.erase(w)
+			continue
+		var bw = _worker_for(w, ob, day)
+		if bw == null:
+			w.idle_days = int(w.idle_days) + 1
+			continue
+		if bw != ob:
+			if not _pay(ob, bw, wage, true):
+				_release_worker(w)
+				continue
+			stats.wages_paid += wage
+			stats.hired_days += 1
+		w.work = int(w.work) + 1
+		if int(w.work) >= int(w.days_need):
+			_release_worker(w)
+			shop_works.erase(w)
+			ob.set_meta("shop_level", int(w.to_level))
+			stats["shops_extended"] = int(stats.get("shops_extended", 0)) + 1
+			_log("[SHOP] day=%d %s finished extending the %s: level %d, room for %d hands" % [day, ob.name, shop_name(ob), int(w.to_level), LaborMarket.staff_room(ob)])
 
 
 ## Morning, before employers hire: at most one person decides to start a house today.

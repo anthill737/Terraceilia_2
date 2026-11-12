@@ -289,6 +289,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.all_households = households
 	labor_market.all_woodworkers = all_woodworkers
 	labor_market.free_field_count = func() -> int: return _free_fields().size()
+	labor_market.extend_shop = func(p, day: int) -> bool: return housing.start_shop_extension(p, day) if housing else false
 	# ── Labor service ──
 	_labor_svc = LaborService.new()
 	_labor_svc.name = "LaborService"

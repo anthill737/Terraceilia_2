@@ -144,6 +144,11 @@ func set_tick(t: int) -> void:
 
 
 const STARTING_CASH: float = 150.0   # batch 3: a business owner's purse (households start with 60)
+
+## A farm hand works a field of their own: the first one brings in a whole farmer's worth.
+func hand_first_gain() -> float:
+	return 1.0
+
 const HOME_FIREWOOD: int = 4         # firewood kept for the farmer's own hearth
 var wheat_harvested_today: int = 0
 
@@ -322,7 +327,8 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
 		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
 		# in one more farmer's worth of wheat (more land worked, not more wheat per field).
-		var _hand_mult: float = 1.0 + float(LaborMarket.hands_of(agent))
+		# From the third hand on each adds less than the one before (LaborMarket.hand_gain).
+		var _hand_mult: float = LaborMarket.hand_mult(agent)
 		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * (Tuning.f("farmer_harvest_percent", 100.0) / 100.0) * _sk_mult * _hand_mult * (market.soil_mult * market.shock_harvest_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))

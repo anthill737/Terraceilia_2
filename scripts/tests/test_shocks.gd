@@ -152,6 +152,7 @@ func _ready() -> void:
 	Engine.max_physics_steps_per_frame = 64
 	Tuning.clear()
 	Tuning.set_value("merchants", true)   # off in the game for now; this test checks them
+	Tuning.set_value("arrivals_follow_jobs", false)   # the town holds still, so a price can be compared before and after a trouble
 	Tuning.keep_on_restart = true
 	var probe := Probe.new()
 	probe.name = "ShockProbe"

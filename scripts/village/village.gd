@@ -408,24 +408,67 @@ func receive_tick(tick: int) -> void:
 
 		if prosperity_meter.should_spawn_household(calendar.day_index) and not suppress_spawn \
 				and (housing == null or housing.free_slots() > 0 or not Tuning.on("arrival_needs_free_house", true)) and room_for_newcomer():
-			var spawn_pos := get_spawn_point_for_role("household")
-			spawn_household_at(spawn_pos)
+			_welcome_newcomer()
 			prosperity_meter.record_spawn(calendar.day_index)
 
 	if farmer != null and is_instance_valid(farmer) and baker != null and is_instance_valid(baker):
 		audit.audit(farmer, baker, market, event_bus, tick)
 
 
-## Newcomers follow work. One comes only while almost nobody in town is idle (at most
-## MAX_IDLE_FOR_ARRIVAL people without work), so the town never fills with people it has
-## nothing for. Before, anyone came whenever food looked fine, found no work and left broke.
+## Who comes to town (docs/WHO_ARRIVES.md). The town's own state decides who the next
+## newcomer is, instead of a limit on how many people may be without work:
+##   - a job is waiting (an employer wanted a hand in the last few days, found nobody, and
+##     nobody in town is free): someone comes looking for work, with a newcomer's purse;
+##   - no job is waiting: the person who comes has the means to open a shop of their own
+##     (the savings a shop takes plus its fee), because a town with nothing to offer a
+##     worker still has room for someone who makes work.
+## The other gates are unchanged: the town is doing well (prosperity), a house stands
+## empty, bread and firewood are not scarce. Dev switch arrivals_follow_jobs; off is the
+## old rule (nobody comes while more than MAX_IDLE_FOR_ARRIVAL people lack work).
 const MAX_IDLE_FOR_ARRIVAL: int = 1
 var _prosperity_day: int = -1
+## Newcomers so far, by what brought them (tests and the long-run rows).
+var arrivals := {"for_work": 0, "with_means": 0}
 
 func room_for_newcomer() -> bool:
-	if labor_market == null:
+	if labor_market == null or Tuning.on("arrivals_follow_jobs", true):
 		return true
 	return labor_market.idle_count <= Tuning.i("arrival_max_idle", MAX_IDLE_FOR_ARRIVAL)
+
+
+## True when the next newcomer is someone with the means to open a shop: no job is waiting.
+func newcomer_has_means() -> bool:
+	if labor_market == null or not Tuning.on("arrivals_follow_jobs", true):
+		return false
+	return not labor_market.job_waiting(calendar.day_index if calendar else 0)
+
+
+## What it takes to open a shop: the savings and the fee (LaborMarket).
+func means_purse() -> float:
+	return Tuning.f("shop_savings_needed", LaborMarket.SAVINGS_BUFFER_REQUIRED) + Tuning.f("shop_opening_fee", LaborMarket.STARTUP_COST)
+
+
+func _welcome_newcomer() -> void:
+	var with_means: bool = newcomer_has_means()
+	var day: int = calendar.day_index if calendar else 0
+	var h = await spawn_household_at(get_spawn_point_for_role("household"))
+	if h == null or not is_instance_valid(h):
+		return
+	if not with_means:
+		arrivals.for_work += 1
+		if event_bus and Tuning.on("arrivals_follow_jobs", true):
+			event_bus.emit_log("[ARRIVAL] day=%d %s comes looking for work (a job was waiting)" % [day, h.name])
+		return
+	arrivals.with_means += 1
+	var purse: float = means_purse()
+	if h.wallet != null and h.wallet.money < purse:
+		Village.note_brought(h, purse - h.wallet.money)
+		h.wallet.credit(purse - h.wallet.money)
+	h.set_meta("came_with_means", true)
+	if h.has_method("log_event"):
+		h.log_event("Came to town with $%.0f to set up a shop." % purse)
+	if event_bus:
+		event_bus.emit_log("[ARRIVAL] day=%d %s comes with $%.0f to set up in town (no job was waiting)" % [day, h.name, purse])
 
 
 func get_market() -> Market:

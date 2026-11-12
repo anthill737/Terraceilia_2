@@ -144,6 +144,7 @@ class Probe extends Node:
 			and _near(wood.current_job.maintenance_cost_per_day, 3.5))
 		Tuning.set_value("town_size_limit", 33)
 		_check("town size limit reaches the village", int(v.MAX_TOTAL_POP) == 33 and not v.pop_mgr.is_at_pop_cap())
+		Tuning.set_value("arrivals_follow_jobs", false)   # the old idle limit only applies with this off
 		Tuning.set_value("arrival_max_idle", 7)
 		var idle_before: int = v.labor_market.idle_count
 		v.labor_market.idle_count = 7
@@ -152,6 +153,18 @@ class Probe extends Node:
 		var ok_at_8: bool = v.room_for_newcomer()
 		v.labor_market.idle_count = idle_before
 		_check("idle limit reaches the newcomer rule", ok_at_7 and not ok_at_8)
+		Tuning.set_value("arrivals_follow_jobs", true)
+		v.labor_market.idle_count = 8
+		var jobs_before: int = v.labor_market.last_open_job_day
+		v.labor_market.last_open_job_day = -999
+		var means_when_no_job: bool = v.room_for_newcomer() and v.newcomer_has_means()
+		v.labor_market.last_open_job_day = v.calendar.day_index
+		var still_means_while_people_lack_work: bool = v.newcomer_has_means()
+		v.labor_market.idle_count = 0
+		var worker_when_job: bool = v.room_for_newcomer() and not v.newcomer_has_means() and still_means_while_people_lack_work
+		v.labor_market.last_open_job_day = jobs_before
+		v.labor_market.idle_count = idle_before
+		_check("who arrives follows jobs: someone with means when no job waits, a worker when one does", means_when_no_job and worker_when_job and _near(v.means_purse(), 150.0))
 		var pm = v.prosperity_meter
 		var score_before: float = pm.prosperity_score
 		var spawn_before: int = pm.last_spawn_day
@@ -287,7 +300,7 @@ class Probe extends Node:
 				["market_coins", 4321.0], ["market_wheat", 85], ["market_bread", 95], ["market_firewood", 75], ["bread_price", 2.9],
 				["wheat_price", 1.2], ["firewood_price", 1.1], ["prosperity", 0.9], ["v2.others", 4], ["v2.market_coins", 999.0],
 				["houses_spare_at_start", 3], ["gardens", false], ["servants", false], ["home_improvements", false], ["troubles", false],
-				["town_size_limit", 40], ["merchants", true], ["merchant_start_coins", 222.0]]:
+				["town_size_limit", 40], ["arrivals_follow_jobs", false], ["merchants", true], ["merchant_start_coins", 222.0]]:
 			Tuning.set_value(str(pair[0]), pair[1])
 		Tuning.source = "test"
 		var dm = main.get_node_or_null("DevMenu")

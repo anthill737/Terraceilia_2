@@ -788,6 +788,10 @@ func _evaluate_producer_switch(p: Node, day: int) -> void:
 var wages_paid_total: float = 0.0   # all wages ever paid in this village (tests)
 ## Employers who wanted to take someone on today and found nobody free.
 var open_jobs: int = 0
+## The last day an employer wanted a hand and found nobody. Whether a given employer wants
+## one flickers from day to day (stock, cash), so a job counts as waiting for
+## OPEN_SHORT_DAYS after it was last seen, as long as nobody in town is free to take it.
+var last_open_job_day: int = -999
 ## People in town with no work today (cottagers). Newcomers only come when this is small.
 var idle_count: int = 0
 const GARDEN_BREAD_KEEP: int = 2     # a cottager's garden keeps this much food in the house
@@ -854,6 +858,8 @@ func _update_hands(day: int) -> void:
 		p.set_meta("hand_prev_cash", p.get_cash() + float(p.get_meta("invested_total", 0.0)))
 		p.set_meta("hand_falling_days", falling)
 		employed += hands.size()
+	if open_jobs > 0:
+		last_open_job_day = day
 	if day % 5 == 0:
 		var line: String = "[HANDS] day=%d employed=%d wage=$%.2f paid_today=$%.2f" % [day, employed, wage, paid]
 		print(line)
@@ -956,7 +962,7 @@ func _update_firewood(day: int) -> void:
 func _woodworker_utility(ce) -> float:
 	if econ_stats == null or ce == null:
 		return -999.0
-	var n: int = maxi(1, _live_count(all_woodworkers))
+	var n: int = _live_count(all_woodworkers) + 1   # the yards in town and this new one share the trade
 	var avg: float = econ_stats.role_rolling_7d_avg("Woodworker") / float(n)
 	return avg + firewood_scarcity_ema * 5.0 - 2.0 - float(ce.last_risk) * 3.0
 
@@ -988,6 +994,12 @@ func _send_to_work(h, p) -> void:
 			spot = pj.yard_location
 			kind = "Cutting wood at the yard"
 	j.set_work_site(spot, kind)
+
+
+## True when work is waiting for a newcomer: an employer went short of hands in the last few
+## days and nobody in town is without work.
+func job_waiting(day: int) -> bool:
+	return idle_count == 0 and day - last_open_job_day < OPEN_SHORT_DAYS
 
 
 ## True when `h` has no work today: no employer and not building a house.

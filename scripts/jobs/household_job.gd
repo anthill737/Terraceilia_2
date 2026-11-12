@@ -352,8 +352,8 @@ func get_status_text() -> String:
 			return "Waiting at Market"
 		return "Going to Market"
 	elif route.target == home_location:
-		if route.is_waiting and agent.has_meta("cottager"):
-			return "Tending the garden plot"
+		if route.is_waiting and agent.has_meta("garden"):
+			return "Growing their own food"
 		if route.is_waiting:
 			if inv.get_qty("bread") > 0:
 				return "Eating"

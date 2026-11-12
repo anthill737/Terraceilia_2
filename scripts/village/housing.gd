@@ -303,8 +303,8 @@ func on_day(day: int) -> void:
 			continue
 		if h.owner != null and not is_instance_valid(h.owner):
 			continue
-		if h.occupant.has_meta("cottager"):
-			h.unpaid = 0   # a cottager has no coin income: like a medieval cottar they owe labour, not rent
+		if h.occupant.has_meta("garden"):
+			h.unpaid = 0   # providing for themselves, with no coin income: like a medieval cottar they owe labour, not rent
 			continue
 		if _pay(h.occupant, h.owner, rent):
 			stats.rent_paid += rent
@@ -791,8 +791,8 @@ func describe(a) -> String:
 		parts.append("Rents house %d from the town ($%.2f a day)." % [home.id, rent_per_day()])
 	else:
 		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, rent_per_day()])
-	if not home.is_empty() and home.owner != a and a.has_meta("cottager"):
-		parts.append("No rent is asked while they have no work.")
+	if not home.is_empty() and home.owner != a and a.has_meta("garden"):
+		parts.append("No rent is asked while they provide for themselves.")
 	if not home.is_empty() and int(home.unpaid) > 0:
 		parts.append("[color=#ff8844]%d day(s) behind on rent.[/color]" % home.unpaid)
 	var let_out := 0

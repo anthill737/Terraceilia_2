@@ -47,7 +47,7 @@ const INPUTS: Array = [
 	{"k": "shop_extensions", "g": "Switches", "t": "Full shops are extended to hold more hands", "d": true},
 	{"k": "worker_skill", "g": "Switches", "t": "Hired hands learn the trade and make more as they do", "d": true},
 	{"k": "owner_wages", "g": "Switches", "t": "Each owner sets the wage; hands weigh wage, walk and boss", "d": true},
-	{"k": "gardens", "g": "Switches", "t": "Garden plots feed people without work", "d": true},
+	{"k": "gardens", "g": "Switches", "t": "People without work may grow food and cut wood for themselves", "d": true},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},
 	{"k": "merchants", "g": "Switches", "t": "Each town has a travelling merchant", "d": false},   # off for now (Anthony, 2026-11-13)

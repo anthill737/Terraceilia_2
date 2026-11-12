@@ -271,7 +271,7 @@ func refresh(selected_pop: Node) -> void:
 		else:
 			living = "Hired hand: works for %s, the %s." % [_person_label(boss), boss_role]
 	elif selected_pop.has_meta("cottager") and selected_pop.get_meta("cottager", false):
-		living = "No work: lives off a garden plot and gathered firewood."
+		living = "No work: grows their own food and cuts their own wood." if selected_pop.has_meta("garden") else "No work: living on savings, buying bread and firewood."
 
 	var general_lines: Array[String] = []
 	general_lines.append(INSPECTOR_SEC % "Vitals")

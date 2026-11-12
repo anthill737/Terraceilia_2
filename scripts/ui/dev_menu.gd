@@ -359,12 +359,12 @@ static func town_line(v) -> String:
 				others += 1
 				if a.has_meta("employer") and is_instance_valid(a.get_meta("employer")):
 					paid += 1
-				if bool(a.get_meta("cottager", false)):
+				if a.has_meta("garden"):
 					garden += 1
 	var shops: int = v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size()
 	var day: int = v.calendar.day_index if v.calendar else 0
 	var pros: float = v.prosperity_meter.prosperity_score if v.prosperity_meter else 0.0
-	return "%s, day %d: %d people (%d farmers, %d bakers, %d woodworkers, %d others; %d hired, %d on garden plots). Market: %.0f coins, wheat %d at %.2f, bread %d at %.2f, wood %d at %.2f. Pockets: %.0f coins. Prosperity %.2f." % [
+	return "%s, day %d: %d people (%d farmers, %d bakers, %d woodworkers, %d others; %d hired, %d providing for themselves). Market: %.0f coins, wheat %d at %.2f, bread %d at %.2f, wood %d at %.2f. Pockets: %.0f coins. Prosperity %.2f." % [
 		str(v.village_name), day, shops + others, v.all_farmers.size(), v.all_bakers.size(), v.all_woodworkers.size(), others, paid, garden,
 		m.money, m.wheat, m.wheat_price, m.bread, m.bread_price, m.firewood, m.firewood_price, pockets, pros]
 

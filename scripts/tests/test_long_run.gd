@@ -195,6 +195,7 @@ class Probe extends Node:
 		var starving := 0
 		var cold := 0
 		var cottagers := 0
+		var providers := 0   # of those, people growing and cutting their own
 		var now := {}
 		for group in [v.all_farmers, v.all_bakers, v.all_woodworkers, v.households]:
 			for a in group:
@@ -209,6 +210,8 @@ class Probe extends Node:
 					cold += 1
 				if bool(a.get_meta("cottager", false)):
 					cottagers += 1
+					if a.has_meta("garden"):
+						providers += 1
 		var prev: Dictionary = people.get(vid, {})
 		for k in prev:
 			if not now.has(k):
@@ -244,7 +247,7 @@ class Probe extends Node:
 			return
 		var hs: Dictionary = v.housing.summary() if v.housing else {"houses": 0, "empty": 0}
 		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "H": roles.Household,
-			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers,
+			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers, "prov": providers,
 			"idle": v.labor_market.idle_count if v.labor_market else 0,
 			"wp": snappedf(m.wheat_price, 0.01), "bp": snappedf(m.bread_price, 0.01), "fp": snappedf(m.firewood_price, 0.01),
 			"mw": m.wheat, "wt": m.wheat_target, "mb": m.bread, "bt": m.bread_target, "mf": m.firewood,

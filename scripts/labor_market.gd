@@ -239,7 +239,7 @@ func update_daily(day: int) -> void:
 	# Batch 2: hiring hands is how households earn, so it runs in both modes; the modes now
 	# differ only in whether farmers and bakers may change trade.
 	_update_hands(day)
-	# People with no work live off a garden plot and gathered wood (docs/WORKING_TOWN.md).
+	# People with no work buy what they need, or grow and cut it themselves (docs/SELF_PROVIDING.md).
 	_update_cottagers(day)
 	# Batch 3: every hearth burns one firewood a day.
 	_update_firewood(day)
@@ -1268,12 +1268,20 @@ func is_idle(h) -> bool:
 	return not h.has_meta("builds_house") and not h.has_meta("merchant")
 
 
-## Cottagers. Someone with no work does not sit and go broke: like a medieval cottager they
-## keep a garden plot (enough to eat, never more than GARDEN_BREAD_KEEP in the house) and
-## gather deadwood for their own hearth. They buy and sell nothing. It is a poor living; a wage is
-## better, and anyone hired stops gardening and buys from the market like everyone else.
-## This is how Victoria 3 (peasants on subsistence farms) and Banished (labourers) keep the
-## jobless alive without paying them.
+## Buy it, or make it yourself (docs/SELF_PROVIDING.md). Anthony's rule: everyone has to buy
+## what they eat and burn, unless they grow it or cut it themselves, and which they do is
+## their own choice. Nobody is handed anything.
+##
+## Growing your own food and cutting your own wood takes the day, so it is open to someone
+## with no work (and someone building their own house). It keeps one person: enough to eat,
+## never more than GARDEN_BREAD_KEEP in the house, and wood for one hearth. Each morning
+## they weigh the two (provides_for_self): buying a day's keep costs coins, and a coin is
+## worth more the thinner the purse; providing costs a day of their own work. Someone with
+## coins to spare buys from the bakers and the woodworker like everyone else. Someone short
+## of coins provides for themselves. Anyone taken on for a wage stops and buys.
+##
+## Before 2026-11-13 everyone with no work lived off a garden plot and spent nothing, however
+## full their purse: half the town stood outside the economy with a hundred coins each.
 func _update_cottagers(_day: int) -> void:
 	idle_count = 0
 	for h in all_households:
@@ -1288,14 +1296,15 @@ func _update_cottagers(_day: int) -> void:
 			h.set_meta("cottager", true)
 		elif h.has_meta("cottager"):
 			h.remove_meta("cottager")
-		if not Tuning.on("gardens", true) or not (idle or own_build or quiet_merchant):
+		# A merchant with no deal for two days provides for themselves whatever their purse,
+		# so a quiet spell does not eat the money they trade with.
+		var provides: bool = Tuning.on("gardens", true) and (quiet_merchant or ((idle or own_build) and provides_for_self(h)))
+		if not provides:
 			if h.has_meta("garden"):
 				h.remove_meta("garden")
 			continue
-		# Living off the plot: enough bread in the house to catch up a missed meal, deadwood
-		# for the hearth, and no coins spent on either (HouseholdJob reads "garden"). A merchant
-		# with no deal for two days lives this way too, so a quiet spell does not eat the
-		# money they trade with (both merchants went broke and left town by day 42 before).
+		# Their own day's work: enough bread in the house to catch up a missed meal, wood for
+		# the hearth, and no coins spent on either (HouseholdJob reads "garden").
 		h.set_meta("garden", true)
 		if h.inv.get_qty("bread") < GARDEN_BREAD_KEEP:
 			h.inv.add("bread", GARDEN_BREAD_KEEP - h.inv.get_qty("bread"))
@@ -1304,6 +1313,28 @@ func _update_cottagers(_day: int) -> void:
 			h.days_in_survival_mode = 0
 		if h.inv.get_qty("firewood") < GATHERED_WOOD_KEEP:
 			h.inv.items["firewood"] = h.inv.get_qty("firewood") + GATHERED_WOOD_PER_DAY + (market.shock_extra_burn if market else 0)
+
+
+## What buying a day's keep (a loaf and a log) costs `h`, as they feel it: today's prices,
+## times what a coin is worth to them. With Housing.CUSHION_DAYS of keep in the purse a coin
+## is worth a coin; with half that, two; with twice that, half.
+func cost_of_buying(h) -> float:
+	if market == null or h == null or not is_instance_valid(h):
+		return 0.0
+	var keep: float = float(market.bread_price) + float(market.firewood_price)
+	var days_in_purse: float = h.get_cash() / maxf(0.01, keep)
+	return keep * Housing.CUSHION_DAYS / maxf(0.01, days_in_purse)
+
+
+## What providing a day's keep for themselves costs: a day of their own work, valued at the
+## least a day's work pays in this town (wage_floor).
+func cost_of_providing(_h) -> float:
+	return wage_floor()
+
+
+## The choice: true when making it themselves costs `h` less than buying it.
+func provides_for_self(h) -> bool:
+	return cost_of_providing(h) < cost_of_buying(h)
 
 
 ## Who `p` takes on: of the people free today, the one most skilled in `p`'s trade, and

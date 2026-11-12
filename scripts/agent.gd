@@ -259,7 +259,7 @@ func _physics_process(delta: float) -> void:
 func on_day_changed(day: int) -> void:
 	_person_day = day
 	_roll_cashflow()
-	_progress_skills(current_role)
+	_progress_skills(trade_worked())
 	# Career evaluation is driven by LaborMarket (single authority)
 	if current_job:
 		current_job.on_day_changed(day)
@@ -295,6 +295,21 @@ func _roll_cashflow() -> void:
 # ==============================================================================
 #  Skills forwarding methods (delegate to SkillSet)
 # ==============================================================================
+
+## The trade this person works in today: their own shop's, or their employer's when they are
+## a hired hand. That is the trade they get better at (docs/SKILL.md).
+func trade_worked() -> String:
+	if has_meta("employer"):
+		var boss = get_meta("employer")
+		if boss != null and is_instance_valid(boss) and not bool(get_meta("servant", false)):
+			return str(boss.current_role)
+	return current_role
+
+
+## Skill in any trade, by name.
+func skill_in(trade: String) -> float:
+	return skills.get_skill(trade) if skills else SkillSet.START
+
 
 func _progress_skills(role_name: String) -> void:
 	if skills:

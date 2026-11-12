@@ -131,7 +131,7 @@ class Probe extends Node:
 		var want_oven: int = maxi(1, roundi(6.0 * m.oven_mult * m.shock_oven_mult * LaborMarket.hand_mult(baker)))
 		_check("baker output reaches the oven", baker.current_job._oven_capacity() == want_oven, "%d a day" % baker.current_job._oven_capacity())
 		Tuning.set_value("woodworker_logs_per_day", 5)
-		_check("woodworker output reaches the yard", wood.current_job._capacity() == roundi(5.0 * LaborMarket.hand_mult(wood)), "%d a day" % wood.current_job._capacity())
+		_check("woodworker output reaches the yard", wood.current_job._capacity() == roundi(5.0 * SkillSet.factor(wood.skill_in("Woodworker")) * LaborMarket.hand_mult(wood)), "%d a day" % wood.current_job._capacity())
 		Tuning.set_value("hand_output_1", 2.0)
 		Tuning.set_value("hand_output_2", 3.0)
 		_check("hand output steps reach the labour market", LaborMarket.hand_steps() == [1.0, 2.0, 3.0], str(LaborMarket.hand_steps()))

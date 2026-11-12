@@ -45,6 +45,7 @@ const INPUTS: Array = [
 
 	{"k": "arrivals_follow_jobs", "g": "Switches", "t": "Who arrives follows jobs: workers, or people with coins", "d": true},
 	{"k": "shop_extensions", "g": "Switches", "t": "Full shops are extended to hold more hands", "d": true},
+	{"k": "worker_skill", "g": "Switches", "t": "Hired hands learn the trade and make more as they do", "d": true},
 	{"k": "gardens", "g": "Switches", "t": "Garden plots feed people without work", "d": true},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},

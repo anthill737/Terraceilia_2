@@ -63,6 +63,11 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   extended with logs from the market and a builder paid by the day; that the third hand is then
   taken on and the bakery makes more; that the level stays with the shop when someone takes it
   over; and that with the switch off a full shop is not extended.
+- `res://scenes/TestSkill.tscn`: output follows skill (docs/SKILL.md). Checks (11 checks) that a hired
+  hand gets better at the employer's trade and not at others; that what a hand adds is their
+  place times how good they are, with the most skilled counted first; that an employer takes
+  the most skilled person free, and among equals the poorest; that the owner's skill counts at
+  the lumber yard; and that with the switch off every hand counts the same.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

@@ -47,7 +47,9 @@ func activate() -> void:
 
 
 func _capacity() -> int:
-	return roundi(float(Tuning.i("woodworker_logs_per_day", FIREWOOD_PER_DAY)) * LaborMarket.hand_mult(agent))
+	# The owner's own skill counts in every trade (docs/SKILL.md); it did not at the yard.
+	var own: float = SkillSet.factor(agent.skill_in("Woodworker")) if Tuning.on("worker_skill", true) else 1.0
+	return roundi(float(Tuning.i("woodworker_logs_per_day", FIREWOOD_PER_DAY)) * own * LaborMarket.hand_mult(agent))
 
 
 ## Firewood beyond what the woodworker keeps for its own hearth.

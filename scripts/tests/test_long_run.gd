@@ -57,6 +57,15 @@ class Probe extends Node:
 	var books_worst := 0.0
 	var books_worst_day := -1
 
+	## The lowest price each woodworker in the town will sell a log at today.
+	func _wood_floors(v) -> Array:
+		var out: Array = []
+		for w in v.all_woodworkers:
+			if is_instance_valid(w) and w.current_job != null and w.current_job.has_method("_min_price"):
+				out.append(snappedf(w.current_job._min_price(), 0.01))
+		return out
+
+
 	func _flax_fields(v) -> int:
 		var n := 0
 		for fn in v.all_field_nodes:
@@ -261,7 +270,7 @@ class Probe extends Node:
 			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers,
 			"idle": v.labor_market.idle_count if v.labor_market else 0,
 			"wp": snappedf(m.wheat_price, 0.01), "bp": snappedf(m.bread_price, 0.01), "fp": snappedf(m.firewood_price, 0.01),
-			"mw": m.wheat, "wt": m.wheat_target, "mb": m.bread, "bt": m.bread_target, "mf": m.firewood,
+			"mw": m.wheat, "wt": m.wheat_target, "mb": m.bread, "bt": m.bread_target, "mf": m.firewood, "ft": m.firewood_target, "fb": snappedf(m.firewood_bid(), 0.01), "wmin": _wood_floors(v),
 			"mm": snappedf(m.money, 0.1), "pm": snappedf(pockets, 0.1),
 			"cmin": snappedf(cash[0], 0.1) if n else 0.0, "cmed": snappedf(cash[n / 2], 0.1) if n else 0.0, "cmax": snappedf(cash[n - 1], 0.1) if n else 0.0,
 			"starving": starving, "cold": cold, "left": s.left, "starved": v.starved_deaths,

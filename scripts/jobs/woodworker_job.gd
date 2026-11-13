@@ -21,6 +21,7 @@ var maintenance_cost_per_day: float:
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 var cost_per_unit: float = 0.7
+var turned_away_today: bool = false   # the market would not take wood at some point today
 
 
 func get_display_name() -> String:
@@ -65,9 +66,10 @@ func _min_price() -> float:
 func _market_wants() -> bool:
 	if market == null:
 		return false
-	if float(market.firewood) > float(market.firewood_target) * (1.0 + float(market.TARGET_BAND_PCT)):
-		return false
-	return market.firewood_bid() >= _min_price()
+	var wants: bool = float(market.firewood) <= float(market.firewood_target) * (1.0 + float(market.TARGET_BAND_PCT)) and market.firewood_bid() >= _min_price()
+	if not wants:
+		turned_away_today = true
+	return wants
 
 
 func _wants_to_chop() -> bool:
@@ -166,9 +168,22 @@ func on_day_changed(day: int) -> void:
 					market.money += upkeep
 				agent.cashflow_today_expense += upkeep
 		day_money_start = wallet.money
-	set_meta("output_ema", 0.3 * float(firewood_made_today) + 0.7 * float(get_meta("output_ema", float(firewood_made_today))))
+	_note_day_of_cutting()
 	firewood_made_today = 0
+	turned_away_today = false
 	_update_cost()
+
+
+## What a normal day's cutting comes to, kept as a running average. A day the market turned the
+## woodworker away says nothing about what a log costs to cut, so it does not count (unless
+## they cut more than usual anyway). It used to: one idle day cut the average by 30%, the cost
+## of a log rose 42% overnight, and the woodworker stayed priced out while the pile ran down
+## to nothing (138 such jumps in a 1,000-day probe of two towns, 2026-11-13).
+func _note_day_of_cutting() -> void:
+	var usual: float = float(get_meta("output_ema", float(firewood_made_today)))
+	if turned_away_today and float(firewood_made_today) < usual:
+		return
+	set_meta("output_ema", 0.3 * float(firewood_made_today) + 0.7 * usual)
 
 
 ## What a firewood costs to make: the hands' wages, the yard's upkeep and the woodworker's own

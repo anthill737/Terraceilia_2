@@ -361,11 +361,11 @@ static func town_line(v) -> String:
 					paid += 1
 				if bool(a.get_meta("cottager", false)):
 					garden += 1
-	var shops: int = v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size() + v.all_smiths.size()
+	var shops: int = v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size() + v.all_smiths.size() + v.all_tailors.size()
 	var day: int = v.calendar.day_index if v.calendar else 0
 	var pros: float = v.prosperity_meter.prosperity_score if v.prosperity_meter else 0.0
-	return "%s, day %d: %d people (%d farmers, %d bakers, %d woodworkers, %d smiths, %d others; %d hired, %d on garden plots). Town purse: %.0f coins, wheat %d at %.2f, bread %d at %.2f, wood %d at %.2f. Pockets: %.0f coins. Prosperity %.2f." % [
-		str(v.village_name), day, shops + others, v.all_farmers.size(), v.all_bakers.size(), v.all_woodworkers.size(), v.all_smiths.size(), others, paid, garden,
+	return "%s, day %d: %d people (%d farmers, %d bakers, %d woodworkers, %d smiths, %d tailors, %d others; %d hired, %d on garden plots). Town purse: %.0f coins, wheat %d at %.2f, bread %d at %.2f, wood %d at %.2f. Pockets: %.0f coins. Prosperity %.2f." % [
+		str(v.village_name), day, shops + others, v.all_farmers.size(), v.all_bakers.size(), v.all_woodworkers.size(), v.all_smiths.size(), v.all_tailors.size(), others, paid, garden,
 		m.money, m.wheat, m.wheat_price, m.bread, m.bread_price, m.firewood, m.firewood_price, pockets, pros]
 
 

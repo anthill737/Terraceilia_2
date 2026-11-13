@@ -114,7 +114,7 @@ class Probe extends Node:
 			var t: Dictionary = v.market.totals
 			var lm = v.labor_market
 			var wages: float = lm.wages_paid_total if lm else 0.0
-			var alive: int = v.households.size() + v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size() + v.all_smiths.size()
+			var alive: int = v.households.size() + v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size() + v.all_smiths.size() + v.all_tailors.size()
 			print("[ECON TEST] village %d after %d days: %d people, wheat farmers->market %d, market->bakers %d, bread bakers->market %d, market->people %d, firewood ->market %d, market-> %d, wages $%.0f, starved %d" % [
 				v.village_id, v.calendar.day_index, alive, t.wheat_from_farmers, t.wheat_to_bakers,
 				t.bread_from_bakers, t.bread_to_people, t.firewood_in, t.firewood_out, wages, v.starved_deaths])

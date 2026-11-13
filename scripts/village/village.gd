@@ -39,6 +39,8 @@ var all_woodworkers: Array:
 	get: return pop_mgr.all_woodworkers if pop_mgr else []
 var all_smiths: Array:
 	get: return pop_mgr.all_smiths if pop_mgr else []
+var all_tailors: Array:
+	get: return pop_mgr.all_tailors if pop_mgr else []
 var households: Array:
 	get: return pop_mgr.households if pop_mgr else []
 var all_fields: Array:
@@ -63,6 +65,9 @@ var spawn_service: VillageSpawnService = null
 ## Positional node used as market routing destination (Node2D in scene).
 var market_node: Node2D = null
 var smithy: Node2D = null        # where smiths make tools (docs/SMITH.md)
+var tailor_shop: Node2D = null   # where tailors make clothes (docs/CLOTHES.md)
+## Everyone's clothes wearing out, and who buys or makes new ones (scripts/village/clothing.gd).
+var clothing: Clothing = null
 var lumber_yard: Node2D = null   # batch 3: where woodworkers cut firewood
 ## Calendar reference for HungerNeed binding during spawns.
 var calendar = null      # Calendar
@@ -292,10 +297,11 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.all_households = households
 	labor_market.all_woodworkers = all_woodworkers
 	labor_market.all_smiths = all_smiths
+	labor_market.all_tailors = all_tailors
 	labor_market.free_field_count = func() -> int: return _free_fields().size()
 	labor_market.extend_shop = func(p, day: int) -> bool: return housing.start_shop_extension(p, day) if housing else false
 	market.first_maker = func(good: String):
-		var list: Array = {"wheat": all_farmers, "bread": all_bakers, "firewood": all_woodworkers, "tools": all_smiths}.get(good, [])
+		var list: Array = {"wheat": all_farmers, "bread": all_bakers, "firewood": all_woodworkers, "tools": all_smiths, "clothes": all_tailors}.get(good, [])
 		for a in list:
 			if a != null and is_instance_valid(a) and not a.is_queued_for_deletion():
 				return a
@@ -315,9 +321,11 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	econ_stats.bind_agents(pop_mgr.all_farmers, pop_mgr.all_bakers, pop_mgr.households)
 	econ_stats.bind_woodworkers(pop_mgr.all_woodworkers)
 	econ_stats.bind_smiths(pop_mgr.all_smiths)
+	econ_stats.bind_tailors(pop_mgr.all_tailors)
 	# Batch 3: a lumber yard and the town's first woodworker.
 	_build_lumber_yard()
 	_build_smithy()
+	_build_tailor_shop()
 	_spawn_first_woodworker()
 	# A travelling merchant carries goods between this village and the other one.
 	_spawn_merchant()
@@ -334,6 +342,9 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	shocks.rng.seed = (rng.seed if rng else 1) + 7919
 	recovery = Recovery.new()
 	recovery.village = self
+	clothing = Clothing.new()
+	clothing.village = self
+	labor_market.clothing = clothing
 	# Drawing: ground, roads, buildings and houses under the people.
 	var art := VillageArt.new()
 	art.name = "VillageArt"
@@ -384,7 +395,7 @@ func receive_tick(tick: int) -> void:
 	for b in all_bakers:
 		if b and is_instance_valid(b):
 			b.set_tick(tick)
-	for w in all_woodworkers + all_smiths:
+	for w in all_woodworkers + all_smiths + all_tailors:
 		if w and is_instance_valid(w):
 			w.set_tick(tick)
 	for h in households:
@@ -740,6 +751,8 @@ func _on_calendar_day_changed(day: int) -> void:
 		labor_market.update_daily(day)
 	if recovery:
 		recovery.on_day(day)   # empty shops are taken over; going without moves people
+	if clothing:
+		clothing.on_day(day)   # clothes wear out; people buy new ones or make their own
 
 	for f in all_farmers:
 		if f and is_instance_valid(f):
@@ -747,7 +760,7 @@ func _on_calendar_day_changed(day: int) -> void:
 	for b in all_bakers:
 		if b and is_instance_valid(b):
 			b.on_day_changed(day)
-	for w in all_woodworkers + all_smiths:
+	for w in all_woodworkers + all_smiths + all_tailors:
 		if w and is_instance_valid(w):
 			w.on_day_changed(day)
 	for h in households:
@@ -830,6 +843,7 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 		var kept_items: Dictionary = ag.inv.items.duplicate() if ag.inv else {}
 		all_woodworkers.erase(ag)
 		all_smiths.erase(ag)
+		all_tailors.erase(ag)
 		if all_farmers.has(ag) or all_bakers.has(ag):
 			if all_farmers.has(ag):
 				all_farmers.erase(ag)
@@ -954,6 +968,22 @@ func _perform_role_conversion(household: Node, role: String, free: bool = false)
 			if not ag.agent_died.is_connected(_on_household_died):
 				ag.agent_died.connect(_on_household_died)
 
+		elif role == "tailor":
+			ag.set_role("Tailor")
+			_restore_items(ag, kept_items)
+			_pay_startup(ag, free)
+			ag.name = "Tailor_%d" % pop_mgr.next_tailor_id
+			pop_mgr.next_tailor_id += 1
+			_fixup_node_name(ag, "Tailor")
+			_rebind_needs(ag)
+			var t_home := _make_spot(ag.name + "_Home", pos, Color(0.7, 0.45, 0.65, 0.6))
+			if ag.current_job is TailorJob:
+				(ag.current_job as TailorJob).shop_location = tailor_shop
+			ag.set_locations(t_home, market_node)
+			all_tailors.append(ag)
+			if not ag.agent_died.is_connected(_on_household_died):
+				ag.agent_died.connect(_on_household_died)
+
 		elif role == "merchant":
 			ag.set_role("Merchant")
 			_restore_items(ag, kept_items)
@@ -1050,6 +1080,16 @@ func _build_smithy() -> void:
 	smithy = _make_spot("Smithy", market_node.global_position + Vector2(-140, -120), Color(0.3, 0.32, 0.38, 0.8), 20.0)
 	if market != null and not market.has_good("tools"):
 		market.add_good("tools", 4.0, 0.5, 2, 12)   # a small shelf: a smith makes to what sells
+
+
+## The tailor's shop (docs/CLOTHES.md): one per village, beyond the market. It stands empty
+## until someone sets up as a tailor; clothes go on the market like any good.
+func _build_tailor_shop() -> void:
+	if tailor_shop != null or market_node == null:
+		return
+	tailor_shop = _make_spot("TailorShop", market_node.global_position + Vector2(0, -190), Color(0.55, 0.35, 0.5, 0.8), 20.0)
+	if market != null and not market.has_good("clothes"):
+		market.add_good("clothes", 6.0, 0.5, 3, 16)
 
 
 ## Dev mode: put a smith in the town (a normal game starts with none; one sets up when the

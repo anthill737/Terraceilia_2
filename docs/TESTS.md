@@ -86,6 +86,13 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   with tools makes a tenth more and a bigger shop wears out more; that a shop's upkeep is the
   tools it wears out; that a tool is bought only when worth its price and never with food
   money; and that with the switch off shops use no tools.
+- `res://scenes/TestClothes.tscn`: clothes and the tailor (docs/CLOTHES.md). Checks (16 checks) that a
+  game starts with no tailor and everyone in partly worn clothes that wear out daily; that a small
+  village could not keep a tailor and a good nobody makes does not climb in price; that a tailor
+  makes clothes and the buyers pay the tailor; when a new set is worth buying to a full and a thin
+  purse, never with the food money; that rags burn two logs in a frost; that no two sets last the
+  same; that someone with no work and no coins sews their own and a hired hand does not; and that
+  with the switch off clothes do not wear.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

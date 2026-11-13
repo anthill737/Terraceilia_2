@@ -94,6 +94,7 @@ var wheat_scarcity_ema: float = 0.0
 var firewood_scarcity_ema: float = 0.0
 var _wood_entry_day: int = -999
 var _smith_entry_day: int = -999
+var _tailor_entry_day: int = -999
 
 # ─── Prev-day money snapshots (for daily profit delta) ──────────────────────
 var farmer_prev_money: Dictionary = {}  # agent → float
@@ -107,6 +108,9 @@ var all_bakers: Array = []
 var all_households: Array = []
 var all_woodworkers: Array = []
 var all_smiths: Array = []
+var all_tailors: Array = []
+## Everyone's clothes (Clothing). Set by the village.
+var clothing = null
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market = null
@@ -167,7 +171,7 @@ func load_career_entry_config(cfg: Dictionary) -> void:
 ## Days in a row the market has been short of what each trade makes. A business opens only
 ## after OPEN_SHORT_DAYS of it: on a single dip a village once ended up with 8 farms.
 const OPEN_SHORT_DAYS: int = 3
-var _short_days: Dictionary = {"Farmer": 0, "Baker": 0, "Woodworker": 0, "Smith": 0}
+var _short_days: Dictionary = {"Farmer": 0, "Baker": 0, "Woodworker": 0, "Smith": 0, "Tailor": 0}
 
 func update_daily(day: int) -> void:
 	if not _initialized:
@@ -590,6 +594,11 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if u_smith > best_u and day - _smith_entry_day >= EVAL_INTERVAL_DAYS:
 		best_u = u_smith
 		best_role = "Smith"
+	# And a tailor's shop (docs/CLOTHES.md).
+	var u_tailor: float = _tailor_utility(ce)
+	if u_tailor > best_u and day - _tailor_entry_day >= EVAL_INTERVAL_DAYS:
+		best_u = u_tailor
+		best_role = "Tailor"
 
 	# Skip if the best role IS the current role
 	if best_role == h.current_role:
@@ -664,6 +673,8 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_wood_entry_day = day
 	elif best_role == "Smith":
 		_smith_entry_day = day
+	elif best_role == "Tailor":
+		_tailor_entry_day = day
 
 
 # ─── Producer migration evaluation ───────────────────────────────────────────
@@ -718,6 +729,8 @@ func _market_wants(role: String) -> bool:
 			return market.firewood < market.firewood_target
 		"Smith":
 			return market.has_good("tools") and Tuning.on("tools", true) and market.good_stock("tools") < market.good_target("tools")
+		"Tailor":
+			return market.has_good("clothes") and Clothing.on() and market.good_stock("clothes") < market.good_target("clothes")
 	return true
 
 
@@ -959,11 +972,24 @@ var rent_per_day: Callable = func() -> float: return 0.0
 var wage_stats := {"raises": 0, "cuts": 0, "moves": 0, "quits_unpaid": 0}
 
 
-## A living wage: what it costs a hired hand to eat, keep warm and pay the rent for a day.
+## A living wage: what it costs someone to live for a day: a loaf, a log, the rent, and their
+## clothes wearing out (a set at today's price over the days it lasts). It is also what a
+## maker counts as their own keep when they price their goods (docs/CLOTHES.md).
 func wage_floor() -> float:
 	if market == null:
 		return 5.0
-	return float(market.bread_price) + float(market.firewood_price) + float(rent_per_day.call())
+	var clothes: float = market.good_price("clothes") / Clothing.life_days() if Clothing.on() and market.has_good("clothes") else 0.0
+	return float(market.bread_price) + float(market.firewood_price) + float(rent_per_day.call()) + clothes
+
+
+## What it costs `job`'s owner to live for a day (wage_floor), from their own town.
+static func keep_of(job) -> float:
+	var a = job.get("agent") if job != null else null
+	var v = a.get("home_village_ref") if a != null and is_instance_valid(a) else null
+	if v != null and is_instance_valid(v) and v.labor_market != null:
+		return v.labor_market.wage_floor()
+	var m = job.get("market") if job != null else null
+	return float(m.bread_price) + float(m.firewood_price) if m != null else 5.0
 
 
 ## The wage `p` pays a hand today: their own offer, or the town's going rate (daily_wage)
@@ -992,6 +1018,8 @@ func _work_spot(p) -> Node2D:
 		return pj.yard_location
 	if pj is SmithJob:
 		return pj.smithy_location
+	if pj is TailorJob:
+		return pj.shop_location
 	return null
 
 
@@ -1097,6 +1125,8 @@ func _hand_value(p: Node, n: int) -> float:
 			return extra * market.firewood_bid()
 		"Smith":
 			return extra * maxf(0.0, market.good_bid("tools") - market.firewood_price / float(SmithJob.TOOLS_PER_LOG)) if market.has_good("tools") else 0.0
+		"Tailor":
+			return extra * market.good_bid("clothes") if market.has_good("clothes") else 0.0
 	return extra * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
 
 
@@ -1115,6 +1145,8 @@ func _overstocked(p: Node) -> bool:
 			return float(market.firewood) > float(market.firewood_target) * band
 		"Smith":
 			return market.has_good("tools") and float(market.good_stock("tools")) > float(market.good_target("tools")) * band
+		"Tailor":
+			return market.has_good("clothes") and float(market.good_stock("clothes")) > float(market.good_target("clothes")) * band
 	return false
 
 
@@ -1189,6 +1221,20 @@ static func shop_size(p) -> float:
 	return 1.0 + float(hands_of(p))
 
 
+## The number of goods a day a smith or a tailor spreads its costs over when it sets its lowest
+## price: what it has really been making, but never less than COSTING_FLOOR of a day's work.
+## A shop that sells little asks more for each, up to a point. (With no floor, a new smith or
+## tailor had made nothing yet, asked about 20 coins each and never sold; and a tailor that
+## sold few asked more, sold fewer and asked more again, up to 38 a set. Spread over 60% of a
+## day's work, as the baker and the woodworker reckon, tools sold for 2 coins and a smith
+## could live in only 60% of towns.)
+const COSTING_FLOOR: float = 0.25
+
+
+static func costing_volume(job, capacity: int) -> float:
+	return maxf(float(job.get_meta("output_ema", 0.0)), COSTING_FLOOR * float(capacity))
+
+
 ## A shop's level (docs/SHOP_LEVELS.md): 1 as built, up to SHOP_MAX_LEVEL after extensions.
 static func shop_level(p: Node) -> int:
 	if p == null or not p.has_meta("shop_level"):
@@ -1210,7 +1256,7 @@ static func daily_wage(m) -> float:
 
 ## Every list of shop owners, one per trade, and everyone in them.
 func _owner_groups() -> Array:
-	return [all_farmers, all_bakers, all_woodworkers, all_smiths]
+	return [all_farmers, all_bakers, all_woodworkers, all_smiths, all_tailors]
 
 
 func _owners() -> Array:
@@ -1260,6 +1306,8 @@ func _unit_value(p) -> float:
 			return float(market.wheat_price)
 		"Woodworker":
 			return market.firewood_bid()
+		"Tailor":
+			return market.good_bid("clothes") if market.has_good("clothes") else 0.0
 		"Baker":
 			var job = p.current_job
 			return maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0) if job else 2.0) - market.firewood_price / 5.0)
@@ -1319,6 +1367,17 @@ func _smith_utility(ce) -> float:
 	return float(spend.coins) / n - fuel - (float(market.bread_price) + float(market.firewood_price)) - float(ce.last_risk) * 3.0
 
 
+## What a tailor's shop would clear in a day: its share of what the town would spend on clothes
+## at today's price, less the tailor's own keep (a loaf and a log). Zero is "no better and no
+## worse than a garden plot", so a town too small or too poor to keep a tailor does not get one.
+func _tailor_utility(ce) -> float:
+	if ce == null or market == null or clothing == null or not market.has_good("clothes") or not Clothing.on():
+		return -999.0
+	var spend: Dictionary = clothing.spending_per_day(market.good_price("clothes"))
+	var n: float = float(_live_count(all_tailors) + 1)
+	return float(spend.coins) / n - (float(market.bread_price) + float(market.firewood_price)) - float(ce.last_risk) * 3.0
+
+
 ## Daily: every shop with tools wears some out; a shop to which a tool is worth its price buys
 ## enough to keep TOOL_STOCK_DAYS by. The buyer pays whichever smith's stall they pick.
 func _update_tools(_day: int) -> void:
@@ -1358,7 +1417,9 @@ func _update_firewood(day: int) -> void:
 			var have: int = a.inv.get_qty("firewood")
 			if have > 0:
 				# In a hard frost a hearth burns twice the wood (Shocks).
-				a.inv.items["firewood"] = have - mini(have, 1 + (market.shock_extra_burn if market else 0))
+				# Someone decently dressed gets through a frost on one log; someone in rags does not
+				# (docs/CLOTHES.md).
+				a.inv.items["firewood"] = have - mini(have, 1 + (market.shock_extra_burn if market and not Clothing.dressed(a) else 0))
 				a.set_meta("cold_days", 0)
 				continue
 			var n: int = int(a.get_meta("cold_days", 0)) + 1
@@ -1420,6 +1481,9 @@ func _send_to_work(h, p) -> void:
 		elif pj is SmithJob:
 			spot = pj.smithy_location
 			kind = "Working at the smithy"
+		elif pj is TailorJob:
+			spot = pj.shop_location
+			kind = "Sewing at the tailor's"
 	j.set_work_site(spot, kind)
 
 

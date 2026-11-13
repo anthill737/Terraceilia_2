@@ -67,9 +67,11 @@ static func _live(list: Array) -> Array:
 static func targets(s: Dictionary, has_merchant: bool) -> Dictionary:
 	var t: Dictionary = {
 		"farmers": int(s.get("farmers", 1)), "bakers": int(s.get("bakers", 1)),
-		"woodworkers": int(s.get("woodworkers", 1)), "smiths": int(s.get("smiths", 0)), "others": int(s.get("others", 1))}
+		"woodworkers": int(s.get("woodworkers", 1)), "smiths": int(s.get("smiths", 0)), "tailors": int(s.get("tailors", 0)), "others": int(s.get("others", 1))}
 	if not Tuning.on("tools", true):
 		t.smiths = 0
+	if not Tuning.on("clothes", true):
+		t.tailors = 0
 	var people: int = int(s.get("people", 0))
 	if people > 0:
 		var left: int = people - (1 if has_merchant else 0)
@@ -80,7 +82,7 @@ static func targets(s: Dictionary, has_merchant: bool) -> Dictionary:
 		if not s.has("woodworkers"):
 			t.woodworkers = maxi(1, ceili(float(people) / float(PEOPLE_PER_WOODWORKER)))
 		if not s.has("others"):
-			t.others = maxi(0, left - int(t.farmers) - int(t.bakers) - int(t.woodworkers) - int(t.smiths))
+			t.others = maxi(0, left - int(t.farmers) - int(t.bakers) - int(t.woodworkers) - int(t.smiths) - int(t.tailors))
 	t.farmers = clampi(int(t.farmers), 0, MAX_FARMERS)
 	return t
 
@@ -99,7 +101,7 @@ static func _set_coins(a, amount: float) -> void:
 static func _build_people(v, s: Dictionary, tree: SceneTree) -> Array:
 	var notes: Array = []
 	var wants_people: bool = false
-	for k in ["people", "farmers", "bakers", "woodworkers", "smiths", "others"]:
+	for k in ["people", "farmers", "bakers", "woodworkers", "smiths", "tailors", "others"]:
 		if s.has(k):
 			wants_people = true
 	if wants_people:
@@ -108,8 +110,8 @@ static func _build_people(v, s: Dictionary, tree: SceneTree) -> Array:
 			if h != null and is_instance_valid(h) and h.has_meta("merchant"):
 				has_merchant = true
 		var t: Dictionary = targets(s, has_merchant)
-		var owners_now: int = _live(v.all_farmers).size() + _live(v.all_bakers).size() + _live(v.all_woodworkers).size() + _live(v.all_smiths).size()
-		var need_total: int = int(t.farmers) + int(t.bakers) + int(t.woodworkers) + int(t.smiths) + int(t.others)
+		var owners_now: int = _live(v.all_farmers).size() + _live(v.all_bakers).size() + _live(v.all_woodworkers).size() + _live(v.all_smiths).size() + _live(v.all_tailors).size()
+		var need_total: int = int(t.farmers) + int(t.bakers) + int(t.woodworkers) + int(t.smiths) + int(t.tailors) + int(t.others)
 		var cap: int = int(v.MAX_TOTAL_POP) - (1 if has_merchant else 0)
 		if need_total > cap:
 			notes.append("asked for %d people but the town holds %d: fewer people without a shop" % [need_total + (1 if has_merchant else 0), int(v.MAX_TOTAL_POP)])
@@ -124,8 +126,8 @@ static func _build_people(v, s: Dictionary, tree: SceneTree) -> Array:
 				notes.append("could not bring in more people (stopped at %d)" % (owners_now + _others(v).size()))
 				break
 		# 2. Give trades to people with no shop, newest first.
-		for role in ["farmer", "baker", "woodworker", "smith"]:
-			var list: Array = {"farmer": v.all_farmers, "baker": v.all_bakers, "woodworker": v.all_woodworkers, "smith": v.all_smiths}[role]
+		for role in ["farmer", "baker", "woodworker", "smith", "tailor"]:
+			var list: Array = {"farmer": v.all_farmers, "baker": v.all_bakers, "woodworker": v.all_woodworkers, "smith": v.all_smiths, "tailor": v.all_tailors}[role]
 			var want: int = int(t[role + "s"])
 			var tries: int = 0
 			while _live(list).size() < want and tries < 200:
@@ -191,7 +193,7 @@ static func _set_levels(v, s: Dictionary, notes: Array) -> void:
 		v.prosperity_meter.prosperity_raw = float(s.prosperity)
 	var summary: Dictionary = {
 		"farmers": _live(v.all_farmers).size(), "bakers": _live(v.all_bakers).size(),
-		"woodworkers": _live(v.all_woodworkers).size(), "smiths": _live(v.all_smiths).size(), "others": _others(v).size(),
+		"woodworkers": _live(v.all_woodworkers).size(), "smiths": _live(v.all_smiths).size(), "tailors": _live(v.all_tailors).size(), "others": _others(v).size(),
 		"people": int(v.pop_mgr.count()), "notes": notes}
 	report[int(v.village_id)] = summary
 	var line: String = "[DEV START] %s: %d people (%d farmers, %d bakers, %d woodworkers, %d with no shop)%s" % [

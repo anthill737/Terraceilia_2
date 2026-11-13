@@ -9,6 +9,7 @@ extends Node
 ##   - with two makers' goods on the shelf, a buyer picks one stall, and over many sales both
 ##     makers sell;
 ##   - the same for wheat (baker pays farmer) and firewood (anyone pays the woodworker);
+##   - a day the market turns the woodworker away does not change what a log costs them;
 ##   - goods of a maker who is gone pay the town's purse;
 ##   - no upkeep is paid to the town, and a farmer's seed comes from their own wheat;
 ##   - with the switch off, the market pays on delivery out of its own purse, as before.
@@ -146,6 +147,37 @@ class Probe extends Node:
 		var fgot: int = m.sell_firewood_to_agent(buyer2, 5)
 		_check("someone who buys firewood pays the woodworker", fput == 8 and not paid_now and fgot == 5 and _near(wood.get_cash() - wc, b2c - buyer2.get_cash()) and b2c - buyer2.get_cash() > 0.0 and _near(m.money, purse),
 			"buyer paid %.2f, woodworker got %.2f" % [b2c - buyer2.get_cash(), wood.get_cash() - wc])
+		# ── A day the market turns the woodworker away does not make a log dearer ──
+		var wj = wood.current_job
+		var kept_ema = wj.get_meta("output_ema", null)
+		var kept_made: int = wj.firewood_made_today
+		var kept_away: bool = wj.turned_away_today
+		var full_day: float = float(wj._capacity())
+		wj.set_meta("output_ema", full_day)
+		wj._update_cost()
+		var cost_then: float = wj.cost_per_unit
+		wj.firewood_made_today = 0
+		wj.turned_away_today = true    # staged: the pile was full, so they cut nothing
+		wj._note_day_of_cutting()
+		wj._update_cost()
+		_check("a day the market turns the woodworker away does not make a log dearer", _near(wj.cost_per_unit, cost_then),
+			"%.2f a log before, %.2f after" % [cost_then, wj.cost_per_unit])
+		wj.turned_away_today = false   # staged: the market was open all day and they still cut less
+		wj.firewood_made_today = int(full_day) - 4
+		wj._note_day_of_cutting()
+		var slow: float = 0.3 * (full_day - 4.0) + 0.7 * full_day
+		_check("a slow day with the market open still counts", _near(float(wj.get_meta("output_ema")), slow), "%.2f a day" % float(wj.get_meta("output_ema")))
+		wj.turned_away_today = true    # staged: a full day's cutting before the market closed
+		wj.firewood_made_today = int(full_day)
+		wj._note_day_of_cutting()
+		_check("a good day counts even when the market closed later", _near(float(wj.get_meta("output_ema")), 0.3 * full_day + 0.7 * slow))
+		if kept_ema == null:
+			wj.remove_meta("output_ema")
+		else:
+			wj.set_meta("output_ema", kept_ema)
+		wj.firewood_made_today = kept_made
+		wj.turned_away_today = kept_away
+		wj._update_cost()
 		# ── Goods of someone who is gone ──
 		_clear(m, "bread")
 		m._shelve_for_test("bread", null, 4)

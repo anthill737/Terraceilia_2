@@ -12,8 +12,10 @@ extends RefCounted
 ##   the purse). They buy when the set is worth its price to them, never before their clothes
 ##   are half worn, and never with the coins for KEEP_DAYS of food, firewood and rent. So
 ##   people with coins to spare spend some of them, and people with little patch and wait.
-## - Making your own: someone with no work, in rags, for whom buying is not worth it, spins
-##   and sews a set of their own. It takes SEW_DAYS of their time.
+## - Making your own: someone with no work, in rags, for whom buying is not worth it, buys the
+##   flax for a set at the market (TailorJob.FLAX_PER_SET, grown by the farmers), then breaks,
+##   spins, weaves and sews it. It takes SEW_DAYS of their time. With no coins for the flax, or
+##   none for sale, they stay in rags.
 ## - A set already in hand (a tailor's own, say) goes on when the old one is worn through.
 ##
 ## The clothes are made by tailors (TailorJob) and sold at the market like any good; the buyer
@@ -25,6 +27,7 @@ const MIN_WEAR: float = 0.5        # nobody replaces clothes less than half worn
 const KEEP_DAYS: float = 10.0      # days of food, firewood and rent nobody spends on clothes (Housing.CUSHION_DAYS)
 const SEW_DAYS: int = 5            # days it takes someone to spin and sew a set of their own
 const LIFE_SPREAD: float = 0.3     # a set lasts this share more or less than LIFE_DAYS
+const SEW_KEEP_DAYS: float = 2.0   # days of keep someone keeps back before buying flax to sew their own
 
 var village = null
 var stats := {"bought": 0, "sewn": 0, "spent": 0.0}
@@ -113,6 +116,23 @@ func _put_on_new(a) -> void:
 	a.set_meta("sewing_days", 0)
 
 
+## The flax for a set of one's own, bought at the market and set to work at once. True when
+## they have it. Nobody spends the coins for SEW_KEEP_DAYS of keep on it.
+func _get_flax(a) -> bool:
+	var need: int = TailorJob.FLAX_PER_SET
+	var m = village.market if village != null else null
+	var have: int = a.inv.get_qty("flax")
+	if have < need and m != null and m.has_good("flax"):
+		var cost: float = float(need - have) * m.good_price("flax")
+		if a.get_cash() - SEW_KEEP_DAYS * keep_day() >= cost:
+			m.buy_good(a, "flax", need - have)
+	if a.inv.get_qty("flax") < need:
+		return false
+	a.inv.remove("flax", need)
+	stats.flax_used = int(stats.get("flax_used", 0)) + need
+	return true
+
+
 ## Once a day.
 func on_day(_day: int) -> void:
 	if not on() or village == null:
@@ -144,6 +164,8 @@ func on_day(_day: int) -> void:
 					continue
 		# Making their own: someone with no work, in rags, who will not pay today's price.
 		if wear_of(a) >= 1.0 and village.households.has(a) and village.labor_market != null and village.labor_market.is_idle(a):
+			if int(a.get_meta("sewing_days", 0)) == 0 and not _get_flax(a):
+				continue   # no flax: nothing to sew
 			var d: int = int(a.get_meta("sewing_days", 0)) + 1
 			if d >= SEW_DAYS:
 				_put_on_new(a)

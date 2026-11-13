@@ -1126,7 +1126,7 @@ func _hand_value(p: Node, n: int) -> float:
 		"Smith":
 			return extra * maxf(0.0, market.good_bid("tools") - market.firewood_price / float(SmithJob.TOOLS_PER_LOG)) if market.has_good("tools") else 0.0
 		"Tailor":
-			return extra * market.good_bid("clothes") if market.has_good("clothes") else 0.0
+			return extra * maxf(0.0, market.good_bid("clothes") - float(TailorJob.FLAX_PER_SET) * market.good_price("flax")) if market.has_good("clothes") and market.has_good("flax") else 0.0
 	return extra * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
 
 
@@ -1368,14 +1368,15 @@ func _smith_utility(ce) -> float:
 
 
 ## What a tailor's shop would clear in a day: its share of what the town would spend on clothes
-## at today's price, less the tailor's own keep (a loaf and a log). Zero is "no better and no
+## at today's price, less the flax it takes and the tailor's own keep (a loaf and a log). Zero is "no better and no
 ## worse than a garden plot", so a town too small or too poor to keep a tailor does not get one.
 func _tailor_utility(ce) -> float:
 	if ce == null or market == null or clothing == null or not market.has_good("clothes") or not Clothing.on():
 		return -999.0
 	var spend: Dictionary = clothing.spending_per_day(market.good_price("clothes"))
 	var n: float = float(_live_count(all_tailors) + 1)
-	return float(spend.coins) / n - (float(market.bread_price) + float(market.firewood_price)) - float(ce.last_risk) * 3.0
+	var flax: float = float(spend.sets) / n * float(TailorJob.FLAX_PER_SET) * (market.good_price("flax") if market.has_good("flax") else 0.0)
+	return float(spend.coins) / n - flax - (float(market.bread_price) + float(market.firewood_price)) - float(ce.last_risk) * 3.0
 
 
 ## Daily: every shop with tools wears some out; a shop to which a tool is worth its price buys

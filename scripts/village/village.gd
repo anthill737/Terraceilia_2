@@ -301,7 +301,7 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	labor_market.free_field_count = func() -> int: return _free_fields().size()
 	labor_market.extend_shop = func(p, day: int) -> bool: return housing.start_shop_extension(p, day) if housing else false
 	market.first_maker = func(good: String):
-		var list: Array = {"wheat": all_farmers, "bread": all_bakers, "firewood": all_woodworkers, "tools": all_smiths, "clothes": all_tailors}.get(good, [])
+		var list: Array = {"wheat": all_farmers, "bread": all_bakers, "firewood": all_woodworkers, "tools": all_smiths, "clothes": all_tailors, "flax": all_farmers}.get(good, [])
 		for a in list:
 			if a != null and is_instance_valid(a) and not a.is_queued_for_deletion():
 				return a
@@ -1090,6 +1090,8 @@ func _build_tailor_shop() -> void:
 	tailor_shop = _make_spot("TailorShop", market_node.global_position + Vector2(0, -190), Color(0.55, 0.35, 0.5, 0.8), 20.0)
 	if market != null and not market.has_good("clothes"):
 		market.add_good("clothes", 6.0, 0.5, 3, 16)
+	if market != null and not market.has_good("flax"):
+		market.add_good("flax", 1.2, 0.2, 8, 40)   # grown by farmers, bought by tailors and people sewing their own
 
 
 ## Dev mode: put a smith in the town (a normal game starts with none; one sets up when the
@@ -1197,6 +1199,8 @@ func _restore_items(ag: Agent, kept: Dictionary) -> void:
 			ag.inv.items[k] = 0
 	if kit.has("seeds") and int(ag.inv.items.get("seeds", 0)) < 5:
 		ag.inv.items["seeds"] = kit["seeds"]
+	if kit.has("flaxseed") and int(ag.inv.items.get("flaxseed", 0)) < 5:
+		ag.inv.items["flaxseed"] = kit["flaxseed"]
 
 
 # ============================================================================

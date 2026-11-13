@@ -5,15 +5,17 @@ class_name TailorJob
 ## market. Everyone wears clothes out; people buy new ones when the set is worth its price to
 ## them (Clothing).
 ##
-## The wool and flax come from the town's common grazing and fields at no charge, the way the
-## lumber yard's wood does, so the tailor's day is the limit. Hands, skill and tools (shears and
-## needles, bought from the smith) raise what a shop makes the way they do in any shop. It
+## Clothes are made of linen. The tailor buys flax at the market (grown by the farmers), and
+## the day's work turns it into clothes: breaking and combing the stalks, spinning the fibre,
+## weaving the cloth and sewing it. FLAX_PER_SET flax make one set. Hands, skill and tools
+## (shears and needles, bought from the smith) raise what a shop makes the way they do in any shop. It
 ## lives like a household (buys bread, keeps a hearth) and so extends HouseholdJob. The price it
 ## will sell at covers its hands' wages, its tools and its own keep over a normal day's work,
 ## plus the same 25% margin the other trades ask.
 
 const OWNER_CASH: float = 150.0      # a business owner's purse
 const CLOTHES_PER_DAY: int = 4       # sets one tailor makes in a day, working alone
+const FLAX_PER_SET: int = 3          # flax that goes into one set of clothes
 const MIN_MARGIN: float = 0.25
 
 var shop_location: Node2D = null
@@ -45,7 +47,7 @@ func activate() -> void:
 		Village.note_brought(agent, Tuning.f("owner_start_coins", OWNER_CASH))
 	super.activate()
 	if inv:
-		inv.items = {"bread": 2, "firewood": 6, "clothes": 0}
+		inv.items = {"bread": 2, "firewood": 6, "clothes": 0, "flax": 0}
 	_update_cost()
 
 
@@ -76,13 +78,24 @@ func _wants_to_work() -> bool:
 		return false
 	if made_today >= _capacity():
 		return false
-	return _spare() < _capacity() and _market_wants()
+	return _spare() < _capacity() and _market_wants() and inv.get_qty("flax") >= FLAX_PER_SET
+
+
+## Flax for the next day's work, bought at the market (the buyer pays the farmer).
+func _buy_flax() -> void:
+	if market == null or not market.has_good("flax") or not _market_wants():
+		return
+	var want: int = _capacity() * FLAX_PER_SET - inv.get_qty("flax")
+	if want > 0:
+		market.buy_good(agent, "flax", want)
 
 
 func _make() -> void:
 	var n: int = mini(_capacity() - made_today, _capacity() - _spare())
+	n = mini(n, inv.get_qty("flax") / FLAX_PER_SET)
 	if n <= 0 or not _market_wants():
 		return
+	inv.remove("flax", n * FLAX_PER_SET)
 	inv.add("clothes", n)
 	made_today += n
 	agent.log_event("Made %d sets of clothes." % n)
@@ -108,6 +121,7 @@ func _on_arrived(t: Node2D) -> void:
 		agent.pending_target = market_location if (_spare() > 0 or needs_food_trip()) else home_location
 	elif t == market_location:
 		_sell_spare()
+		_buy_flax()
 		buy_firewood_to(HOME_FIREWOOD)
 		attempt_buy_bread()
 		phase = Phase.AT_MARKET
@@ -116,7 +130,7 @@ func _on_arrived(t: Node2D) -> void:
 		phase = Phase.AT_HOME
 		if _wants_to_work():
 			agent.pending_target = shop_location
-		elif needs_food_trip() or (_spare() > 0 and _market_wants()):
+		elif needs_food_trip() or (_spare() > 0 and _market_wants()) or (_market_wants() and inv.get_qty("flax") < FLAX_PER_SET):
 			agent.pending_target = market_location
 		else:
 			agent.pending_target = home_location
@@ -153,11 +167,12 @@ func on_day_changed(day: int) -> void:
 	_update_cost()
 
 
-## What a set of clothes costs to make: the hands' wages, the tools worn out and the tailor's
+## What a set of clothes costs to make: its flax, the hands' wages, the tools worn out and the tailor's
 ## own keep (food, firewood, rent and clothes), spread over a normal day's work (LaborMarket.costing_volume).
 func _update_cost() -> void:
 	if market == null:
 		return
 	var per_day: float = LaborMarket.costing_volume(self, _capacity())
 	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
-	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / per_day
+	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / per_day \
+			+ (float(FLAX_PER_SET) * market.good_price("flax") if market.has_good("flax") else 0.0)

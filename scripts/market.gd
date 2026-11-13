@@ -443,7 +443,11 @@ func _adjust_good_prices() -> void:
 		var g: Dictionary = goods[good]
 		var t: float = float(maxi(1, int(g.target)))
 		var limit: float = Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE)
-		if int(g.wanted_today) > 0 and (float(g.stock) < t * (1.0 - TARGET_BAND_PCT) or int(g.short_today) > 0):
+		# With nobody in town making it, nobody is selling it: there is no price to bid up.
+		# (A bare shelf with no maker climbed 12% a day for ever; clothes reached 439 coins.)
+		var maker = first_maker.call(good)
+		var has_maker: bool = maker != null and is_instance_valid(maker)
+		if has_maker and int(g.wanted_today) > 0 and (float(g.stock) < t * (1.0 - TARGET_BAND_PCT) or int(g.short_today) > 0):
 			g.price = float(g.price) * (1.0 + (0.12 if int(g.stock) <= 0 else limit * clampf(1.0 - float(g.stock) / t, 0.2, 1.0)))
 		elif float(g.stock) > t * (1.0 + TARGET_BAND_PCT):
 			g.price = float(g.price) * (1.0 - limit * clampf(float(g.stock) / t - 1.0, 0.2, 1.0))

@@ -54,7 +54,13 @@ class Probe extends Node:
 	func _settled_text() -> String:
 		lp.process_mode = Node.PROCESS_MODE_ALWAYS
 		get_tree().paused = true
-		await get_tree().create_timer(0.35, true, false, true).timeout
+		# Wait for the panel's next rewrite, which it makes at most every REDRAW_EVERY_MS of real
+		# time. A fixed 0.35 s of game time was not enough: with the game paused, frames run so
+		# fast that the 0.35 s could pass in less real time than that, before any rewrite.
+		var r0: int = lp.redraws
+		var t0: int = Time.get_ticks_msec()
+		while lp.redraws == r0 and Time.get_ticks_msec() - t0 < 1500:
+			await get_tree().process_frame
 		var text: String = _shown()
 		get_tree().paused = false
 		lp.process_mode = Node.PROCESS_MODE_INHERIT

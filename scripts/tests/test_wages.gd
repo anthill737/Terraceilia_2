@@ -2,7 +2,7 @@ extends Node
 ## Wage test (docs/WAGES.md). Runs the real game (Main.tscn, 10x) once and checks that each
 ## owner sets a wage and hands weigh it:
 ##
-##   - nobody works for less than a loaf, a log and a day's rent (the garden plot is free);
+##   - nobody works for less than a living: a loaf, a log, a day's rent and clothes;
 ##   - a job is worth its wage less the share of the day spent walking to it, plus how the
 ##     hand gets on with the boss, which grows with every day paid on time;
 ##   - a hand moves to another employer only for an offer worth 15% more to them;
@@ -98,7 +98,7 @@ class Probe extends Node:
 						return
 					hand = hs[0]
 					var need: float = lm.wage_floor()
-					_check("nobody works for less than a loaf, a log and a day's rent", _near(need, m.bread_price + m.firewood_price + v.housing.rent_per_day())
+					_check("nobody works for less than a living: a loaf, a log, a day's rent and clothes wearing out", _near(need, m.bread_price + m.firewood_price + v.housing.rent_per_day() + (m.good_price("clothes") / Clothing.life_days() if Clothing.on() else 0.0))
 						and LaborMarket.wage_of(baker) >= need - 0.011, "the floor is %.2f, the baker pays %.2f" % [need, LaborMarket.wage_of(baker)])
 					wood.set_meta("wage_offer", LaborMarket.wage_of(baker) + 3.0)   # staged: another owner pays differently
 					_check("each owner pays a wage of their own", _near(LaborMarket.wage_of(wood), LaborMarket.wage_of(baker) + 3.0))

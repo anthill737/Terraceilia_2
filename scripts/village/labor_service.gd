@@ -57,6 +57,7 @@ func handle_migrate_requested(agent: Node, reason: String) -> void:
 			_pop_mgr.all_bakers.remove_at(b_idx)
 		_pop_mgr.all_woodworkers.erase(agent)
 		_pop_mgr.all_smiths.erase(agent)
+		_pop_mgr.all_tailors.erase(agent)
 
 	pending_conversions = pending_conversions.filter(
 		func(e): return is_instance_valid(e["household"]) and e["household"] != agent

@@ -136,7 +136,7 @@ class Probe extends Node:
 					lm._update_tools(day)
 					var bought_poor: int = baker.inv.get_qty("tools")
 					baker.wallet.credit(cash - 5.0)
-					m._shelve_for_test("tools", smith, 3)   # staged: tools on the shelf to buy
+					m._shelve_for_test("tools", smith, 20)   # staged: tools on the shelf to buy (enough for every shop)
 					lm._update_tools(day)
 					_check("no tools are bought with the food money", bought_poor == 0 and baker.inv.get_qty("tools") > 0,
 						"none with 5 coins; %d with %.0f" % [baker.inv.get_qty("tools"), baker.get_cash()])

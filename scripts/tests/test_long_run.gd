@@ -190,7 +190,8 @@ class Probe extends Node:
 			"left": 0, "starved_with_coins": 0, "purse_min": INF, "no_farmer_run": 0, "no_baker_run": 0, "worst_no_farmer": 0,
 			"worst_no_baker": 0, "bread_min": INF, "bread_max": 0.0, "reached": {}})
 		var m = v.market
-		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0, "Smith": 0, "Merchant": 0}
+		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0, "Smith": 0, "Tailor": 0, "Merchant": 0}
+		var rags := 0
 		var cash: Array = []
 		var starving := 0
 		var cold := 0
@@ -209,6 +210,8 @@ class Probe extends Node:
 					cold += 1
 				if bool(a.get_meta("cottager", false)):
 					cottagers += 1
+				if not Clothing.dressed(a):
+					rags += 1
 		var prev: Dictionary = people.get(vid, {})
 		for k in prev:
 			if not now.has(k):
@@ -243,7 +246,9 @@ class Probe extends Node:
 		if rows_file == null:
 			return
 		var hs: Dictionary = v.housing.summary() if v.housing else {"houses": 0, "empty": 0}
-		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "S": roles.Smith, "H": roles.Household,
+		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "S": roles.Smith, "T": roles.Tailor, "H": roles.Household, "rags": rags,
+			"cp": snappedf(m.good_price("clothes"), 0.01) if m.has_good("clothes") else 0.0, "mc": m.good_stock("clothes") if m.has_good("clothes") else 0,
+			"cbought": v.clothing.stats.bought if v.clothing else 0, "csewn": v.clothing.stats.sewn if v.clothing else 0,
 			"tp": snappedf(m.good_price("tools"), 0.01) if m.has_good("tools") else 0.0, "mt": m.good_stock("tools") if m.has_good("tools") else 0,
 			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers,
 			"idle": v.labor_market.idle_count if v.labor_market else 0,

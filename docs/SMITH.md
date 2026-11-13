@@ -19,9 +19,10 @@ row in `Recovery.TRADES`.
   firewood money before buying tools.
 - **The smith** works at the smithy, burns one log from the market for every three tools, and
   puts tools out at the market like any maker. Buyers pay the smith (docs/BUY_FROM_MAKERS.md).
-  The price the smith asks covers the firewood and the smith's own keep over the tools
-  actually sold, plus the same 25% the other trades ask. So in a small town, where few tools
-  sell, each one costs more.
+  The price the smith asks covers the firewood and the smith's own keep over a normal day's
+  work, the way the baker and the woodworker reckon it, plus the same 25% the other trades
+  ask. (Until 2026-11-13 it was spread over the tools made so far: a new smith who had made
+  none asked about 20 coins a tool and never sold one.)
 - **The price of tools** moves like firewood's: up when the shelf is low and somebody with
   coins wanted one, down when the shelf is over its target. It also comes down on a day when
   tools sit on the shelf and nobody buys.

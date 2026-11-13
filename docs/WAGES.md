@@ -11,7 +11,8 @@ Before, everyone in town was paid the same number: a loaf plus a log at today's 
 
 - **Every shop has its own wage**, paid to all its hands. A new shop starts at the old
   town rate.
-- **The floor.** Nobody works for less than a loaf, a log and a day's rent. Someone with no
+- **The floor.** Nobody works for less than a loaf, a log, a day's rent and their clothes
+  wearing out (clothes added 2026-11-13, docs/CLOTHES.md). Someone with no
   work lives off a garden plot, so a job has to pay at least what it
   costs to stop gardening.
 - **An owner who wants a hand and finds nobody free offers more**, by up to 5% a day (the

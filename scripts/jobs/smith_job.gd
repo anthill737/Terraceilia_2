@@ -16,7 +16,6 @@ const TOOLS_PER_DAY: int = 6         # one person's day at the anvil
 const TOOLS_PER_LOG: int = 3         # the forge burns one log for every three tools
 const FORGE_LOGS: int = 3            # logs kept by for the forge, beyond the hearth's
 const MIN_MARGIN: float = 0.25
-const MIN_VOLUME: float = 0.25       # tools a day a smith's costs are spread over at the least
 
 var smithy_location: Node2D = null
 var tools_made_today: int = 0
@@ -171,9 +170,7 @@ func on_day_changed(day: int) -> void:
 func _update_cost() -> void:
 	if market == null:
 		return
-	# Spread over the tools it really sells in a day, however few: a smith in a small town
-	# sells few and has to ask more for each.
-	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), MIN_VOLUME)
-	var keep: float = float(market.bread_price) + float(market.firewood_price)
+	var per_day: float = LaborMarket.costing_volume(self, _capacity())
+	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
 	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + keep) / maxf(1.0, per_day) \
 			+ float(market.firewood_price) / float(TOOLS_PER_LOG)

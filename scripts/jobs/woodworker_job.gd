@@ -172,10 +172,12 @@ func on_day_changed(day: int) -> void:
 
 
 ## What a firewood costs to make: the hands' wages, the yard's upkeep and the woodworker's own
-## keep (a loaf and a firewood a day), spread over a normal day's cutting.
+## keep (what it costs them to live: food, firewood, rent and clothes; until 2026-11-13 only a
+## loaf and a log, so a woodworker sold wood for less than they needed and went broke),
+## spread over a normal day's cutting.
 func _update_cost() -> void:
 	if market == null:
 		return
 	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_capacity()))
-	var keep: float = float(market.bread_price) + float(market.firewood_price)
+	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
 	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / maxf(1.0, per_day)

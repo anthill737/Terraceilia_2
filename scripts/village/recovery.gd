@@ -51,9 +51,10 @@ const TRADES: Dictionary = {
 	"Baker": {"list": "all_bakers", "shop": "bakery", "lack": "bread", "rank": 0, "uses": ["Farmer", "Woodworker"], "fields": 0},
 	"Woodworker": {"list": "all_woodworkers", "shop": "lumber yard", "lack": "firewood", "rank": 1, "uses": [], "fields": 0},
 	"Smith": {"list": "all_smiths", "shop": "smithy", "lack": "tools", "rank": 2, "uses": ["Woodworker"], "fields": 0, "basic": false},
+	"Tailor": {"list": "all_tailors", "shop": "tailor's shop", "lack": "clothes", "rank": 2, "uses": [], "fields": 0, "basic": false},
 }
 ## Trades whose shops wear tools out and buy new ones from the smith (docs/SMITH.md).
-const USES_TOOLS: Array = ["Farmer", "Baker", "Woodworker"]
+const USES_TOOLS: Array = ["Farmer", "Baker", "Woodworker", "Tailor"]
 const KEEP_DAYS: float = 3.0         # days of bread and firewood a new owner keeps before paying the fee
 
 var village = null

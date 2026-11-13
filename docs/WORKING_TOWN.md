@@ -17,7 +17,7 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
 
 ## People and work
 
-- **Owners** (farmer, baker, woodworker, and since 2026-11-13 a smith, docs/SMITH.md) run a business and may hire up to 2 hands, more once
+- **Owners** (farmer, baker, woodworker, and since 2026-11-13 a smith and a tailor, docs/SMITH.md and docs/CLOTHES.md) run a business and may hire up to 2 hands, more once
   the shop is extended (six levels, docs/SHOP_LEVELS.md).
 - **Hands** are households paid a daily wage, from the day they are hired. Each owner sets
   their own wage (docs/WAGES.md, 2026-11-13). A hand walks to the

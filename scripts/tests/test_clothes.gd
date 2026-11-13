@@ -8,7 +8,8 @@ extends Node
 ##      the tailor is paid, not the town; a new set is worth it to someone with coins to spare
 ##      sooner than to someone with few, never before half worn, and never with the food money;
 ##      someone in rags gets through a frost on two logs, someone dressed on one; no two sets
-##      last the same; someone with no work and no coins sews their own in five days, while a
+##      last the same; clothes are made of flax grown by the farmers; someone with no work and
+##      the flax for a set sews their own in five days, with no flax they cannot, and a
 ##      hired hand has no time to; with the switch off, clothes do not wear.
 ##
 ##   godot --headless --fixed-fps 30 --path . res://scenes/TestClothes.tscn
@@ -24,6 +25,7 @@ class Probe extends Node:
 	var day0 := -1
 	var watched = null
 	var wear0 := 0.0
+	var staged_flax := false
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
@@ -122,6 +124,10 @@ class Probe extends Node:
 		var m = v.market
 		var cl = v.clothing
 		var lm = v.labor_market
+		if not staged_flax and day >= 1:
+			# Staged: flax on the shelf from the start, so the tailor need not wait for a farmer.
+			m._shelve_for_test("flax", null, 60)
+			staged_flax = true
 		if day < 14:
 			return
 		var tailor = v.all_tailors[0]
@@ -184,8 +190,34 @@ class Probe extends Node:
 		var hi: float = Clothing.LIFE_DAYS * (1.0 + Clothing.LIFE_SPREAD) + 0.01
 		_check("no two sets last quite the same", life1 >= lo and life1 <= hi and life2 >= lo and life2 <= hi and not _near(life1, life2, 0.0001), "%.1f and %.1f days" % [life1, life2])
 		_check("nobody starved", v.starved_deaths == 0, "%d" % v.starved_deaths)
+		# Flax: what clothes are made of.
+		var fp := FieldPlot.new()
+		fp.plant("flax")
+		fp.ticks_to_mature = 0
+		var crop: Dictionary = fp.harvest()
+		fp.free()
+		_check("a field sown with flax gives flax, and more seed than it took to sow", int(crop.get("flax", 0)) == FieldPlot.FLAX_YIELD and int(crop.get("flaxseed", 0)) > 5,
+			"%d flax, %d flaxseed" % [int(crop.get("flax", 0)), int(crop.get("flaxseed", 0))])
+		var fg: Dictionary = m.goods["flax"]
+		_check("the tailor makes clothes out of flax bought at the market", int(fg.out) > 0, "%d flax bought" % int(fg.out))
+		var farmer = v.all_farmers[0] if not v.all_farmers.is_empty() else null
+		if farmer != null:
+			var fprice: float = float(fg.price)
+			var fstock: int = int(fg.stock)
+			fg.stock = 0
+			farmer.inv.items["flaxseed"] = maxi(10, farmer.inv.get_qty("flaxseed"))
+			fg.price = 10.0
+			var sow_dear: bool = farmer.current_job._sow_flax()
+			fg.price = 0.2
+			var sow_cheap: bool = farmer.current_job._sow_flax()
+			fg.price = fprice
+			fg.stock = fstock
+			_check("a farmer sows flax when a field of it is worth more than a field of wheat, and wheat when not", sow_dear and not sow_cheap)
+		else:
+			_check("a farmer to ask", false)
 		# Making your own (staged: five mornings in a row).
 		_set_cash(a, 0.0)
+		a.inv.items["flax"] = 0
 		a.set_meta("clothes_wear", 1.0)
 		a.set_meta("sewing_days", 0)
 		_set_cash(b, 0.0)
@@ -195,7 +227,11 @@ class Probe extends Node:
 		var sewn0: int = int(cl.stats.sewn)
 		for i in Clothing.SEW_DAYS:
 			cl.on_day(day)
-		_check("someone with no work and no coins sews their own set in five days", Clothing.wear_of(a) < 0.1 and int(cl.stats.sewn) == sewn0 + 1,
+		_check("with no coins and no flax, nobody can make clothes: they stay in rags", Clothing.wear_of(a) >= 1.0 and int(cl.stats.sewn) == sewn0)
+		a.inv.items["flax"] = TailorJob.FLAX_PER_SET   # staged: flax of their own
+		for i in Clothing.SEW_DAYS:
+			cl.on_day(day)
+		_check("with the flax for a set, someone with no work sews their own in five days, and the flax is used", Clothing.wear_of(a) < 0.1 and int(cl.stats.sewn) == sewn0 + 1 and a.inv.get_qty("flax") == 0,
 			"worn %.2f, %d sewn" % [Clothing.wear_of(a), int(cl.stats.sewn) - sewn0])
 		_check("a hired hand has no time to sew", Clothing.wear_of(b) >= 1.0)
 		b.remove_meta("employer")

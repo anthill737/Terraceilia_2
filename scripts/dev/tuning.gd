@@ -54,7 +54,7 @@ const INPUTS: Array = [
 	{"k": "buy_from_makers", "g": "Switches", "t": "Buyers pay the makers (off: the market buys with its own purse)", "d": true},
 	{"k": "clothes", "g": "Switches", "t": "Clothes wear out; people buy new ones or make their own", "d": true},
 	{"k": "tools", "g": "Switches", "t": "Shops wear out tools and buy them from the smith", "d": true},
-	{"k": "gardens", "g": "Switches", "t": "Garden plots feed people without work", "d": true},
+	{"k": "gardens", "g": "Switches", "t": "Old rule: people without work are handed bread and firewood", "d": false},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},
 	{"k": "merchants", "g": "Switches", "t": "Each town has a travelling merchant", "d": false},   # off for now (Anthony, 2026-11-13)

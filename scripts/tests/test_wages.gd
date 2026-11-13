@@ -223,6 +223,7 @@ func _ready() -> void:
 	Engine.max_physics_steps_per_frame = 64
 	Tuning.clear()
 	Tuning.set_value("troubles", false)
+	Tuning.set_value("gardens", true)   # staged: the old free plot, so the few people with no work live through the staged dear bread; this test is about something else
 	Tuning.set_value("arrival_prosperity_bar", 2.0)   # staged: nobody new comes during the test
 	Tuning.set_value("home_improvements", false)
 	Tuning.set_value("shop_extensions", false)

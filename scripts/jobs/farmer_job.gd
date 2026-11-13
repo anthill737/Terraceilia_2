@@ -151,13 +151,40 @@ func hand_first_gain() -> float:
 
 const HOME_FIREWOOD: int = 4         # firewood kept for the farmer's own hearth
 var wheat_harvested_today: int = 0
+var flax_harvested_today: int = 0
+const FLAX_KEEP_SEED: int = 10       # flaxseed kept back for sowing
+
+
+## Sow this empty field with flax instead of wheat? When a field of flax is worth more than a
+## field of wheat at today's prices, the farmer has the seed, and the market is not already
+## full of flax (docs/CLOTHES.md).
+func _sow_flax() -> bool:
+	if market == null or not market.has_good("flax") or not Clothing.on() or inv.get_qty("flaxseed") < 5:
+		return false
+	if float(market.good_stock("flax")) >= float(market.good_target("flax")) * (1.0 + float(market.TARGET_BAND_PCT)):
+		return false
+	var wheat_field: float = 10.0 * float(market.get_bid_price("wheat"))
+	var flax_field: float = float(FieldPlot.FLAX_YIELD) * market.good_bid("flax")
+	return flax_field > wheat_field
+
+
+## Flax goes on the market; the buyer pays the farmer as it sells (docs/BUY_FROM_MAKERS.md).
+func _sell_flax() -> void:
+	if market == null or not market.has_good("flax"):
+		return
+	var have: int = inv.get_qty("flax")
+	if have <= 0:
+		return
+	var put: int = market.put_out(agent, "flax", have, 0.0)
+	if put > 0:
+		agent.log_event("Put %d flax out at the market." % put)
 
 func activate() -> void:
 	if wallet and wallet.money <= 0.0:
 		wallet.credit(Tuning.f("owner_start_coins", STARTING_CASH))
 		Village.note_brought(agent, Tuning.f("owner_start_coins", STARTING_CASH))
 	if inv:
-		inv.items = {"seeds": 50, "wheat": 0, "bread": 2, "firewood": 4}
+		inv.items = {"seeds": 50, "wheat": 0, "bread": 2, "firewood": 4, "flaxseed": 10, "flax": 0}
 	profit = agent.get_node_or_null("ProductionProfitability") as ProductionProfitability
 	inventory_throttle = agent.get_node_or_null("InventoryThrottle") as InventoryThrottle
 	route.bind(agent)
@@ -322,7 +349,16 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 				agent.current_tick, field_name, fields_worked_today, field_work_capacity_per_day])
 		return
 	fields_worked_today += 1
-	if field.is_mature():
+	if field.is_mature() and field.crop == "flax":
+		var flax_result: Dictionary = field.harvest()
+		var fsk: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
+		var fmult: float = LaborMarket.hand_mult(agent) * LaborMarket.tool_factor(agent) * (market.soil_mult * market.shock_harvest_mult if market else 1.0)
+		var got_flax: int = maxi(1, roundi(float(flax_result.flax) * fsk * fmult))
+		inv.add("flax", got_flax)
+		inv.add("flaxseed", maxi(0, roundi(float(flax_result.flaxseed) * fsk)))
+		flax_harvested_today += got_flax
+		agent.log_event("Pulled %d flax." % got_flax)
+	elif field.is_mature():
 		var harvest_result = field.harvest()
 		var _sk_mult: float = clamp(lerp(0.85, 1.25, agent.skill_farmer), 0.85, 1.25)
 		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
@@ -340,6 +376,10 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 			"Harvested %d wheat and %d seeds (farmer skill %.2f, yield ×%.2f)." %
 			[actual_wheat, actual_seeds, agent.skill_farmer, _sk_mult]
 		)
+	elif field.state == FieldPlot.State.EMPTY and _sow_flax():
+		if field.plant("flax"):
+			inv.remove("flaxseed", 5)
+			agent.log_event("Sowed a field with flax (spent 5 flaxseed).")
 	elif field.state == FieldPlot.State.EMPTY and inv.get_qty("seeds") >= 5:
 		if not market.can_producer_produce("wheat"):
 			if event_bus:
@@ -383,6 +423,7 @@ func handle_market_arrival() -> void:
 			agent.log_event(
 				"Sold %d wheat at $%.2f each (%s)." % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")]
 			)
+	_sell_flax()
 	buy_firewood_to(HOME_FIREWOOD)
 	if inv.get_qty("seeds") < 20 and not Market.direct():
 		var _cf_seeds_snap: float = agent.get_cash()
@@ -434,6 +475,7 @@ func on_day_changed(_day: int) -> void:
 	set_meta("output_ema", 0.3 * float(wheat_harvested_today) + 0.7 * float(get_meta("output_ema", float(wheat_harvested_today))))
 	_update_overhead()
 	wheat_harvested_today = 0
+	flax_harvested_today = 0
 	fields_worked_today = 0
 	warned_no_field_today = false
 

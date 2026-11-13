@@ -313,7 +313,7 @@ class Probe extends Node:
 		for pair in [["farmers", 2], ["bakers", 3], ["woodworkers", 2], ["others", 17], ["coins_others", 80.0], ["coins_owners", 210.0],
 				["market_coins", 4321.0], ["market_wheat", 85], ["market_bread", 95], ["market_firewood", 75], ["bread_price", 2.9],
 				["wheat_price", 1.2], ["firewood_price", 1.1], ["prosperity", 0.9], ["v2.others", 4], ["v2.market_coins", 999.0],
-				["houses_spare_at_start", 3], ["gardens", false], ["servants", false], ["home_improvements", false], ["troubles", false],
+				["houses_spare_at_start", 3], ["gardens", true], ["servants", false], ["home_improvements", false], ["troubles", false],
 				["town_size_limit", 40], ["arrivals_follow_jobs", false], ["merchants", true], ["merchant_start_coins", 222.0]]:
 			Tuning.set_value(str(pair[0]), pair[1])
 		Tuning.source = "test"
@@ -411,7 +411,7 @@ class Probe extends Node:
 			for h in v.housing.houses:
 				if h.get("up") != null or int(h.get("level", 1)) > 1:
 					improving += 1
-			_check("garden plots stay off", gardeners == 0)
+			_check("the old free plot, switched on here, feeds whoever has no work", gardeners >= v.labor_market.idle_count, "%d on a plot, %d without work" % [gardeners, v.labor_market.idle_count])
 			_check("servants stay off", v.housing.servant_count() == 0)
 			_check("home improvements stay off", improving == 0 and int(v.housing.stats.improve_started) == 0)
 			_check("troubles stay off", v.shocks.active.is_empty())

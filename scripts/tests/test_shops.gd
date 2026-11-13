@@ -38,6 +38,7 @@ class Probe extends Node:
 	static func setup_phase(n: int) -> void:
 		Tuning.clear()
 		Tuning.set_value("troubles", false)
+		Tuning.set_value("gardens", true)   # staged: the old free plot, so the few people with no work live through the staged dear bread; this test is about something else
 		Tuning.set_value("arrival_prosperity_bar", 2.0)   # staged: nobody new comes during the test
 		Tuning.set_value("home_improvements", false)      # so the builders are free for the shop
 		if n == 2:

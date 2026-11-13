@@ -57,6 +57,13 @@ class Probe extends Node:
 	var books_worst := 0.0
 	var books_worst_day := -1
 
+	func _flax_fields(v) -> int:
+		var n := 0
+		for fn in v.all_field_nodes:
+			if is_instance_valid(fn) and fn.get("crop") == "flax" and int(fn.get("state")) == 1:
+				n += 1
+		return n
+
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
 		for arg in OS.get_cmdline_user_args():
@@ -248,6 +255,7 @@ class Probe extends Node:
 		var hs: Dictionary = v.housing.summary() if v.housing else {"houses": 0, "empty": 0}
 		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "S": roles.Smith, "T": roles.Tailor, "H": roles.Household, "rags": rags,
 			"cp": snappedf(m.good_price("clothes"), 0.01) if m.has_good("clothes") else 0.0, "mc": m.good_stock("clothes") if m.has_good("clothes") else 0,
+			"xp": snappedf(m.good_price("flax"), 0.01) if m.has_good("flax") else 0.0, "mx": m.good_stock("flax") if m.has_good("flax") else 0, "flaxfields": _flax_fields(v),
 			"cbought": v.clothing.stats.bought if v.clothing else 0, "csewn": v.clothing.stats.sewn if v.clothing else 0,
 			"tp": snappedf(m.good_price("tools"), 0.01) if m.has_good("tools") else 0.0, "mt": m.good_stock("tools") if m.has_good("tools") else 0,
 			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers,

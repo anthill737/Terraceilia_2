@@ -3,7 +3,16 @@ class_name FieldPlot
 
 enum State { EMPTY, PLANTED }
 
+## A field of flax gives less than a field of wheat: the stalks are pulled, retted and broken
+## down for their fibre (docs/CLOTHES.md).
+const FLAX_YIELD: int = 6
+## Flax seeds well: a field gives back more seed than it took to sow (five), so a farmer can
+## keep growing it from their own seed.
+const FLAXSEED_YIELD: int = 7
+
 var state: State = State.EMPTY
+## What is growing: "wheat" or "flax" (docs/CLOTHES.md).
+var crop: String = "wheat"
 var ticks_to_mature: int = 0
 
 # PART 3: Farmer assignment (bidirectional)
@@ -23,6 +32,8 @@ func _draw() -> void:
 	if state == State.PLANTED:
 		var ripe := ticks_to_mature <= 0
 		var col := Color(0.92, 0.78, 0.30) if ripe else Color(0.35, 0.75, 0.30)
+		if crop == "flax":
+			col = Color(0.62, 0.55, 0.35) if ripe else Color(0.45, 0.6, 0.95)   # flax flowers blue, then browns
 		var hgt := 7.0 if ripe else 3.5
 		for i in 5:
 			for k in 6:
@@ -31,9 +42,10 @@ func _draw() -> void:
 	draw_rect(Rect2(-17, -17, 34, 34), Color(0.20, 0.13, 0.07), false, 2)
 
 
-func plant() -> bool:
+func plant(what: String = "wheat") -> bool:
 	if state == State.EMPTY:
 		state = State.PLANTED
+		crop = what
 		ticks_to_mature = 2
 		queue_redraw()  # Update visual
 		return true
@@ -54,6 +66,8 @@ func harvest() -> Dictionary:
 	if is_mature():
 		state = State.EMPTY
 		queue_redraw()  # Update visual
+		if crop == "flax":
+			return {"flax": FLAX_YIELD, "flaxseed": FLAXSEED_YIELD}
 		return {"wheat": 10, "seeds": 2}
 	else:
 		return {"wheat": 0, "seeds": 0}

@@ -209,6 +209,122 @@ func seed_market(seed_wheat: int, seed_bread: int, seed_seeds: int) -> void:
 		event_bus.emit_log(msg)
 
 
+# ── Buyers pay the makers (docs/BUY_FROM_MAKERS.md) ──────────────────────────────
+## The market is the place goods are sold and where their price is set. It is not a buyer:
+## a maker puts goods on the shelf and is paid when somebody buys them, with the buyer's own
+## coins at the price the buyer paid. Before 2026-11-13 the market bought everything with a
+## purse of its own; when owners piled up their takings that purse ran dry, the market could
+## buy nothing, the shelves emptied and people starved holding coins.
+##
+## Whose goods are on each shelf: good -> {key -> {"who": the maker, or null for the town's
+## own stock, "qty": how much of the shelf is theirs}}. Each maker's goods are that maker's
+## stall: a buyer picks one stall by chance and buys there (_take_payment). Goods lost from
+## the shelf (spoiling, rats) are lost by everyone in the same share.
+var shelf: Dictionary = {"wheat": {}, "bread": {}, "firewood": {}}
+var paid_to_makers: Dictionary = {"wheat": 0.0, "bread": 0.0, "firewood": 0.0}
+var paid_to_town: Dictionary = {"wheat": 0.0, "bread": 0.0, "firewood": 0.0}
+## Who made the stock nobody is recorded as bringing (what the shelf starts with): the
+## town's first maker of that good. Set by the village.
+var first_maker: Callable = func(_good: String): return null
+
+
+static func direct() -> bool:
+	return Tuning.on("buy_from_makers", true)
+
+
+## Bring the ledger for `good` in line with `stock` units on the shelf.
+func _sync_shelf(good: String, stock: int) -> void:
+	var d: Dictionary = shelf[good]
+	var held: float = 0.0
+	for k in d:
+		held += float(d[k].qty)
+	if stock <= 0:
+		d.clear()
+	elif held <= 0.0001:
+		d.clear()
+		var maker = first_maker.call(good)
+		if maker != null and is_instance_valid(maker):
+			d[maker.get_instance_id()] = {"who": maker, "qty": float(stock)}
+		else:
+			d["town"] = {"who": null, "qty": float(stock)}   # nobody to credit: the town's
+	elif absf(held - float(stock)) > 0.0001:
+		var f: float = float(stock) / held
+		for k in d:
+			d[k].qty = float(d[k].qty) * f
+
+
+## `seller` has just put `qty` of `good` on the shelf (the stock already counts it).
+func _shelve(good: String, seller, qty: int) -> void:
+	if qty <= 0:
+		return
+	_sync_shelf(good, int(get(good)) - qty)
+	var d: Dictionary = shelf[good]
+	if seller == null or not is_instance_valid(seller):
+		var t: Dictionary = d.get("town", {"who": null, "qty": 0.0})
+		t.qty = float(t.qty) + float(qty)
+		d["town"] = t
+		return
+	var key: int = seller.get_instance_id()
+	var e: Dictionary = d.get(key, {"who": seller, "qty": 0.0})
+	e.qty = float(e.qty) + float(qty)
+	d[key] = e
+
+
+## Tests: put `qty` of `good` on the shelf as `seller`'s (null: nobody's).
+func _shelve_for_test(good: String, seller, qty: int) -> void:
+	set(good, int(get(good)) + qty)
+	_shelve(good, seller, qty)
+
+
+## How much of `good` on the shelf is `seller`'s.
+func on_shelf(good: String, seller) -> float:
+	if seller == null or not is_instance_valid(seller):
+		return 0.0
+	_sync_shelf(good, int(get(good)))
+	var e = (shelf[good] as Dictionary).get(seller.get_instance_id(), null)
+	return float(e.qty) if e != null else 0.0
+
+
+## A buyer has paid `cost` for `qty` of `good` (call before the stock is reduced). With
+## buy_from_makers on, the buyer has picked one maker's stall by chance (Anthony: "If I'm
+## walking down an open market and I see 12 vendors, I pick one and I buy their stuff") and
+## that maker gets the whole payment. If that stall has less than the buyer wants, the rest
+## comes from another stall picked the same way. Goods of someone who is gone, and the town's
+## own stock, are one more stall, and what they sell for goes to the town's purse.
+func _take_payment(good: String, qty: int, cost: float) -> void:
+	if not direct():
+		money += cost
+		return
+	var stock: int = int(get(good))
+	_sync_shelf(good, stock)
+	var d: Dictionary = shelf[good]
+	var each: float = cost / float(maxi(1, qty))
+	var want: float = float(qty)
+	var left: float = cost
+	while want > 0.0001 and not d.is_empty():
+		var keys: Array = d.keys()
+		var k = keys[randi() % keys.size()]
+		var e: Dictionary = d[k]
+		var take: float = minf(want, float(e.qty))
+		var coins: float = each * take
+		e.qty = float(e.qty) - take
+		want -= take
+		left -= coins
+		var who = e.who
+		var w: Wallet = get_wallet(who) if who != null and is_instance_valid(who) and not who.is_queued_for_deletion() else null
+		if w != null:
+			w.credit(coins)
+			who.cashflow_today_income += coins
+			paid_to_makers[good] = float(paid_to_makers[good]) + coins
+		else:
+			money += coins
+			paid_to_town[good] = float(paid_to_town[good]) + coins
+		if float(e.qty) <= 0.0001:
+			d.erase(k)
+	if absf(left) > 0.0000001:
+		money += left
+
+
 func _agent_label(agent) -> String:
 	if agent == null:
 		return "Unknown"
@@ -555,18 +671,21 @@ func buy_wheat_from_farmer(farmer: Agent, min_acceptable_price: float = 0.0, is_
 			stopped_by_price = true
 			break
 		
-		if money < current_bid:
+		if not direct() and money < current_bid:
 			break
 		
 		farmer_inv.remove("wheat", 1)
-		farmer_wallet.credit(current_bid)
 		wheat += 1
-		money -= current_bid
+		if not direct():
+			farmer_wallet.credit(current_bid)
+			money -= current_bid
 		total_paid += current_bid
 		units_bought += 1
 	
 	if units_bought == max_units and units_bought < farmer_wheat:
 		stopped_by_cap = true
+	if direct():
+		_shelve("wheat", farmer, units_bought)
 	
 	wheat_sold_today += units_bought
 	totals.wheat_from_farmers += units_bought
@@ -657,7 +776,7 @@ func sell_wheat_to_baker(baker: Agent, requested: int) -> int:
 	
 	var cost: float = amount_sold * wheat_price
 	baker_wallet.debit(cost)
-	money += cost
+	_take_payment("wheat", amount_sold, cost)
 	baker_inv.add("wheat", amount_sold)
 	wheat -= amount_sold
 	totals.wheat_to_bakers += amount_sold
@@ -715,17 +834,20 @@ func buy_bread_from_baker(baker: Agent, min_acceptable_price: float = 0.0, is_su
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
 			break
-		if money < current_bid:
+		if not direct() and money < current_bid:
 			break
 		baker_inv.remove("bread", 1)
-		baker_wallet.credit(current_bid)
 		bread += 1
-		money -= current_bid
+		if not direct():
+			baker_wallet.credit(current_bid)
+			money -= current_bid
 		total_paid += current_bid
 		units_bought += 1
 	
 	if units_bought == max_units and units_bought < baker_bread:
 		stopped_by_cap = true
+	if direct():
+		_shelve("bread", baker, units_bought)
 	
 	bread_sold_today += units_bought
 	totals.bread_from_bakers += units_bought
@@ -799,17 +921,20 @@ func buy_bread_from_agent(agent, amount_offered: int, min_acceptable_price: floa
 		if min_acceptable_price > 0.0 and current_bid < min_acceptable_price:
 			stopped_by_price = true
 			break
-		if money < current_bid:
+		if not direct() and money < current_bid:
 			break
 		agent_inv.remove("bread", 1)
-		agent_wallet.credit(current_bid)
 		bread += 1
-		money -= current_bid
+		if not direct():
+			agent_wallet.credit(current_bid)
+			money -= current_bid
 		total_paid += current_bid
 		units_bought += 1
 	
 	if units_bought == max_units and units_bought < amount_offered:
 		stopped_by_cap = true
+	if direct():
+		_shelve("bread", agent, units_bought)
 	
 	bread_sold_today += units_bought
 	totals.bread_from_bakers += units_bought
@@ -869,7 +994,7 @@ func sell_bread_to_household(h, requested: int) -> int:
 	
 	var cost: float = float(qty) * bread_price
 	h_wallet.debit(cost)
-	money += cost
+	_take_payment("bread", qty, cost)
 	bread -= qty
 	bread_bought_by_people_today += qty
 	totals.bread_to_people += qty
@@ -923,7 +1048,7 @@ func sell_bread_to_agent(agent, requested: int) -> int:
 	
 	var cost: float = float(qty) * bread_price
 	agent_wallet.debit(cost)
-	money += cost
+	_take_payment("bread", qty, cost)
 	bread -= qty
 	bread_bought_by_people_today += qty
 	totals.bread_to_people += qty
@@ -1416,14 +1541,18 @@ func buy_firewood_from_agent(agent, amount_offered: int, min_acceptable_price: f
 		return 0
 	var qty: int = mini(amount_offered, a_inv.get_qty("firewood"))
 	qty = mini(qty, firewood_capacity - firewood)
-	qty = mini(qty, int(floor(money / bid)))
+	if not direct():
+		qty = mini(qty, int(floor(money / bid)))
 	if qty <= 0:
 		return 0
 	var pay: float = float(qty) * bid
 	a_inv.items["firewood"] = a_inv.get_qty("firewood") - qty
-	a_wallet.credit(pay)
-	money -= pay
 	firewood += qty
+	if direct():
+		_shelve("firewood", agent, qty)
+	else:
+		a_wallet.credit(pay)
+		money -= pay
 	firewood_bought_today += qty
 	totals.firewood_in += qty
 	return qty
@@ -1448,7 +1577,7 @@ func sell_firewood_to_agent(agent, requested: int) -> int:
 		return 0
 	var cost: float = float(qty) * firewood_price
 	a_wallet.debit(cost)
-	money += cost
+	_take_payment("firewood", qty, cost)
 	firewood -= qty
 	firewood_sold_today += qty
 	totals.firewood_out += qty

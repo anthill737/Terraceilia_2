@@ -106,7 +106,8 @@ class Probe extends Node:
 						"%d rewrites in %.1f s" % [redraws2, secs])
 					var shown2: String = await _settled_text()
 					var last: String = lp.log_lines[lp.log_lines.size() - 1]
-					_check("with the newest log line", shown2.contains(last), last.substr(0, 80))
+					# The start of the line is enough: the panel may wrap or cut a long one.
+					_check("with the newest log line", shown2.contains(last.substr(0, 40)), last.substr(0, 80))
 					_press_l()
 					await get_tree().process_frame
 					_check("L a third time hides it again", not lp.is_shown())

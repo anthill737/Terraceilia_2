@@ -74,6 +74,12 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   hand stays a day and quits on the second; that an owner who finds nobody raises the wage a
   little each day, never above what the hand brings in, and lets it settle back; and that with
   the switch off everyone pays the town's rate.
+- `res://scenes/TestMakers.tscn`: buyers pay the makers (docs/BUY_FROM_MAKERS.md). Checks (13 checks)
+  that a maker is not paid on putting goods out and the town's purse pays nothing; that a buyer's
+  whole payment goes to one maker, for bread, wheat and firewood; that with two stalls both sell
+  over many sales; that goods with no maker left pay the town; that seed comes from the farmer's
+  own wheat; that no upkeep reaches the town's purse in play; and that with the switch off the
+  market pays on delivery.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

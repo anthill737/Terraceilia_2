@@ -105,7 +105,8 @@ func _sell_spare() -> void:
 	var bid: float = market.firewood_bid()
 	var sold: int = market.buy_firewood_from_agent(agent, spare, _min_price())
 	if sold > 0:
-		agent.cashflow_today_income += float(sold) * bid
+		if not Market.direct():
+			agent.cashflow_today_income += float(sold) * bid   # with buyers paying makers, the takings are booked when the wood sells
 		agent.log_event("Sold %d firewood at $%.2f each." % [sold, bid])
 		if event_bus:
 			event_bus.emit_log("Tick %d: %s sold %d firewood at $%.2f" % [agent.current_tick, agent.name, sold, bid])
@@ -157,7 +158,7 @@ func on_day_changed(day: int) -> void:
 				consecutive_days_negative_cashflow += 1
 			else:
 				consecutive_days_negative_cashflow = 0
-		if maintenance_cost_per_day > 0.0:
+		if maintenance_cost_per_day > 0.0 and not Market.direct():   # with buyers paying makers the town collects no upkeep: it was coins going to nobody (docs/BUY_FROM_MAKERS.md)
 			# Upkeep is paid to the town (the market's purse), not lost: coins only change hands.
 			var upkeep: float = minf(maintenance_cost_per_day, wallet.money)
 			if upkeep > 0.0 and wallet.debit(upkeep):

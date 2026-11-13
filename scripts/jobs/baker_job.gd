@@ -788,7 +788,7 @@ func on_day_changed(_day: int) -> void:
 			consecutive_days_negative_cashflow += 1
 		else:
 			consecutive_days_negative_cashflow = 0
-	if wallet and maintenance_cost_per_day > 0.0:
+	if wallet and maintenance_cost_per_day > 0.0 and not Market.direct():   # with buyers paying makers the town collects no upkeep: it was coins going to nobody (docs/BUY_FROM_MAKERS.md)
 		# Upkeep is paid to the town (the market's purse), not lost: coins only change hands.
 		var upkeep: float = minf(maintenance_cost_per_day, wallet.money)
 		if upkeep > 0.0 and wallet.debit(upkeep):

@@ -362,6 +362,13 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 func handle_market_arrival() -> void:
 	if food_reserve and food_reserve.is_survival_mode:
 		var _bought: int = food_reserve.attempt_survival_purchase()
+	if inv.get_qty("seeds") < 20 and Market.direct():
+		# Seed comes out of the farmer's own wheat, before any is sold. (It was bought from a
+		# bottomless stock at the market, and the coins went to nobody.)
+		var kept: int = mini(20 - inv.get_qty("seeds"), inv.get_qty("wheat"))
+		if kept > 0:
+			inv.remove("wheat", kept)
+			inv.add("seeds", kept)
 	if inv.get_qty("wheat") > 0:
 		var min_price: float = 0.0
 		if profit:
@@ -377,7 +384,7 @@ func handle_market_arrival() -> void:
 				"Sold %d wheat at $%.2f each (%s)." % [_ws, wtr.get("price", 0.0), wtr.get("reason", "?")]
 			)
 	buy_firewood_to(HOME_FIREWOOD)
-	if inv.get_qty("seeds") < 20:
+	if inv.get_qty("seeds") < 20 and not Market.direct():
 		var _cf_seeds_snap: float = agent.get_cash()
 		market.sell_seeds_to_farmer(agent)
 		agent.cashflow_today_expense += max(0.0, _cf_seeds_snap - agent.get_cash())
@@ -416,7 +423,7 @@ func on_day_changed(_day: int) -> void:
 			consecutive_days_negative_cashflow += 1
 		else:
 			consecutive_days_negative_cashflow = 0
-	if wallet and maintenance_cost_per_day > 0.0:
+	if wallet and maintenance_cost_per_day > 0.0 and not Market.direct():   # with buyers paying makers the town collects no upkeep: it was coins going to nobody (docs/BUY_FROM_MAKERS.md)
 		# Upkeep is paid to the town (the market's purse), not lost: coins only change hands.
 		var upkeep: float = minf(maintenance_cost_per_day, wallet.money)
 		if upkeep > 0.0 and wallet.debit(upkeep):

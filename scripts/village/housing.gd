@@ -69,7 +69,7 @@ func _people() -> Array:
 	var out: Array = []
 	if village == null:
 		return out
-	for group in [village.households, village.all_farmers, village.all_bakers, village.all_woodworkers]:
+	for group in [village.households] + village.owner_groups():
 		for a in group:
 			if a != null and is_instance_valid(a) and not out.has(a):
 				out.append(a)

@@ -12,6 +12,7 @@ var _cashflow_7d: Dictionary = {
 	"Farmer":    [],
 	"Baker":     [],
 	"Woodworker": [],
+	"Smith": [],
 }
 
 var _farmers: Array = []
@@ -33,6 +34,7 @@ func roll_daily() -> void:
 		"Farmer":    _farmers,
 		"Baker":     _bakers,
 		"Woodworker": _woodworkers,
+		"Smith": _smiths,
 		"Household": _households,
 	}
 	for role: String in role_agents:
@@ -60,7 +62,7 @@ func role_rolling_7d_sum(role: String) -> float:
 
 ## How many people are in `role` today.
 func role_count(role: String) -> int:
-	var list: Array = {"Farmer": _farmers, "Baker": _bakers, "Woodworker": _woodworkers, "Household": _households}.get(role, [])
+	var list: Array = {"Farmer": _farmers, "Baker": _bakers, "Woodworker": _woodworkers, "Smith": _smiths, "Household": _households}.get(role, [])
 	var n: int = 0
 	for a in list:
 		if is_instance_valid(a):
@@ -73,6 +75,13 @@ func role_rolling_7d_avg(role: String) -> float:
 	if hist.is_empty():
 		return 0.0
 	return role_rolling_7d_sum(role) / float(hist.size())
+
+
+var _smiths: Array = []
+
+
+func bind_smiths(smiths: Array) -> void:
+	_smiths = smiths
 
 
 func bind_woodworkers(woodworkers: Array) -> void:

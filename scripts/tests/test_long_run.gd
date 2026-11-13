@@ -137,7 +137,7 @@ class Probe extends Node:
 			total += v.market.money
 			brought += v.coins_brought
 			taken += v.coins_taken
-			for group in [v.all_farmers, v.all_bakers, v.all_woodworkers, v.households]:
+			for group in (v.owner_groups() + [v.households]):
 				for a in group:
 					if a != null and is_instance_valid(a):
 						total += a.get_cash()
@@ -190,13 +190,13 @@ class Probe extends Node:
 			"left": 0, "starved_with_coins": 0, "purse_min": INF, "no_farmer_run": 0, "no_baker_run": 0, "worst_no_farmer": 0,
 			"worst_no_baker": 0, "bread_min": INF, "bread_max": 0.0, "reached": {}})
 		var m = v.market
-		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0, "Merchant": 0}
+		var roles := {"Farmer": 0, "Baker": 0, "Household": 0, "Woodworker": 0, "Smith": 0, "Merchant": 0}
 		var cash: Array = []
 		var starving := 0
 		var cold := 0
 		var cottagers := 0
 		var now := {}
-		for group in [v.all_farmers, v.all_bakers, v.all_woodworkers, v.households]:
+		for group in (v.owner_groups() + [v.households]):
 			for a in group:
 				if a == null or not is_instance_valid(a):
 					continue
@@ -243,7 +243,8 @@ class Probe extends Node:
 		if rows_file == null:
 			return
 		var hs: Dictionary = v.housing.summary() if v.housing else {"houses": 0, "empty": 0}
-		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "H": roles.Household,
+		var row := {"v": vid, "day": day, "pop": n, "F": roles.Farmer, "B": roles.Baker, "W": roles.Woodworker, "S": roles.Smith, "H": roles.Household,
+			"tp": snappedf(m.good_price("tools"), 0.01) if m.has_good("tools") else 0.0, "mt": m.good_stock("tools") if m.has_good("tools") else 0,
 			"hands": 0, "servants": v.housing.servant_count() if v.housing else 0, "cott": cottagers,
 			"idle": v.labor_market.idle_count if v.labor_market else 0,
 			"wp": snappedf(m.wheat_price, 0.01), "bp": snappedf(m.bread_price, 0.01), "fp": snappedf(m.firewood_price, 0.01),
@@ -254,7 +255,7 @@ class Probe extends Node:
 			"houses": hs.houses, "empty": hs.empty, "tot": m.totals.duplicate(),
 			"pros": snappedf(v.prosperity_meter.prosperity_score, 0.01) if v.prosperity_meter else -1.0,
 			"brought": snappedf(v.coins_brought, 0.1), "taken": snappedf(v.coins_taken, 0.1)}
-		for group in [v.all_farmers, v.all_bakers, v.all_woodworkers]:
+		for group in v.owner_groups():
 			for a in group:
 				if a != null and is_instance_valid(a):
 					row.hands += LaborMarket.hands_of(a)

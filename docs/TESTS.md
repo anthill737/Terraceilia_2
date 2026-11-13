@@ -80,6 +80,12 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   over many sales; that goods with no maker left pay the town; that seed comes from the farmer's
   own wheat; that no upkeep reaches the town's purse in play; and that with the switch off the
   market pays on delivery.
+- `res://scenes/TestSmith.tscn`: the smith and tools (docs/SMITH.md). Checks (13 checks) that a normal
+  game starts with no smith and a village of three shops would not keep one; that in a bigger
+  town the smith makes tools and shops buy them, paying the smith and not the town; that a shop
+  with tools makes a tenth more and a bigger shop wears out more; that a shop's upkeep is the
+  tools it wears out; that a tool is bought only when worth its price and never with food
+  money; and that with the switch off shops use no tools.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

@@ -257,7 +257,7 @@ func _sync_shelf(good: String, stock: int) -> void:
 func _shelve(good: String, seller, qty: int) -> void:
 	if qty <= 0:
 		return
-	_sync_shelf(good, int(get(good)) - qty)
+	_sync_shelf(good, good_stock(good) - qty)
 	var d: Dictionary = shelf[good]
 	if seller == null or not is_instance_valid(seller):
 		var t: Dictionary = d.get("town", {"who": null, "qty": 0.0})
@@ -272,7 +272,7 @@ func _shelve(good: String, seller, qty: int) -> void:
 
 ## Tests: put `qty` of `good` on the shelf as `seller`'s (null: nobody's).
 func _shelve_for_test(good: String, seller, qty: int) -> void:
-	set(good, int(get(good)) + qty)
+	_set_stock(good, good_stock(good) + qty)
 	_shelve(good, seller, qty)
 
 
@@ -280,7 +280,7 @@ func _shelve_for_test(good: String, seller, qty: int) -> void:
 func on_shelf(good: String, seller) -> float:
 	if seller == null or not is_instance_valid(seller):
 		return 0.0
-	_sync_shelf(good, int(get(good)))
+	_sync_shelf(good, good_stock(good))
 	var e = (shelf[good] as Dictionary).get(seller.get_instance_id(), null)
 	return float(e.qty) if e != null else 0.0
 
@@ -295,7 +295,7 @@ func _take_payment(good: String, qty: int, cost: float) -> void:
 	if not direct():
 		money += cost
 		return
-	var stock: int = int(get(good))
+	var stock: int = good_stock(good)
 	_sync_shelf(good, stock)
 	var d: Dictionary = shelf[good]
 	var each: float = cost / float(maxi(1, qty))
@@ -323,6 +323,139 @@ func _take_payment(good: String, qty: int, cost: float) -> void:
 			d.erase(k)
 	if absf(left) > 0.0000001:
 		money += left
+
+
+# ── More goods (docs/SMITH.md) ───────────────────────────────────────────────────
+## Goods beyond wheat, bread and firewood live here, one entry each, and all go through the
+## same few functions: a maker puts them out (put_out), anyone buys them (buy_good), and the
+## price follows the stock the way firewood's does. A new good is one add_good call.
+var goods: Dictionary = {}
+
+
+func add_good(good: String, price: float, floor_price: float, target: int, capacity: int) -> void:
+	goods[good] = {"stock": 0, "price": price, "floor": floor_price, "target": target, "base_target": target, "capacity": capacity, "base_capacity": capacity,
+		"sold_today": 0, "wanted_today": 0, "short_today": 0, "sold_ema": 0.0, "in": 0, "out": 0}
+	shelf[good] = {}
+	paid_to_makers[good] = 0.0
+	paid_to_town[good] = 0.0
+
+
+func has_good(good: String) -> bool:
+	return goods.has(good)
+
+
+## Units of `good` on the shelf, for any good the market holds.
+func good_stock(good: String) -> int:
+	return int(goods[good].stock) if goods.has(good) else int(get(good))
+
+
+func good_price(good: String) -> float:
+	return float(goods[good].price) if goods.has(good) else float(get(good + "_price"))
+
+
+func good_target(good: String) -> int:
+	return int(goods[good].target) if goods.has(good) else int(get(good + "_target"))
+
+
+func _set_stock(good: String, n: int) -> void:
+	if goods.has(good):
+		goods[good].stock = n
+	else:
+		set(good, n)
+
+
+## What a maker is offered for `good` today: the price, less when the shelf is over its
+## target band and a little more when it is under.
+func good_bid(good: String) -> float:
+	var g: Dictionary = goods[good]
+	var t: float = float(maxi(1, int(g.target)))
+	var bid: float = float(g.price)
+	if float(g.stock) > t * (1.0 + TARGET_BAND_PCT):
+		bid *= BAND_UPPER_BID_MULTIPLIER
+	elif float(g.stock) < t * (1.0 - TARGET_BAND_PCT):
+		bid *= BAND_LOWER_BID_MULTIPLIER
+	return maxf(float(g.floor), bid)
+
+
+## A maker puts `amount` of `good` on the shelf, unless the price on offer is under
+## `min_acceptable_price`. Returns how much went on. They are paid as it sells.
+func put_out(agent, good: String, amount: int, min_acceptable_price: float = 0.0) -> int:
+	if agent == null or amount <= 0 or not goods.has(good):
+		return 0
+	var g: Dictionary = goods[good]
+	var bid: float = good_bid(good)
+	if bid < min_acceptable_price:
+		return 0
+	var a_inv = get_inv(agent)
+	var a_wallet = get_wallet(agent)
+	if a_inv == null or a_wallet == null:
+		return 0
+	var qty: int = mini(amount, a_inv.get_qty(good))
+	qty = mini(qty, int(g.capacity) - int(g.stock))
+	if not direct():
+		qty = mini(qty, int(floor(money / bid)))
+	if qty <= 0:
+		return 0
+	a_inv.remove(good, qty)
+	g.stock = int(g.stock) + qty
+	g["in"] = int(g["in"]) + qty
+	if direct():
+		_shelve(good, agent, qty)
+	else:
+		a_wallet.credit(float(qty) * bid)
+		money -= float(qty) * bid
+	return qty
+
+
+## Anyone buys `good` at today's price; it goes into their own stock. Returns how much.
+func buy_good(agent, good: String, requested: int) -> int:
+	if agent == null or requested <= 0 or not goods.has(good):
+		return 0
+	var g: Dictionary = goods[good]
+	var a_wallet = get_wallet(agent)
+	var a_inv = get_inv(agent)
+	if a_wallet == null or a_inv == null:
+		return 0
+	# Demand is what buyers can pay for: a request with no coins behind it moves no price.
+	var can_pay: int = mini(requested, int(floor(a_wallet.money / float(g.price))))
+	g.wanted_today = int(g.wanted_today) + can_pay
+	var qty: int = mini(can_pay, int(g.stock))
+	if qty < can_pay:
+		g.short_today = int(g.short_today) + can_pay - qty
+	if qty <= 0:
+		return 0
+	var cost: float = float(qty) * float(g.price)
+	a_wallet.debit(cost)
+	_take_payment(good, qty, cost)
+	g.stock = int(g.stock) - qty
+	g.sold_today = int(g.sold_today) + qty
+	g.out = int(g.out) + qty
+	a_inv.add(good, qty)
+	agent.cashflow_today_expense += cost
+	return qty
+
+
+## Daily, for each of these goods: dearer when the shelf is low or ran short and somebody
+## with coins asked for it, cheaper when it is piling up, by at most the daily limit. The
+## target follows about two days of sales.
+func _adjust_good_prices() -> void:
+	for good in goods:
+		var g: Dictionary = goods[good]
+		var t: float = float(maxi(1, int(g.target)))
+		var limit: float = Tuning.f("price_daily_limit", MAX_DAILY_PRICE_CHANGE)
+		if int(g.wanted_today) > 0 and (float(g.stock) < t * (1.0 - TARGET_BAND_PCT) or int(g.short_today) > 0):
+			g.price = float(g.price) * (1.0 + (0.12 if int(g.stock) <= 0 else limit * clampf(1.0 - float(g.stock) / t, 0.2, 1.0)))
+		elif float(g.stock) > t * (1.0 + TARGET_BAND_PCT):
+			g.price = float(g.price) * (1.0 - limit * clampf(float(g.stock) / t - 1.0, 0.2, 1.0))
+		elif int(g.stock) > 0 and int(g.sold_today) == 0:
+			g.price = float(g.price) * (1.0 - limit)   # goods on the shelf and no buyer today: the price comes down
+		g.price = maxf(float(g.price), float(g.floor))
+		g.sold_ema = 0.3 * float(g.sold_today) + 0.7 * float(g.sold_ema)
+		g.target = maxi(int(g.base_target), roundi(2.0 * float(g.sold_ema)))
+		g.capacity = maxi(int(g.base_capacity), int(g.target) * 2)
+		g.sold_today = 0
+		g.wanted_today = 0
+		g.short_today = 0
 
 
 func _agent_label(agent) -> String:
@@ -1134,6 +1267,7 @@ func on_day_changed(day: int) -> void:
 	_adjust_wheat_price(day)
 	_adjust_bread_price(day)
 	_adjust_firewood_price()
+	_adjust_good_prices()
 	
 	# Store current inventory for next day's recovery detection
 	wheat_prev = wheat

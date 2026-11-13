@@ -17,7 +17,7 @@ const MIN_MARGIN: float = 0.25
 var yard_location: Node2D = null
 var firewood_made_today: int = 0
 var maintenance_cost_per_day: float:
-	get: return Tuning.f("upkeep_woodworker", 0.2)
+	get: return LaborMarket.tool_cost_per_day(agent) if Market.direct() else Tuning.f("upkeep_woodworker", 0.2)   # upkeep is the tools it wears out (docs/SMITH.md)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 var cost_per_unit: float = 0.7
@@ -49,7 +49,7 @@ func activate() -> void:
 func _capacity() -> int:
 	# The owner's own skill counts in every trade (docs/SKILL.md); it did not at the yard.
 	var own: float = SkillSet.factor(agent.skill_in("Woodworker")) if Tuning.on("worker_skill", true) else 1.0
-	return roundi(float(Tuning.i("woodworker_logs_per_day", FIREWOOD_PER_DAY)) * own * LaborMarket.hand_mult(agent))
+	return roundi(float(Tuning.i("woodworker_logs_per_day", FIREWOOD_PER_DAY)) * own * LaborMarket.hand_mult(agent) * LaborMarket.tool_factor(agent))
 
 
 ## Firewood beyond what the woodworker keeps for its own hearth.

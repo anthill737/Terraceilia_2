@@ -93,6 +93,7 @@ var bread_scarcity_ema: float = 0.0
 var wheat_scarcity_ema: float = 0.0
 var firewood_scarcity_ema: float = 0.0
 var _wood_entry_day: int = -999
+var _smith_entry_day: int = -999
 
 # ─── Prev-day money snapshots (for daily profit delta) ──────────────────────
 var farmer_prev_money: Dictionary = {}  # agent → float
@@ -105,6 +106,7 @@ var all_farmers: Array = []
 var all_bakers: Array = []
 var all_households: Array = []
 var all_woodworkers: Array = []
+var all_smiths: Array = []
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market = null
@@ -165,7 +167,7 @@ func load_career_entry_config(cfg: Dictionary) -> void:
 ## Days in a row the market has been short of what each trade makes. A business opens only
 ## after OPEN_SHORT_DAYS of it: on a single dip a village once ended up with 8 farms.
 const OPEN_SHORT_DAYS: int = 3
-var _short_days: Dictionary = {"Farmer": 0, "Baker": 0, "Woodworker": 0}
+var _short_days: Dictionary = {"Farmer": 0, "Baker": 0, "Woodworker": 0, "Smith": 0}
 
 func update_daily(day: int) -> void:
 	if not _initialized:
@@ -243,6 +245,8 @@ func update_daily(day: int) -> void:
 	_update_cottagers(day)
 	# Batch 3: every hearth burns one firewood a day.
 	_update_firewood(day)
+	# Shops wear their tools out and buy new ones from the smith (docs/SMITH.md).
+	_update_tools(day)
 
 	# Evaluate producers for sustained-loss migration
 	_evaluate_producer_migration(day)
@@ -581,6 +585,11 @@ func _evaluate_household(h: Node, day: int) -> void:
 	if u_wood > best_u and day - _wood_entry_day >= EVAL_INTERVAL_DAYS:
 		best_u = u_wood
 		best_role = "Woodworker"
+	# A smithy is weighed the same way (docs/SMITH.md).
+	var u_smith: float = _smith_utility(ce)
+	if u_smith > best_u and day - _smith_entry_day >= EVAL_INTERVAL_DAYS:
+		best_u = u_smith
+		best_role = "Smith"
 
 	# Skip if the best role IS the current role
 	if best_role == h.current_role:
@@ -653,6 +662,8 @@ func _evaluate_household(h: Node, day: int) -> void:
 		_entries_to_baker_today += 1
 	elif best_role == "Woodworker":
 		_wood_entry_day = day
+	elif best_role == "Smith":
+		_smith_entry_day = day
 
 
 # ─── Producer migration evaluation ───────────────────────────────────────────
@@ -660,7 +671,7 @@ func _evaluate_household(h: Node, day: int) -> void:
 ## Producers leave only after a losing streak that has left them broke, and never the last of
 ## their trade: a town that still eats bread keeps its last farmer and its last baker.
 func _evaluate_producer_migration(_day: int) -> void:
-	for group in [all_farmers, all_bakers, all_woodworkers]:
+	for group in _owner_groups():
 		for p in group.duplicate():
 			if not (p and is_instance_valid(p)):
 				continue
@@ -673,7 +684,9 @@ func _evaluate_producer_migration(_day: int) -> void:
 					continue
 				if not _is_broke(p):
 					continue
-			if _live_count(group) <= 1:
+			# The last farm, bakery or lumber yard stays open whatever happens. A trade the town
+			# can live without (a smithy) closes like any shop: its last smith used to starve.
+			if _live_count(group) <= 1 and bool(Recovery.TRADES.get(str(p.current_role), {}).get("basic", true)):
 				if event_bus:
 					event_bus.emit_log("[LaborMkt] %s kept: last of their trade (%d losing days, $%.1f)" % [
 						p.name, p.consecutive_days_negative_cashflow, p.get_cash()])
@@ -703,6 +716,8 @@ func _market_wants(role: String) -> bool:
 			return market.bread < market.bread_target
 		"Woodworker":
 			return market.firewood < market.firewood_target
+		"Smith":
+			return market.has_good("tools") and Tuning.on("tools", true) and market.good_stock("tools") < market.good_target("tools")
 	return true
 
 
@@ -819,7 +834,7 @@ func _update_hands(day: int) -> void:
 	var paid: float = 0.0
 	var employed: int = 0
 	var wanting: Array = []   # employers who wanted a hand today and found nobody willing
-	for p in all_farmers + all_bakers + all_woodworkers:
+	for p in _owners():
 		if not (p and is_instance_valid(p)):
 			continue
 		var hands: Array = p.get_meta("hands", [])
@@ -975,6 +990,8 @@ func _work_spot(p) -> Node2D:
 		return pj.bakery_location
 	if pj is WoodworkerJob:
 		return pj.yard_location
+	if pj is SmithJob:
+		return pj.smithy_location
 	return null
 
 
@@ -1020,7 +1037,7 @@ func _better_offers(day: int, wanting: Array) -> void:
 		var best = null
 		var best_from = null
 		var best_gain: float = 0.0
-		for e in all_farmers + all_bakers + all_woodworkers:
+		for e in _owners():
 			if e == p or not (e and is_instance_valid(e)):
 				continue
 			for h in e.get_meta("hands", []):
@@ -1078,6 +1095,8 @@ func _hand_value(p: Node, n: int) -> float:
 			return extra * market.wheat_price
 		"Woodworker":
 			return extra * market.firewood_bid()
+		"Smith":
+			return extra * maxf(0.0, market.good_bid("tools") - market.firewood_price / float(SmithJob.TOOLS_PER_LOG)) if market.has_good("tools") else 0.0
 	return extra * maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0)) - market.firewood_price / 5.0)
 
 
@@ -1094,6 +1113,8 @@ func _overstocked(p: Node) -> bool:
 			return float(market.bread) > float(market.bread_target) * band
 		"Woodworker":
 			return float(market.firewood) > float(market.firewood_target) * band
+		"Smith":
+			return market.has_good("tools") and float(market.good_stock("tools")) > float(market.good_target("tools")) * band
 	return false
 
 
@@ -1187,10 +1208,147 @@ static func daily_wage(m) -> float:
 	return (float(m.bread_price) + float(m.firewood_price)) * Tuning.f("wage_markup", WAGE_MARKUP)
 
 
+## Every list of shop owners, one per trade, and everyone in them.
+func _owner_groups() -> Array:
+	return [all_farmers, all_bakers, all_woodworkers, all_smiths]
+
+
+func _owners() -> Array:
+	var out: Array = []
+	for g in _owner_groups():
+		out += g
+	return out
+
+
+# ── Tools (docs/SMITH.md) ─────────────────────────────────────────────────────────
+## Tools are a real market. A shop with tools makes TOOL_BONUS more. A tool lasts one person
+## TOOL_DAYS of work, so a bigger shop wears out more. A shop buys a tool only when it is
+## worth more to it than it costs. A town with no smith has no tools and works as it always
+## did; a smithy opens when what the town would spend on tools is a living.
+
+const TOOL_BONUS: float = 0.10        # how much more a shop with tools makes
+const TOOL_DAYS: float = 8.0          # a tool lasts one person this many days of work
+const TOOL_STOCK_DAYS: float = 3.0    # days of tools a shop keeps by
+const TOOL_KEEP_DAYS: float = 5.0     # days of bread and firewood a shop owner keeps before buying tools
+
+
+## True when `p`'s shop is of a trade that uses tools (Recovery.USES_TOOLS) and tools are on.
+static func uses_tools(p) -> bool:
+	return p != null and is_instance_valid(p) and Tuning.on("tools", true) and Recovery.USES_TOOLS.has(str(p.current_role))
+
+
+## What a shop makes with tools in hand, as a share of what it makes without.
+static func tool_factor(p) -> float:
+	if not uses_tools(p):
+		return 1.0
+	var inv = p.get("inv")
+	return 1.0 + TOOL_BONUS if inv != null and inv.get_qty("tools") > 0 else 1.0
+
+
+## Tools `p`'s shop wears out in a day: one for every TOOL_DAYS person-days worked there.
+static func tools_per_day(p) -> float:
+	return shop_size(p) / maxf(1.0, Tuning.f("tool_days", TOOL_DAYS))
+
+
+## What one unit of what `p` makes is worth to them at today's prices (bread less its wheat
+## and oven firewood).
+func _unit_value(p) -> float:
+	if market == null or p == null or not is_instance_valid(p):
+		return 0.0
+	match str(p.current_role):
+		"Farmer":
+			return float(market.wheat_price)
+		"Woodworker":
+			return market.firewood_bid()
+		"Baker":
+			var job = p.current_job
+			return maxf(0.0, market.bread_price - market.wheat_price * float(job.get_meta("wheat_per_bread", 2.0) if job else 2.0) - market.firewood_price / 5.0)
+	return 0.0
+
+
+## What one tool is worth to `p`: the extra it lets one person make over the days it lasts.
+func tool_worth(p) -> float:
+	if not uses_tools(p) or p.current_job == null:
+		return 0.0
+	var made: float = float(p.current_job.get_meta("output_ema", 0.0))
+	var with_tools: bool = p.inv != null and p.inv.get_qty("tools") > 0
+	var per_person_without: float = made / shop_size(p) / (1.0 + TOOL_BONUS if with_tools else 1.0)
+	return TOOL_BONUS * per_person_without * _unit_value(p) * Tuning.f("tool_days", TOOL_DAYS)
+
+
+## True when `p` would buy tools at today's price.
+func wants_tools(p) -> bool:
+	return market != null and market.has_good("tools") and uses_tools(p) and market.good_price("tools") <= tool_worth(p)
+
+
+## A shop's upkeep: the tools it wears out, at today's price. It grows with the shop and is
+## paid to the smith. Nothing while the shop is not buying tools.
+static func tool_cost_per_day(p) -> float:
+	if not uses_tools(p) or p.get("inv") == null or p.inv.get_qty("tools") <= 0:
+		return 0.0
+	var m = p.get("market")
+	return tools_per_day(p) * (m.good_price("tools") if m != null and m.has_good("tools") else 0.0)
+
+
+## What the town's shops would spend on tools in a day, and how many they would buy. A shop
+## pays today's price, or what a tool is worth to it if that is less (it will not pay more).
+func tool_spending_per_day() -> Dictionary:
+	var coins: float = 0.0
+	var tools: float = 0.0
+	if market == null or not market.has_good("tools"):
+		return {"coins": 0.0, "tools": 0.0}
+	var price: float = market.good_price("tools")
+	for p in _owners():
+		if p and is_instance_valid(p) and uses_tools(p):
+			var worth: float = tool_worth(p)
+			if worth > 0.0:
+				coins += tools_per_day(p) * minf(price, worth)
+				tools += tools_per_day(p)
+	return {"coins": coins, "tools": tools}
+
+
+## What a smithy would clear in a day: its share of what the town would spend on tools, less
+## the forge's firewood and the smith's own keep (a loaf and a log). Zero is "no better and
+## no worse than a garden plot". So a village too small to keep a smith does not get one.
+func _smith_utility(ce) -> float:
+	if ce == null or market == null or not market.has_good("tools") or not Tuning.on("tools", true):
+		return -999.0
+	var spend: Dictionary = tool_spending_per_day()
+	var n: float = float(_live_count(all_smiths) + 1)
+	var fuel: float = float(spend.tools) / n * float(market.firewood_price) / float(SmithJob.TOOLS_PER_LOG)
+	return float(spend.coins) / n - fuel - (float(market.bread_price) + float(market.firewood_price)) - float(ce.last_risk) * 3.0
+
+
+## Daily: every shop with tools wears some out; a shop to which a tool is worth its price buys
+## enough to keep TOOL_STOCK_DAYS by. The buyer pays whichever smith's stall they pick.
+func _update_tools(_day: int) -> void:
+	if market == null or not market.has_good("tools") or not Tuning.on("tools", true):
+		return
+	for p in _owners():
+		if not (p and is_instance_valid(p)) or not uses_tools(p) or p.inv == null:
+			continue
+		if p.inv.get_qty("tools") > 0:
+			var wear: float = float(p.get_meta("tool_wear", 0.0)) + tools_per_day(p)
+			while wear >= 1.0 and p.inv.get_qty("tools") > 0:
+				p.inv.remove("tools", 1)
+				wear -= 1.0
+			p.set_meta("tool_wear", minf(wear, 1.0))
+		if not wants_tools(p):
+			continue
+		var want: int = maxi(1, ceili(tools_per_day(p) * TOOL_STOCK_DAYS))
+		var have: int = p.inv.get_qty("tools")
+		# Food and firewood come first: no tools are bought with the coins for the next few
+		# days' keep.
+		var keep: float = TOOL_KEEP_DAYS * (float(market.bread_price) + float(market.firewood_price))
+		var can: int = int(floor(maxf(0.0, p.get_cash() - keep) / maxf(0.01, market.good_price("tools"))))
+		if have < want and can > 0:
+			market.buy_good(p, "tools", mini(want - have, can))
+
+
 ## Daily: every person burns one firewood. A hearth with none is a cold day; after
 ## COLD_DAYS_TO_LEAVE cold days in a row the person leaves town. The last of a trade stays.
 func _update_firewood(day: int) -> void:
-	var groups: Array = [all_households, all_farmers, all_bakers, all_woodworkers]
+	var groups: Array = [all_households] + _owner_groups()
 	var cold: int = 0
 	for gi in groups.size():
 		var group: Array = groups[gi]
@@ -1259,6 +1417,9 @@ func _send_to_work(h, p) -> void:
 		elif pj is WoodworkerJob:
 			spot = pj.yard_location
 			kind = "Cutting wood at the yard"
+		elif pj is SmithJob:
+			spot = pj.smithy_location
+			kind = "Working at the smithy"
 	j.set_work_site(spot, kind)
 
 

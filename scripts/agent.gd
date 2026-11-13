@@ -183,6 +183,7 @@ const ROLE_COLORS: Dictionary = {
 	"Farmer":    Color(0.2, 1, 0.2, 1),
 	"Baker":     Color(0.8, 0.6, 0.2, 1),
 	"Woodworker": Color(0.6, 0.4, 0.2, 1),
+	"Smith":     Color(0.55, 0.6, 0.7, 1),
 	"Household": Color(1, 0.4, 1, 1),
 	"Merchant":  Color(0.3, 0.7, 1.0, 1),
 }
@@ -191,6 +192,7 @@ const ROLE_GROUPS: Dictionary = {
 	"Farmer":    "farmers",
 	"Baker":     "bakers",
 	"Woodworker": "woodworkers",
+	"Smith":     "smiths",
 	"Household": "households",
 	"Merchant":  "households",   # a merchant lives as a household that also trades
 }
@@ -223,6 +225,8 @@ func set_role(role: String) -> void:
 			current_job = BakerJob.new()
 		"Woodworker":
 			current_job = WoodworkerJob.new()
+		"Smith":
+			current_job = SmithJob.new()
 		"Household":
 			current_job = HouseholdJob.new()
 		"Merchant":

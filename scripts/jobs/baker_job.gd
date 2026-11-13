@@ -54,7 +54,7 @@ var oven_fuel: int = 0   # loaves the firewood now in the oven can still bake
 
 var oven_capacity_per_day: int = 12  # loaves a baker makes alone (was 15, which fed the whole town with no help); 18 and 21 with hands
 var maintenance_cost_per_day: float:
-	get: return Tuning.f("upkeep_baker", 0.3)
+	get: return LaborMarket.tool_cost_per_day(agent) if Market.direct() else Tuning.f("upkeep_baker", 0.3)   # upkeep is the tools it wears out (docs/SMITH.md)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
@@ -198,7 +198,7 @@ func shop_stock_cost() -> float:
 
 
 func _oven_capacity() -> int:
-	return maxi(1, roundi(float(Tuning.i("baker_loaves_per_day", oven_capacity_per_day)) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent)))
+	return maxi(1, roundi(float(Tuning.i("baker_loaves_per_day", oven_capacity_per_day)) * (market.oven_mult * market.shock_oven_mult if market else 1.0) * LaborMarket.hand_mult(agent) * LaborMarket.tool_factor(agent)))
 
 
 func _hand_batch(base: int) -> int:

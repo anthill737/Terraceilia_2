@@ -59,7 +59,7 @@ var inventory_throttle: InventoryThrottle = null
 var field_work_capacity_per_day: int = 3
 var fields_worked_today: int = 0
 var maintenance_cost_per_day: float:
-	get: return Tuning.f("upkeep_farmer", 0.2)
+	get: return LaborMarket.tool_cost_per_day(agent) if Market.direct() else Tuning.f("upkeep_farmer", 0.2)   # upkeep is the tools it wears out (docs/SMITH.md)
 var consecutive_days_negative_cashflow: int = 0
 var day_money_start: float = -1.0
 
@@ -328,7 +328,7 @@ func handle_field_arrival(field: FieldPlot, field_name: String) -> void:
 		# Batch 3: a hired hand works fields of its own beside the farmer's, so each hand brings
 		# in one more farmer's worth of wheat (more land worked, not more wheat per field).
 		# From the third hand on each adds less than the one before (LaborMarket.hand_gain).
-		var _hand_mult: float = LaborMarket.hand_mult(agent)
+		var _hand_mult: float = LaborMarket.hand_mult(agent) * LaborMarket.tool_factor(agent)
 		var actual_wheat: int = maxi(1, roundi(float(harvest_result.wheat) * (Tuning.f("farmer_harvest_percent", 100.0) / 100.0) * _sk_mult * _hand_mult * (market.soil_mult * market.shock_harvest_mult if market else 1.0)))
 		wheat_harvested_today += actual_wheat
 		var actual_seeds: int = maxi(0, roundi(float(harvest_result.seeds) * _sk_mult))

@@ -10,16 +10,18 @@ var households: Array = []
 var all_farmers: Array = []
 var all_bakers: Array = []
 var all_woodworkers: Array = []
+var all_smiths: Array = []
 
 var next_farmer_id: int = 2
 var next_baker_id: int = 2
 var next_woodworker_id: int = 1
+var next_smith_id: int = 1
 var next_household_id: int = 2
 var _next_person_id: int = 1
 
 
 func get_total_population() -> int:
-	return households.size() + all_farmers.size() + all_bakers.size() + all_woodworkers.size()
+	return households.size() + all_farmers.size() + all_bakers.size() + all_woodworkers.size() + all_smiths.size()
 
 
 func count() -> int:

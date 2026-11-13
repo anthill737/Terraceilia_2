@@ -87,7 +87,7 @@ class Probe extends Node:
 			if is_nan(pair[1]) or pair[1] < pair[2] - 0.001 or pair[1] > pair[3] + 0.001:
 				_fail("%s: %s price %s outside %.2f..%.2f" % [tag, pair[0], pair[1], pair[2], pair[3]])
 		var seen := {}
-		for grp in [v.households, v.all_farmers, v.all_bakers, v.all_woodworkers]:
+		for grp in [v.households] + v.owner_groups():
 			for a in grp:
 				if a == null or not is_instance_valid(a):
 					continue
@@ -114,7 +114,7 @@ class Probe extends Node:
 			var t: Dictionary = v.market.totals
 			var lm = v.labor_market
 			var wages: float = lm.wages_paid_total if lm else 0.0
-			var alive: int = v.households.size() + v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size()
+			var alive: int = v.households.size() + v.all_farmers.size() + v.all_bakers.size() + v.all_woodworkers.size() + v.all_smiths.size()
 			print("[ECON TEST] village %d after %d days: %d people, wheat farmers->market %d, market->bakers %d, bread bakers->market %d, market->people %d, firewood ->market %d, market-> %d, wages $%.0f, starved %d" % [
 				v.village_id, v.calendar.day_index, alive, t.wheat_from_farmers, t.wheat_to_bakers,
 				t.bread_from_bakers, t.bread_to_people, t.firewood_in, t.firewood_out, wages, v.starved_deaths])

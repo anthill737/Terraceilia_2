@@ -44,11 +44,16 @@ extends RefCounted
 ##   uses:   trades this shop cannot work without. The last owner of a trade never moves to a
 ##           shop that uses their goods, or whose goods their own shop uses.
 ##   fields: idle fields that go with the shop (a farm)
+##   basic:  false for a trade a town can live without (a smith). Its empty shop is not
+##           filled at once when the town has none; it waits until the trade would pay.
 const TRADES: Dictionary = {
 	"Farmer": {"list": "all_farmers", "shop": "farm", "lack": "bread", "rank": 0, "uses": [], "fields": 2},
 	"Baker": {"list": "all_bakers", "shop": "bakery", "lack": "bread", "rank": 0, "uses": ["Farmer", "Woodworker"], "fields": 0},
 	"Woodworker": {"list": "all_woodworkers", "shop": "lumber yard", "lack": "firewood", "rank": 1, "uses": [], "fields": 0},
+	"Smith": {"list": "all_smiths", "shop": "smithy", "lack": "tools", "rank": 2, "uses": ["Woodworker"], "fields": 0, "basic": false},
 }
+## Trades whose shops wear tools out and buy new ones from the smith (docs/SMITH.md).
+const USES_TOOLS: Array = ["Farmer", "Baker", "Woodworker"]
 const KEEP_DAYS: float = 3.0         # days of bread and firewood a new owner keeps before paying the fee
 
 var village = null
@@ -146,7 +151,7 @@ func shop_opened(who) -> void:
 
 ## Does the town have use for an empty shop of this trade today?
 func _wanted(role: String, owners: int) -> bool:
-	if owners == 0:
+	if owners == 0 and bool(TRADES[role].get("basic", true)):
 		return true
 	if orphaned_shops(role) <= 0:
 		return false   # closed for want of trade: reopened the normal way, with savings
@@ -184,7 +189,7 @@ func on_day(day: int) -> void:
 					stats.takeovers += 1
 					_log("[RECOVERY] day=%d %s takes over the empty %s (%s) and %s" % [day, who_name, shop, why, _fee_words(who)])
 					continue
-		if owners == 0 and Tuning.on("hunger_switch", true):
+		if owners == 0 and Tuning.on("hunger_switch", true) and bool(TRADES[role].get("basic", true)):
 			var needy = _going_without_candidate(role)
 			if needy != null:
 				var lack: String = str(TRADES[role].lack)
@@ -283,9 +288,9 @@ func _takeover_candidate(role: String):
 ## the market.
 func _going_without(a, good: String) -> bool:
 	var m = village.market
-	if m == null or a.inv == null or int(m.get(good)) > 0 or a.inv.get_qty(good) > 0:
+	if m == null or a.inv == null or m.good_stock(good) > 0 or a.inv.get_qty(good) > 0:
 		return false
-	return a.get_cash() >= float(m.get(good + "_price"))
+	return a.get_cash() >= m.good_price(good)
 
 
 ## Someone going without what the empty shop's trade gives the town. People with no shop

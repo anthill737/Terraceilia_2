@@ -37,8 +37,8 @@ The town still has a purse (`Market.money`). It buys nothing. It takes in:
 It no longer takes in:
 
 - **Shop upkeep.** It was a daily charge paid to nobody: two thirds of what drained out of a
-  full town. It is not charged while buyers pay makers. It comes back as tools bought from a
-  smith (the next change).
+  full town. A shop's upkeep is now the tools it wears out, bought from a smith
+  (docs/SMITH.md).
 - **Seed.** A farmer keeps seed back from their own wheat before selling the rest. It used to
   be bought from a bottomless stock at the market.
 

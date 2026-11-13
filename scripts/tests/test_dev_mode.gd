@@ -89,6 +89,11 @@ class Probe extends Node:
 
 		var fresh_market := Market.new()
 		var fresh_meter := ProsperityMeter.new()
+		# The three upkeep dials apply when the market buys with its own purse; with buyers
+		# paying makers a shop's upkeep is the tools it wears out (docs/SMITH.md).
+		Tuning.set_value("buy_from_makers", false)
+		var old_upkeep := [float(farmer.current_job.maintenance_cost_per_day), float(baker.current_job.maintenance_cost_per_day), float(wood.current_job.maintenance_cost_per_day)]
+		Tuning.values.erase("buy_from_makers")
 		var code := {
 			"day_seconds": SimulationClock.TICK_SECONDS * 10.0,
 			"baker_loaves_per_day": float(baker.current_job.oven_capacity_per_day),
@@ -99,8 +104,9 @@ class Probe extends Node:
 			"merchant_start_coins": MerchantJob.OWNER_CASH, "market_start_coins": Market.START_MONEY,
 			"wage_markup": LaborMarket.WAGE_MARKUP, "shop_savings_needed": LaborMarket.SAVINGS_BUFFER_REQUIRED,
 			"shop_opening_fee": LaborMarket.STARTUP_COST,
-			"upkeep_farmer": float(farmer.current_job.maintenance_cost_per_day), "upkeep_baker": float(baker.current_job.maintenance_cost_per_day),
-			"upkeep_woodworker": float(wood.current_job.maintenance_cost_per_day),
+			"upkeep_farmer": float(old_upkeep[0]), "upkeep_baker": float(old_upkeep[1]),
+			"upkeep_woodworker": float(old_upkeep[2]),
+			"smith_tools_per_day": float(SmithJob.TOOLS_PER_DAY), "tool_days": LaborMarket.TOOL_DAYS,
 			"price_daily_limit": Market.MAX_DAILY_PRICE_CHANGE,
 			"arrival_prosperity_bar": float(v.prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW), "arrival_wait_days": float(v.prosperity_meter.GROWTH_COOLDOWN_DAYS),
 			"arrival_max_idle": float(v.MAX_IDLE_FOR_ARRIVAL), "town_size_limit": float(PopulationManager.MAX_TOTAL_POP),
@@ -140,8 +146,16 @@ class Probe extends Node:
 		Tuning.set_value("upkeep_farmer", 1.5)
 		Tuning.set_value("upkeep_baker", 2.5)
 		Tuning.set_value("upkeep_woodworker", 3.5)
-		_check("upkeep reaches all three trades", _near(farmer.current_job.maintenance_cost_per_day, 1.5) and _near(baker.current_job.maintenance_cost_per_day, 2.5)
+		Tuning.set_value("buy_from_makers", false)
+		_check("upkeep reaches all three trades (when the market buys with its own purse)", _near(farmer.current_job.maintenance_cost_per_day, 1.5) and _near(baker.current_job.maintenance_cost_per_day, 2.5)
 			and _near(wood.current_job.maintenance_cost_per_day, 3.5))
+		Tuning.values.erase("buy_from_makers")
+		Tuning.set_value("tool_days", 4.0)
+		_check("tool life reaches the shops", _near(LaborMarket.tools_per_day(baker), (1.0 + float(LaborMarket.hands_of(baker))) / 4.0))
+		Tuning.set_value("smith_tools_per_day", 9)
+		var a_smith := SmithJob.new()
+		_check("smith output has a dial", int(Tuning.i("smith_tools_per_day", SmithJob.TOOLS_PER_DAY)) == 9)
+		a_smith.free()
 		Tuning.set_value("town_size_limit", 33)
 		_check("town size limit reaches the village", int(v.MAX_TOTAL_POP) == 33 and not v.pop_mgr.is_at_pop_cap())
 		Tuning.set_value("arrivals_follow_jobs", false)   # the old idle limit only applies with this off

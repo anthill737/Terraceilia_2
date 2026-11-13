@@ -1158,6 +1158,16 @@ static func hand_mult(p: Node) -> float:
 	return m
 
 
+## The size of `p`'s business for its upkeep: the people working in it (the owner and the
+## hired hands). Upkeep is a plain coin cost that grows with the business (Anthony,
+## 2026-11-13: "a bleed proportionate to the size of the business"); it was the same for a
+## one-person shop and a shop of eight.
+static func shop_size(p) -> float:
+	if p == null or not is_instance_valid(p) or not Tuning.on("buy_from_makers", true):
+		return 1.0
+	return 1.0 + float(hands_of(p))
+
+
 ## A shop's level (docs/SHOP_LEVELS.md): 1 as built, up to SHOP_MAX_LEVEL after extensions.
 static func shop_level(p: Node) -> int:
 	if p == null or not p.has_meta("shop_level"):

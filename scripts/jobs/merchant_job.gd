@@ -184,8 +184,13 @@ func _sell_load(m, where: String) -> void:
 	if sold <= 0:
 		return
 	var revenue: float = wallet.money - before
+	if Market.direct():
+		# Buyers pay makers: the load is on the shelf and is paid for as it sells. For the
+		# merchant's own books, count it at today's price there.
+		revenue = float(sold) * float(m.get(cargo_good + "_price"))
 	var profit: float = revenue - float(sold) * cargo_unit_cost
-	agent.cashflow_today_income += revenue
+	if not Market.direct():
+		agent.cashflow_today_income += revenue   # otherwise booked as the load sells
 	agent.set_meta("trade_trips", int(agent.get_meta("trade_trips", 0)) + 1)
 	agent.set_meta("trade_profit_total", float(agent.get_meta("trade_profit_total", 0.0)) + profit)
 	agent.set_meta("days_since_trade", 0)

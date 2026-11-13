@@ -26,13 +26,12 @@ got 1 second per tick, could not finish their rounds, and the town starved. The 
   hired by the owner at the daily wage.
 - **Servants** work in the house of someone who owns a proper house and can afford one.
 - **Merchants** (one per village) carry goods between the two markets with their own coins.
-- **Cottagers** are households with no work. They do not sit and go broke. Like medieval
-  cottagers they keep a garden plot (enough to eat, and to catch up a missed meal) and gather
-  deadwood for their own hearth. They spend no coins on bread or firewood, sell nothing, and they
-  pay rent like anyone else (2026-11-13). A wage is better, and anyone hired stops gardening and
-  buys from the market like everyone else. Someone building their own house, and a merchant
-  with no deal for two days, live the same way meanwhile. (Victoria 3 does this with peasants on
-  subsistence farms, Banished with labourers, SAELIG with a free bunkhouse.)
+- **Cottagers** are households with no work. Since 2026-11-13 they are handed nothing: they
+  buy their bread and firewood at the market out of what they have saved, and pay rent like
+  anyone else. Someone with no work, no bread in the house and not the price of a loaf left goes
+  to look for work somewhere else. (Until then they kept a garden plot that handed them bread and
+  firewood every day, whatever was in their purse; Anthony: a plot is a place to live, not food.
+  The old plot is behind the dev switch "gardens", off.)
 
 ## Who comes to town
 

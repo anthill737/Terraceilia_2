@@ -21,12 +21,19 @@ The code is in `Clothing` (scripts/village/clothing.gd), `TailorJob`, and the tr
   - someone with few coins waits until they are in rags, and may not buy even then;
   - nobody spends the coins for ten days of food, firewood and rent on clothes.
 - **Making your own is the other choice.** Someone with no work, in rags, who will not pay
-  today's price, spins and sews a set of their own. It takes five days of their time. A hired
-  hand has no time to.
+  today's price, buys the flax for a set at the market (three flax), then breaks, spins, weaves
+  and sews it. It takes five days of their time. With no coins for the flax, or none for sale,
+  they stay in rags. A hired hand has no time to sew.
 - **The tailor** makes clothes at the tailor's shop (four sets a day alone; hands, skill and
   tools add more) and puts them out at the market. Buyers pay the tailor whose stall they pick
-  (docs/BUY_FROM_MAKERS.md). The wool and flax come from the town's common grazing and fields
-  at no charge, the way the lumber yard's wood does.
+  (docs/BUY_FROM_MAKERS.md). Clothes are linen: the tailor buys flax at the market, three for
+  a set, and the day's work turns it into clothes.
+- **Flax is grown by the farmers.** A field can be sown with wheat or with flax. When a farmer
+  comes to an empty field, they sow flax if a field of flax (six flax) is worth more than a
+  field of wheat (ten wheat) at today's prices, they have the flaxseed, and the market is not
+  already full of flax; otherwise wheat. A field of flax gives back seven flaxseed for the five
+  it took, so a farmer keeps growing it from their own seed. Farmers start with ten flaxseed, as
+  they start with wheat seed. Flax goes on the market and the buyer pays the farmer.
 - **A town gets a tailor when it can keep one.** A game starts with none. Someone opens a
   tailor's shop the normal way when what the town would spend on clothes, shared with any
   tailors already there, is more than a tailor's own keep. A tailor's shop is not refilled at
@@ -78,6 +85,19 @@ of 50. "Off" is the same code with the clothes switch off.
 - The bread shelf was empty on 37 town-days after day 400 (21 off), and the firewood pile on
   about 530 (467 off).
 
+## With flax, and no free food for people with no work
+
+Measured the same way, with flax grown by the farmers and the garden plot no longer handing out
+bread and firewood (both 2026-11-13):
+
+- Nobody more starved: 8 in eight towns (8 with flax and the old plot).
+- Towns are smaller: 13 to 46 people at the end, and none reached 50 for long. People arrive,
+  find no work, spend what they brought and go: 1,890 left with no money in the eight towns.
+- Almost everyone left in town works: about 3 people per town have no work (19 with the plot).
+- A tailor in town on 74% of days; flax about 1.40. Clothes cost 6 to 95 a set from town to
+  town; about 13 people in 50 in rags.
+- The town's purse grows faster (rent from people who arrive and leave).
+
 ## Not fixed
 
 - **Firewood runs out about one day in twenty in every version**, with or without clothes. The
@@ -91,5 +111,5 @@ of 50. "Off" is the same code with the clothes switch off.
 
 Thirty days a set, give or take 30%; three days of keep as what a new set is worth; half worn
 before anyone replaces; ten days of keep held back; five days to sew your own; four sets a day;
-the free wool and flax; that rags only matter in a frost; a quarter of a day's work as the
+six flax and seven flaxseed to a field, three flax to a set; that rags only matter in a frost; a quarter of a day's work as the
 least a smith or tailor reckons on.

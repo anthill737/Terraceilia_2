@@ -1503,27 +1503,34 @@ func is_idle(h) -> bool:
 	return not h.has_meta("builds_house") and not h.has_meta("merchant")
 
 
-## Cottagers. Someone with no work does not sit and go broke: like a medieval cottager they
-## keep a garden plot (enough to eat, never more than GARDEN_BREAD_KEEP in the house) and
-## gather deadwood for their own hearth. They buy and sell nothing. It is a poor living; a wage is
-## better, and anyone hired stops gardening and buys from the market like everyone else.
-## This is how Victoria 3 (peasants on subsistence farms) and Banished (labourers) keep the
-## jobless alive without paying them.
-func _update_cottagers(_day: int) -> void:
+## People with no work ("cottagers", counted in idle_count for the newcomer rules). They buy
+## their bread and firewood at the market like everyone else, out of what they have saved.
+## (Anthony, 2026-11-13: the garden plot is a place to live, not free food. Until then
+## anyone with no work was handed bread and firewood every day, whatever was in their
+## purse.) The old free plot is behind the dev switch "gardens", off.
+func _update_cottagers(day: int) -> void:
 	idle_count = 0
-	for h in all_households:
+	for h in all_households.duplicate():
 		if not (h and is_instance_valid(h)) or h.inv == null:
 			continue
 		var quiet_merchant: bool = h.has_meta("merchant") and int(h.get_meta("days_since_trade", 0)) >= 2
 		var own_build: bool = h.has_meta("builds_house") and not h.has_meta("hired_builder") \
 				and not (h.has_meta("employer") and is_instance_valid(h.get_meta("employer")))
 		var idle: bool = is_idle(h)
+		# No work, no bread in the house and not the price of a loaf left: they go to look for
+		# work somewhere else, as anyone would, instead of sitting at home until they starve.
+		if idle and day >= STARTUP_GRACE_DAYS and not Tuning.on("gardens", false) and market != null \
+				and h.inv.get_qty("bread") == 0 and h.get_cash() < float(market.bread_price):
+			if event_bus:
+				event_bus.emit_log("[LaborMkt] %s leaving: no work and no money for bread ($%.1f)" % [h.name, h.get_cash()])
+			migrate_requested.emit(h, "no_money")
+			continue
 		if idle:
 			idle_count += 1
 			h.set_meta("cottager", true)
 		elif h.has_meta("cottager"):
 			h.remove_meta("cottager")
-		if not Tuning.on("gardens", true) or not (idle or own_build or quiet_merchant):
+		if not Tuning.on("gardens", false) or not (idle or own_build or quiet_merchant):
 			if h.has_meta("garden"):
 				h.remove_meta("garden")
 			continue

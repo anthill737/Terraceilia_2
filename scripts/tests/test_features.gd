@@ -14,7 +14,7 @@ extends Node
 ##      home, walks it to village 2 and sells it there at a profit.
 ##   7. hands: a hired hand walks to the employer's field, bakery or yard.
 ##   8. improving: an owner with money to spare improves their home with logs and a builder.
-##   9. cottagers: someone with no work eats from a garden plot, and pays rent like anyone else.
+##   9. cottagers: someone with no work is handed nothing: they buy their food like anyone else.
 ##  10. servants: an owner with a proper house and money to spare keeps a paid servant, who
 ##      spends the day at the master's house.
 ##
@@ -302,10 +302,10 @@ class Probe extends Node:
 			if is_instance_valid(a) and a.has_meta("cottager"):
 				cott += 1
 				var ch: Dictionary = hs._home_of(a)
-				if a.inv.get_qty("bread") > 0 and a.hunger.hunger_days >= 3 and (ch.is_empty() or int(ch.get("unpaid", 0)) == 0):
+				if not a.has_meta("garden"):
 					cott_ok += 1
-		_check("people with no work eat from a garden plot and keep their home", cott == cott_ok,
-			"%d without work, %d fed and housed, nobody left town: %s" % [cott, cott_ok, v.labor_market.idle_count >= 0])
+		_check("people with no work are handed no food or firewood: they buy it like anyone else", cott == cott_ok,
+			"%d without work, %d on no free plot" % [cott, cott_ok])
 		# 4. eating at 0: a household holding one loaf, hunger about to run out, already ate today.
 		var eater = null
 		for a in v.households + v.all_woodworkers:

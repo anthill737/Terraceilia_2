@@ -139,11 +139,11 @@ func _draw() -> void:
 			_house_shape(n.position, STONE, Color(0.48, 0.30, 0.20), 1.3)
 			_label(n.position + Vector2(0, 30), "Bakery", 11, TEXT_DIM)
 
-	# Shelter where people with no house sleep.
+	# The poorhouse (the old shelter): people with nothing left live there (docs/POORHOUSE.md).
 	if shelter != null:
 		draw_colored_polygon(PackedVector2Array([shelter + Vector2(-16, 10), shelter + Vector2(0, -14), shelter + Vector2(16, 10)]), Color(0.66, 0.60, 0.46))
 		draw_line(shelter + Vector2(0, -14), shelter + Vector2(0, 10), WOOD_DARK, 2.0)
-		_label(shelter + Vector2(0, 26), "Shelter", 12, TEXT_DIM)
+		_label(shelter + Vector2(0, 26), "Poorhouse" if Poorhouse.on() else "Shelter", 12, TEXT_DIM)
 
 	# Lumber yard: trees and a log pile.
 	if yard != null:

@@ -111,10 +111,11 @@ func _update_eco_bar(village: Node) -> void:
 		var wc: String = _eco_cap_display(snap.get("wheat_cap", 999999999))
 		var bc: String = _eco_cap_display(snap.get("bread_cap", 999999999))
 		eco_market_label.text = (
-			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f\nFirewood %d @ $%.2f · Town purse $%.0f" % [
+			"Wheat %d / %s @ $%.2f\nBread %d / %s @ $%.2f\nFirewood %d @ $%.2f · Town purse $%.0f, poorhouse %d" % [
 				snap.get("wheat", 0), wc, snap.get("wheat_price", 0.0),
 				snap.get("bread", 0), bc, snap.get("bread_price", 0.0),
-				village.market.firewood, village.market.firewood_price, village.market.money
+				village.market.firewood, village.market.firewood_price, village.market.money,
+				village.poorhouse.residents().size() if village.get("poorhouse") != null else 0
 			]
 		)
 

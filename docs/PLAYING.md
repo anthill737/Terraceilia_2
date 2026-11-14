@@ -14,7 +14,7 @@ at 10x. How the town works is in docs/WORKING_TOWN.md.
 
 - Market (striped awning): the town shop. The line under it shows its bread, wheat and wood.
 - Bakery (stone, smoking chimney), Farmhouse, fields (brown when empty, green when growing,
-  gold when ripe), Lumber Yard (trees and a log pile), Shelter (where anyone without a house sleeps).
+  gold when ripe), Lumber Yard (trees and a log pile), Poorhouse (where anyone without a house sleeps, and where people with nothing left are kept by the town; docs/POORHOUSE.md).
 - Houses south-east of the market. Red roof: the owner lives there. Blue roof: rented.
   Grey roof: empty, marked "for sale" (the town owns it) or "to let" (a person owns it).
   An outline with a yellow bar is a house being built; the bar is wood bought then days worked.

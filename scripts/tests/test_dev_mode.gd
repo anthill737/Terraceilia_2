@@ -111,6 +111,7 @@ class Probe extends Node:
 			"arrival_prosperity_bar": float(v.prosperity_meter.PROSPERITY_THRESHOLD_TO_GROW), "arrival_wait_days": float(v.prosperity_meter.GROWTH_COOLDOWN_DAYS),
 			"arrival_max_idle": float(v.MAX_IDLE_FOR_ARRIVAL), "town_size_limit": float(PopulationManager.MAX_TOTAL_POP),
 			"house_logs": float(Housing.HOUSE_WOOD), "house_build_days": float(Housing.BUILD_DAYS), "houses_spare_at_start": float(Housing.START_SPARE),
+			"poorhouse_places": float(Poorhouse.PLACES),
 			"coins_others": HouseholdJob.STARTING_CASH, "coins_owners": BakerJob.STARTING_CASH, "market_coins": Market.START_MONEY,
 			"market_wheat": float(v.economy_config.get("market_seed", {}).get("initial_market_wheat", 40)),
 			"market_bread": float(v.economy_config.get("market_seed", {}).get("initial_market_bread", 20)),

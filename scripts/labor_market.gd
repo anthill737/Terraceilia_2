@@ -111,6 +111,8 @@ var all_smiths: Array = []
 var all_tailors: Array = []
 ## Everyone's clothes (Clothing). Set by the village.
 var clothing = null
+## The town's poorhouse (Poorhouse). Set by the village.
+var poorhouse = null
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
 var market = null
@@ -1549,10 +1551,24 @@ func _update_cottagers(day: int) -> void:
 		var own_build: bool = h.has_meta("builds_house") and not h.has_meta("hired_builder") \
 				and not (h.has_meta("employer") and is_instance_valid(h.get_meta("employer")))
 		var idle: bool = is_idle(h)
+		var broke: bool = market != null and h.inv.get_qty("bread") == 0 and h.get_cash() < float(market.bread_price)
+		# The poorhouse (docs/POORHOUSE.md): someone with nothing left moves in instead of
+		# leaving, while the town's purse can keep them, and a resident is kept another day.
+		if idle and poorhouse != null and Poorhouse.on() and day >= STARTUP_GRACE_DAYS and not Tuning.on("gardens", false) and market != null:
+			if Poorhouse.lives_there(h) or (broke and poorhouse.take_in(h, day, "no work and no money for bread")):
+				var kept: bool = poorhouse.keep(h, day)
+				broke = h.inv.get_qty("bread") == 0 and h.get_cash() < float(market.bread_price)
+				if kept and not broke:
+					idle_count += 1
+					h.set_meta("cottager", true)
+					continue
+				if event_bus:
+					event_bus.emit_log("[LaborMkt] %s leaving: the poorhouse can't keep them ($%.1f)" % [h.name, h.get_cash()])
+				migrate_requested.emit(h, "no_money")
+				continue
 		# No work, no bread in the house and not the price of a loaf left: they go to look for
 		# work somewhere else, as anyone would, instead of sitting at home until they starve.
-		if idle and day >= STARTUP_GRACE_DAYS and not Tuning.on("gardens", false) and market != null \
-				and h.inv.get_qty("bread") == 0 and h.get_cash() < float(market.bread_price):
+		if idle and day >= STARTUP_GRACE_DAYS and not Tuning.on("gardens", false) and market != null and broke:
 			if event_bus:
 				event_bus.emit_log("[LaborMkt] %s leaving: no work and no money for bread ($%.1f)" % [h.name, h.get_cash()])
 			migrate_requested.emit(h, "no_money")

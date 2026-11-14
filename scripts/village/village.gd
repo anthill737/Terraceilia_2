@@ -68,6 +68,8 @@ var smithy: Node2D = null        # where smiths make tools (docs/SMITH.md)
 var tailor_shop: Node2D = null   # where tailors make clothes (docs/CLOTHES.md)
 ## Everyone's clothes wearing out, and who buys or makes new ones (scripts/village/clothing.gd).
 var clothing: Clothing = null
+## The poorhouse, kept by the town's purse (scripts/village/poorhouse.gd).
+var poorhouse: Poorhouse = null
 var lumber_yard: Node2D = null   # batch 3: where woodworkers cut firewood
 ## Calendar reference for HungerNeed binding during spawns.
 var calendar = null      # Calendar
@@ -345,6 +347,12 @@ func initialize(seed_val: int, config: Dictionary) -> void:
 	clothing = Clothing.new()
 	clothing.village = self
 	labor_market.clothing = clothing
+	# The poorhouse: someone with nothing left lives there on the town's purse (docs/POORHOUSE.md).
+	poorhouse = Poorhouse.new()
+	poorhouse.village = self
+	poorhouse.market = market
+	poorhouse.event_bus = event_bus
+	labor_market.poorhouse = poorhouse
 	# Drawing: ground, roads, buildings and houses under the people.
 	var art := VillageArt.new()
 	art.name = "VillageArt"

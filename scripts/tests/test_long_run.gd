@@ -276,7 +276,9 @@ class Probe extends Node:
 			"starving": starving, "cold": cold, "left": s.left, "starved": v.starved_deaths,
 			"houses": hs.houses, "empty": hs.empty, "tot": m.totals.duplicate(),
 			"pros": snappedf(v.prosperity_meter.prosperity_score, 0.01) if v.prosperity_meter else -1.0,
-			"brought": snappedf(v.coins_brought, 0.1), "taken": snappedf(v.coins_taken, 0.1)}
+			"brought": snappedf(v.coins_brought, 0.1), "taken": snappedf(v.coins_taken, 0.1),
+			"poor": v.poorhouse.residents().size() if v.poorhouse else 0, "pin": v.poorhouse.stats.taken_in if v.poorhouse else 0,
+			"pout": v.poorhouse.stats.moved_out if v.poorhouse else 0, "ppaid": snappedf(v.poorhouse.stats.paid, 0.1) if v.poorhouse else 0.0}
 		for group in v.owner_groups():
 			for a in group:
 				if a != null and is_instance_valid(a):

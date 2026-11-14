@@ -39,7 +39,9 @@ work, went broke in about 12 days and left. Houses now limit arrivals, the way S
   output, but the hand doesn't walk to the field or oven. House builders do walk to the site.
 - Logs for houses come from the firewood pile; there is no separate lumber good.
 - Everyone who does not own the house they live in pays rent, whatever they do for a living
-  (2026-11-13). Four days unpaid and they leave town, shop owners included.
+  (2026-11-13). Four days unpaid and they leave town, shop owners included. The one exception
+  (2026-11-14): someone with no shop and no work goes to the poorhouse instead, where there is no
+  rent, and does not take an empty house again until they have work (docs/POORHOUSE.md).
 
 ## Survival test
 

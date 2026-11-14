@@ -201,9 +201,23 @@ func free_slots() -> int:
 		return 0   # nobody arrives before the houses are handed out on day 1
 	var homeless := 0
 	for a in _people():
-		if _home_of(a).is_empty():
+		if _home_of(a).is_empty() and not _waits_in_poorhouse(a):
 			homeless += 1
 	return _vacant().size() - homeless
+
+
+## Someone in the poorhouse with no work: they do not take a house (docs/POORHOUSE.md).
+func _waits_in_poorhouse(a) -> bool:
+	return Poorhouse.lives_there(a) and village.labor_market != null and village.labor_market.is_idle(a)
+
+
+## `a` gives up the house they live in (they move into the poorhouse). If they own it, it is
+## still theirs, empty, and can be let out.
+func move_out(a) -> void:
+	for h in houses:
+		if h.done and h.occupant == a:
+			h.occupant = null
+			h.unpaid = 0
 
 
 func _pay(from, to, amount: float, invest: bool = false) -> bool:
@@ -271,7 +285,7 @@ func on_day(day: int) -> void:
 	# with some left over, otherwise rent it.
 	var homeless := 0
 	for a in people:
-		if not _home_of(a).is_empty():
+		if not _home_of(a).is_empty() or _waits_in_poorhouse(a):
 			continue
 		var vac: Array = _vacant()
 		if vac.is_empty():
@@ -293,6 +307,8 @@ func on_day(day: int) -> void:
 		else:
 			stats.rented_out += 1
 			_log("[HOUSING] day=%d %s rents house %d" % [day, a.name, h.id])
+		if village.poorhouse:
+			village.poorhouse.moved_out(a, day, int(h.id))
 	stats.homeless_max = maxi(stats.homeless_max, homeless)
 
 	# Rent. Everyone who lives in a house they do not own pays it, whatever they do for a
@@ -313,9 +329,13 @@ func on_day(day: int) -> void:
 		var a = h.occupant
 		if h.unpaid >= RENT_DAYS_TO_LEAVE and village.labor_market:
 			stats.evicted += 1
-			_log("[HOUSING] day=%d %s leaving: %d days of rent unpaid ($%.1f)" % [day, a.name, h.unpaid, a.get_cash()])
 			h.occupant = null
 			h.unpaid = 0
+			# Someone with no shop and no work goes to the poorhouse instead, while the town can
+			# keep them (docs/POORHOUSE.md).
+			if village.poorhouse and village.poorhouse.take_in(a, day, "%d days behind on rent" % RENT_DAYS_TO_LEAVE):
+				continue
+			_log("[HOUSING] day=%d %s leaving: %d days of rent unpaid ($%.1f)" % [day, a.name, RENT_DAYS_TO_LEAVE, a.get_cash()])
 			var had_shop: bool = not a.is_in_group("households")
 			village.labor_market.migrate_requested.emit(a, "no_rent")
 			if had_shop:
@@ -783,7 +803,9 @@ func _set_home(a, spot: Node2D) -> void:
 func describe(a) -> String:
 	var parts: Array = []
 	var home: Dictionary = _home_of(a)
-	if home.is_empty():
+	if home.is_empty() and Poorhouse.lives_there(a):
+		parts.append("Lives in the poorhouse (no rent; the town buys their bread and firewood while they have no work and no coins).")
+	elif home.is_empty():
 		parts.append("No house; sleeps at the shelter.")
 	elif home.owner == a:
 		parts.append("Owns house %d." % home.id)
@@ -793,6 +815,8 @@ func describe(a) -> String:
 		parts.append("Rents house %d from %s ($%.2f a day)." % [home.id, home.owner.name, rent_per_day()])
 	if not home.is_empty() and int(home.unpaid) > 0:
 		parts.append("[color=#ff8844]%d day(s) behind on rent.[/color]" % home.unpaid)
+	if not home.is_empty() and Poorhouse.lives_there(a):
+		parts.append("Kept by the town's poorhouse: it buys their bread and firewood while they have no work and no coins.")
 	var let_out := 0
 	for h in houses:
 		if not h.done and h.owner == a:

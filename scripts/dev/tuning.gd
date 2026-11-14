@@ -46,6 +46,7 @@ const INPUTS: Array = [
 	{"k": "house_logs", "g": "Houses", "t": "Logs it takes to build a house", "d": 20, "lo": 1, "hi": 500, "st": 1},
 	{"k": "house_build_days", "g": "Houses", "t": "Days of work to build a house", "d": 5, "lo": 1, "hi": 365, "st": 1},
 	{"k": "houses_spare_at_start", "g": "Houses", "t": "Empty houses when the town starts", "d": 2, "lo": 0, "hi": 100, "st": 1},
+	{"k": "poorhouse_places", "g": "Houses", "t": "People the poorhouse can keep", "d": 6, "lo": 0, "hi": 500, "st": 1},
 
 	{"k": "arrivals_follow_jobs", "g": "Switches", "t": "Who arrives follows jobs: workers, or people with coins", "d": true},
 	{"k": "shop_extensions", "g": "Switches", "t": "Full shops are extended to hold more hands", "d": true},
@@ -55,6 +56,7 @@ const INPUTS: Array = [
 	{"k": "clothes", "g": "Switches", "t": "Clothes wear out; people buy new ones or make their own", "d": true},
 	{"k": "tools", "g": "Switches", "t": "Shops wear out tools and buy them from the smith", "d": true},
 	{"k": "gardens", "g": "Switches", "t": "Old rule: people without work are handed bread and firewood", "d": false},
+	{"k": "poorhouse", "g": "Switches", "t": "People with nothing left live in the poorhouse on the town's purse", "d": true},
 	{"k": "servants", "g": "Switches", "t": "Well-off owners keep servants", "d": true},
 	{"k": "home_improvements", "g": "Switches", "t": "Owners improve their homes", "d": true},
 	{"k": "merchants", "g": "Switches", "t": "Each town has a travelling merchant", "d": false},   # off for now (Anthony, 2026-11-13)

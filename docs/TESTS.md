@@ -93,6 +93,16 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   purse, never with the food money; that rags burn two logs in a frost; that no two sets last the
   same; that someone with no work and no coins sews their own and a hired hand does not; and that
   with the switch off clothes do not wear.
+- `res://scenes/TestPoorhouse.tscn`: the poorhouse (docs/POORHOUSE.md). Checks (20 checks) that
+  someone with no work and nothing left moves in instead of leaving and gives up the house they
+  rented; that the town buys them a loaf and a log at the market price, paid to the baker and the
+  woodworker, and pays exactly that; that they pay no rent, take no empty house and so hold none
+  back from a newcomer; that a resident with coins buys their own; that one who is taken on is no
+  longer kept and moves into the next empty house; that with an empty purse nobody is taken in and
+  a resident the town can't keep leaves; that someone four days behind on rent goes there and a
+  shop owner does not; that someone who owns their house is kept in it; that with the switch off
+  people leave as before; and that in play someone who runs out of money is still in town six
+  days later.
 - `res://scenes/TestTradeMigration.tscn`: the older test of farmers and bakers carrying their own
   goods when a price gap is forced. In normal play they stay home and the merchants trade; this
   test switches that on for itself.

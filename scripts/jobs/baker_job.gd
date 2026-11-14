@@ -216,12 +216,14 @@ func _take_oven_fuel(units: int) -> int:
 
 
 ## What a loaf costs beyond its wheat: oven firewood, the hands' wages and the bakery's
-## upkeep, spread over a normal day's baking. The profit and margin checks add this to the
-## wheat cost, so a baker stops baking when bread no longer pays its true cost (batch 3).
+## upkeep, spread over what today's crew will bake (the morning price,
+## LaborMarket.costing_volume). The profit and margin checks add this to the wheat cost, so a
+## baker stops baking when bread no longer pays its true cost (batch 3).
 func _update_overhead() -> void:
 	if market == null:
 		return
-	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_oven_capacity()))
+	var can: float = float(_oven_capacity())
+	var per_day: float = LaborMarket.costing_volume(self, can, 0.6 * can)
 	var over: float = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day) / maxf(1.0, per_day)
 	over += market.firewood_price / float(LOAVES_PER_FIREWOOD)
 	if profit:
@@ -797,6 +799,7 @@ func on_day_changed(_day: int) -> void:
 			agent.cashflow_today_expense += upkeep
 	day_money_start = wallet.money if wallet else 0.0
 	set_meta("output_ema", 0.3 * float(bread_produced_today) + 0.7 * float(get_meta("output_ema", float(bread_produced_today))))
+	LaborMarket.note_day_made(self, float(bread_produced_today))
 	set_meta("wheat_per_bread", float(WHEAT_PER_FLOUR) / float(BREAD_PER_FLOUR))
 	_update_overhead()
 	bread_produced_today = 0

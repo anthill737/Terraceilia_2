@@ -161,16 +161,19 @@ func on_day_changed(day: int) -> void:
 				consecutive_days_negative_cashflow = 0
 		day_money_start = wallet.money
 	set_meta("output_ema", 0.3 * float(tools_made_today) + 0.7 * float(get_meta("output_ema", float(tools_made_today))))
+	LaborMarket.note_day_made(self, float(tools_made_today))
 	tools_made_today = 0
 	_update_cost()
 
 
 ## What a tool costs to make: the forge's firewood, the hands' wages and the smith's own keep
-## (a loaf and a log a day), spread over a normal day's work.
+## (food, firewood, rent and clothes), spread over what today's crew will make (the morning
+## price, LaborMarket.costing_volume).
 func _update_cost() -> void:
 	if market == null:
 		return
-	var per_day: float = LaborMarket.costing_volume(self, _capacity())
+	var can: float = float(_capacity())
+	var per_day: float = LaborMarket.costing_volume(self, can, LaborMarket.COSTING_FLOOR * can)
 	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
 	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + keep) / maxf(1.0, per_day) \
 			+ float(market.firewood_price) / float(TOOLS_PER_LOG)

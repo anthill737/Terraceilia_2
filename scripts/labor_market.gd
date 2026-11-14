@@ -1221,18 +1221,50 @@ static func shop_size(p) -> float:
 	return 1.0 + float(hands_of(p))
 
 
-## The number of goods a day a smith or a tailor spreads its costs over when it sets its lowest
-## price: what it has really been making, but never less than COSTING_FLOOR of a day's work.
-## A shop that sells little asks more for each, up to a point. (With no floor, a new smith or
-## tailor had made nothing yet, asked about 20 coins each and never sold; and a tailor that
-## sold few asked more, sold fewer and asked more again, up to 38 a set. Spread over 60% of a
-## day's work, as the baker and the woodworker reckon, tools sold for 2 coins and a smith
-## could live in only 60% of towns.)
+## ── The morning price: one step every maker goes through ────────────────────────────────
+## A woodworker, baker, smith or tailor sets its lowest price once a day, in the morning after
+## the day's hiring, and keeps it all day. It spreads the day's costs over what its crew will
+## make today: how busy the shop has been lately (what it made each day, as a share of what that
+## day's crew could make, kept as a running average) times what today's crew can make. So a
+## hand taken on this morning counts in this morning's price, wage and work together.
+##
+## It used to be spread over the shop's own recent output. The morning a hand was taken on,
+## their wage counted at once and their work only as the average caught up, so the price jumped
+## overnight: 111 of 126 overnight jumps of 30% or more in a woodworker's lowest price, in eight
+## towns over 1,500 days, fell on a hiring day, and most woodpile outages left followed one
+## (2026-11-13). Farmers do not go through this: a farm hand works a field of their own that has
+## to grow first, so a farm's extra wheat really does come later.
+
+## The least share of a day's work a smith or a tailor spreads its costs over: a shop that sells
+## little asks more for each, up to a point. (With no floor, a new smith or tailor had made
+## nothing yet, asked about 20 coins each and never sold; and a tailor that sold few asked more,
+## sold fewer and asked more again, up to 38 a set. Spread over 60% of a day's work, as the baker
+## and the woodworker reckon, tools sold for 2 coins and a smith could live in only 60% of towns.)
 const COSTING_FLOOR: float = 0.25
 
 
-static func costing_volume(job, capacity: int) -> float:
-	return maxf(float(job.get_meta("output_ema", 0.0)), COSTING_FLOOR * float(capacity))
+## The goods `job` spreads its costs over this morning: how busy it has been lately times
+## `can_make`, what today's crew can make in a day, but never less than `least`. It also notes
+## the crew it priced for, so that tonight what it made is measured against that crew.
+static func costing_volume(job, can_make: float, least: float) -> float:
+	job.set_meta("priced_for", can_make)
+	return maxf(busy_share(job) * can_make, least)
+
+
+## How busy `job` has been lately: a usual day's work as a share of what its crew could make
+## (0 before its first day).
+static func busy_share(job) -> float:
+	return float(job.get_meta("busy_share", 0.0))
+
+
+## At the end of a day: what `job` made today, as a share of what the crew it priced for this
+## morning could make, goes into its running average.
+static func note_day_made(job, made: float) -> void:
+	var crew: float = float(job.get_meta("priced_for", 0.0))
+	if crew <= 0.0:
+		return
+	var share: float = made / crew
+	job.set_meta("busy_share", 0.3 * share + 0.7 * float(job.get_meta("busy_share", share)))
 
 
 ## A shop's level (docs/SHOP_LEVELS.md): 1 as built, up to SHOP_MAX_LEVEL after extensions.

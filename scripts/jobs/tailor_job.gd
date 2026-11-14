@@ -163,16 +163,19 @@ func on_day_changed(day: int) -> void:
 				consecutive_days_negative_cashflow = 0
 		day_money_start = wallet.money
 	set_meta("output_ema", 0.3 * float(made_today) + 0.7 * float(get_meta("output_ema", float(made_today))))
+	LaborMarket.note_day_made(self, float(made_today))
 	made_today = 0
 	_update_cost()
 
 
 ## What a set of clothes costs to make: its flax, the hands' wages, the tools worn out and the tailor's
-## own keep (food, firewood, rent and clothes), spread over a normal day's work (LaborMarket.costing_volume).
+## own keep (food, firewood, rent and clothes), spread over what today's crew will make (the
+## morning price, LaborMarket.costing_volume).
 func _update_cost() -> void:
 	if market == null:
 		return
-	var per_day: float = LaborMarket.costing_volume(self, _capacity())
+	var can: float = float(_capacity())
+	var per_day: float = LaborMarket.costing_volume(self, can, LaborMarket.COSTING_FLOOR * can)
 	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
 	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / per_day \
 			+ (float(FLAX_PER_SET) * market.good_price("flax") if market.has_good("flax") else 0.0)

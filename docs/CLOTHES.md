@@ -50,6 +50,9 @@ The code is in `Clothing` (scripts/village/clothing.gd), `TailorJob`, and the tr
   bakeries could not bake, and in two test runs a town had a famine.
 - **How a smith or tailor reckons its costs.** It spreads its costs over what it really makes
   in a day, but never over less than a quarter of a day's work (`LaborMarket.costing_volume`).
+  Since 2026-11-13 every maker but the farmer counts "what it really makes" for today's crew
+  (the morning price): how busy the shop has been, as a share of a day's work, times what the
+  crew it has this morning can make, so a hand taken on counts from their first morning.
   Before, a new smith had made nothing yet and asked about 20 coins a tool; with no floor a
   tailor that sold few asked more, sold fewer and asked more again (up to 38 a set); spread
   over 60% of a day's work, as the baker reckons, tools fell to 2 coins and a smith could live

@@ -180,19 +180,22 @@ func on_day_changed(day: int) -> void:
 ## of a log rose 42% overnight, and the woodworker stayed priced out while the pile ran down
 ## to nothing (138 such jumps in a 1,000-day probe of two towns, 2026-11-13).
 func _note_day_of_cutting() -> void:
-	var usual: float = float(get_meta("output_ema", float(firewood_made_today)))
-	if turned_away_today and float(firewood_made_today) < usual:
+	var made: float = float(firewood_made_today)
+	var usual: float = LaborMarket.busy_share(self) * float(get_meta("priced_for", 0.0)) if has_meta("busy_share") else made
+	if turned_away_today and made < usual:
 		return
-	set_meta("output_ema", 0.3 * float(firewood_made_today) + 0.7 * usual)
+	set_meta("output_ema", 0.3 * made + 0.7 * float(get_meta("output_ema", made)))
+	LaborMarket.note_day_made(self, made)
 
 
 ## What a firewood costs to make: the hands' wages, the yard's upkeep and the woodworker's own
 ## keep (what it costs them to live: food, firewood, rent and clothes; until 2026-11-13 only a
 ## loaf and a log, so a woodworker sold wood for less than they needed and went broke),
-## spread over a normal day's cutting.
+## spread over what today's crew will cut (the morning price, LaborMarket.costing_volume).
 func _update_cost() -> void:
 	if market == null:
 		return
-	var per_day: float = maxf(float(get_meta("output_ema", 0.0)), 0.6 * float(_capacity()))
+	var can: float = float(_capacity())
+	var per_day: float = LaborMarket.costing_volume(self, can, 0.6 * can)
 	var keep: float = LaborMarket.keep_of(self)   # what it costs the owner to live: food, firewood, rent, clothes
 	cost_per_unit = (float(LaborMarket.hands_of(agent)) * LaborMarket.wage_of(agent) + maintenance_cost_per_day + keep) / maxf(1.0, per_day)

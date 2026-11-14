@@ -10,6 +10,8 @@ extends Node
 ##     makers sell;
 ##   - the same for wheat (baker pays farmer) and firewood (anyone pays the woodworker);
 ##   - a day the market turns the woodworker away does not change what a log costs them;
+##   - a hand taken on this morning counts in this morning's price (the morning price, which
+##     the baker goes through too);
 ##   - goods of a maker who is gone pay the town's purse;
 ##   - no upkeep is paid to the town, and a farmer's seed comes from their own wheat;
 ##   - with the switch off, the market pays on delivery out of its own purse, as before.
@@ -147,15 +149,20 @@ class Probe extends Node:
 		var fgot: int = m.sell_firewood_to_agent(buyer2, 5)
 		_check("someone who buys firewood pays the woodworker", fput == 8 and not paid_now and fgot == 5 and _near(wood.get_cash() - wc, b2c - buyer2.get_cash()) and b2c - buyer2.get_cash() > 0.0 and _near(m.money, purse),
 			"buyer paid %.2f, woodworker got %.2f" % [b2c - buyer2.get_cash(), wood.get_cash() - wc])
-		# ── A day the market turns the woodworker away does not make a log dearer ──
+		# ── The morning price (LaborMarket.costing_volume) ──
 		var wj = wood.current_job
-		var kept_ema = wj.get_meta("output_ema", null)
+		var kept_meta: Dictionary = {}
+		for k in ["output_ema", "busy_share", "priced_for"]:
+			kept_meta[k] = wj.get_meta(k, null)
 		var kept_made: int = wj.firewood_made_today
 		var kept_away: bool = wj.turned_away_today
-		var full_day: float = float(wj._capacity())
-		wj.set_meta("output_ema", full_day)
+		var kept_hands = wood.get_meta("hands", null)
+		wood.set_meta("hands", [])
+		wj.set_meta("busy_share", 1.0)   # staged: they have been cutting a full day's worth
 		wj._update_cost()
+		var full_day: float = float(wj.get_meta("priced_for", 0.0))
 		var cost_then: float = wj.cost_per_unit
+		# A day the market turns the woodworker away does not make a log dearer.
 		wj.firewood_made_today = 0
 		wj.turned_away_today = true    # staged: the pile was full, so they cut nothing
 		wj._note_day_of_cutting()
@@ -165,16 +172,33 @@ class Probe extends Node:
 		wj.turned_away_today = false   # staged: the market was open all day and they still cut less
 		wj.firewood_made_today = int(full_day) - 4
 		wj._note_day_of_cutting()
-		var slow: float = 0.3 * (full_day - 4.0) + 0.7 * full_day
-		_check("a slow day with the market open still counts", _near(float(wj.get_meta("output_ema")), slow), "%.2f a day" % float(wj.get_meta("output_ema")))
+		var slow: float = 0.3 * (full_day - 4.0) / full_day + 0.7
+		_check("a slow day with the market open still counts", _near(LaborMarket.busy_share(wj), slow), "%.2f of a day's work" % LaborMarket.busy_share(wj))
 		wj.turned_away_today = true    # staged: a full day's cutting before the market closed
 		wj.firewood_made_today = int(full_day)
 		wj._note_day_of_cutting()
-		_check("a good day counts even when the market closed later", _near(float(wj.get_meta("output_ema")), 0.3 * full_day + 0.7 * slow))
-		if kept_ema == null:
-			wj.remove_meta("output_ema")
+		_check("a good day counts even when the market closed later", _near(LaborMarket.busy_share(wj), 0.3 + 0.7 * slow))
+		# A hand taken on this morning counts in this morning's price: their wage over what the
+		# crew with them can cut, not over what the woodworker cut alone.
+		wj.set_meta("busy_share", 1.0)
+		wj._update_cost()
+		var alone: float = float(wj.get_meta("priced_for", 0.0))
+		wood.set_meta("hands", [buyer2])   # staged: a hand taken on this morning
+		wj._update_cost()
+		var crew: float = float(wj.get_meta("priced_for", 0.0))
+		var costs: float = float(LaborMarket.hands_of(wood)) * LaborMarket.wage_of(wood) + wj.maintenance_cost_per_day + LaborMarket.keep_of(wj)
+		_check("a hand taken on this morning counts in this morning's price", crew > alone and _near(wj.cost_per_unit, costs / crew) and wj.cost_per_unit < costs / alone - 0.01,
+			"%.2f a log with the hand (the crew cuts %.0f, alone %.0f); counting the old output it would be %.2f" % [wj.cost_per_unit, crew, alone, costs / alone])
+		_check("a baker prices through the same morning step", b1.current_job.has_meta("priced_for"))
+		if kept_hands == null:
+			wood.remove_meta("hands")
 		else:
-			wj.set_meta("output_ema", kept_ema)
+			wood.set_meta("hands", kept_hands)
+		for k in kept_meta.keys():
+			if kept_meta[k] == null:
+				wj.remove_meta(k)
+			else:
+				wj.set_meta(k, kept_meta[k])
 		wj.firewood_made_today = kept_made
 		wj.turned_away_today = kept_away
 		wj._update_cost()

@@ -32,7 +32,7 @@ const MAX_BUILDS: int = 2             # houses going up at once in one village
 ## it better, one level at a time: cottage, house, fine house, hall, great hall, manor. The
 ## manor is the last step, so a home is improved at most five times, each step once (as in
 ## Saelig, where every home has a short list of upgrades and each is bought once). Until
-## 2026-11-14 a manor kept getting rooms added up to level 99, and the richest owner never
+## 2026-11-18 a manor kept getting rooms added up to level 99, and the richest owner never
 ## stopped building. Steps stay affordable (a few weeks of an owner's profit). It takes logs
 ## and builder days (index = the level it starts from). It pays the woodworker and a builder,
 ## who spend it on bread.

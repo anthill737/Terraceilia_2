@@ -47,7 +47,7 @@ been short of that good three days running.
 
 - **Improving their home.** Someone who owns the house they live in and has money to spare
   improves it, level by level: cottage, house, fine house, hall, great hall, manor. The manor is
-  the last step, so each home is improved at most five times (2026-11-14, docs/HOUSING.md; before
+  the last step, so each home is improved at most five times (2026-11-18, docs/HOUSING.md; before
   that a manor kept getting rooms without end). Each step takes 10 to 16 logs from the woodworker
   and 4 to 7 days from a builder. (Victoria 3: owners put a share of profit into new building.)
 - **Servants.** Once the home is more than a cottage, its owner keeps a servant when they have

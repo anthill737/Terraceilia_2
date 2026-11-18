@@ -40,7 +40,7 @@ Each step takes 10 to 16 logs from the market and 4 to 7 days from a builder (th
 have no employer, or the poorest person out of work, paid a day's wage). At most two homes in a
 village are improved at once, and the richest owner who can afford a step goes first.
 
-The manor is the last step (2026-11-14). Before that a manor kept getting rooms added up to level
+The manor is the last step (2026-11-18). Before that a manor kept getting rooms added up to level
 99, so the richest owner never stopped building: over 1,500 days in 16 towns, 3,902 improvements
 were started and 2,187 of the finished ones were rooms past a manor. In Saelig every home has a
 short list of upgrades and each is bought once. Dev mode row `home_top_level` (6 = manor) sets

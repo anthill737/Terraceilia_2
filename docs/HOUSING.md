@@ -32,6 +32,43 @@ work, went broke in about 12 days and left. Houses now limit arrivals, the way S
 - When someone leaves, their house stays. If they owned it, it passes to the town. A half-built
   house is given up.
 
+## Home improvements
+
+Someone who owns the house they live in, and can pay for the next step while keeping their
+reserve, improves it one step at a time: cottage, house, fine house, hall, great hall, manor.
+Each step takes 10 to 16 logs from the market and 4 to 7 days from a builder (the owner, if they
+have no employer, or the poorest person out of work, paid a day's wage). At most two homes in a
+village are improved at once, and the richest owner who can afford a step goes first.
+
+The manor is the last step (2026-11-14). Before that a manor kept getting rooms added up to level
+99, so the richest owner never stopped building: over 1,500 days in 16 towns, 3,902 improvements
+were started and 2,187 of the finished ones were rooms past a manor. In Saelig every home has a
+short list of upgrades and each is bought once. Dev mode row `home_top_level` (6 = manor) sets
+the top step; above 6 the old rooms come back.
+
+Left out: Saelig's owners only buy an upgrade with twice its cost in hand. Ours already keep
+back ten days of bread and firewood (and a business owner ten days of wages per hand) on top of
+the cost, which is more than a step costs, so that rule would almost never change anything.
+
+Measured (16 towns, 1,500 days, the same seeds, against main with the poorhouse):
+- Improvements started 3,902 to 1,953. Rooms past a manor 2,187 to 0. Homes that became manors
+  197 to 300: with the richest owners no longer building without end, other owners get their
+  turn at the two building slots.
+- People out of work hired as builders 4,443 times to 2,304. This was paid work for the jobless.
+- Towns are smaller: about 36 people on average from day 300 became about 31. Eight of the 16
+  towns settled at 18 to 25 people (three did on main). Newcomers 3,555 to 2,810, people leaving
+  3,098 to 2,435 (87 in 100 newcomers leave either way). Shop hands hired 4,176 to 3,204. A town
+  had an empty house on 37 in 100 days (49 on main), and empty houses are what bring newcomers.
+- Prices stay low and steady. Bread's median from day 200 was 5.7 and rose to 11 in the middle
+  of the runs; now it is 3.0 to 3.4. Firewood sits at its 0.50 floor on 47 in 100 days (26).
+- Starved 14 to 8. Cold home-days 4,601 to 3,833. Books balance in every run. One run failed one
+  check: someone starved holding 65 coins when the bread shelf was empty at 20 a loaf
+  (a famine in one town, as on main, where seven did in one town).
+
+So the endless rooms were a money sink that kept the jobless in work and prices climbing. Capping
+it stops the spiral and the endless building, but the jobs it gave have to come from somewhere
+real. In Saelig they come from owners adding job places and new workplaces when people are idle.
+
 ## Shortcuts
 
 - There are no families yet, so one worker does the work. In SAELIG the whole household helps.

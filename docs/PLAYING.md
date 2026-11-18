@@ -24,7 +24,8 @@ at 10x. How the town works is in docs/WORKING_TOWN.md.
   walks to the field, bakery or yard; a builder to the building site; a servant to the
   master's house; a merchant to the other village and back.
 - Homes grow as their owners improve them: a wing for a house, a second for a fine house, a
-  tower for a hall. A yellow bar under a home means it is being improved.
+  tower for a hall, and larger still up to a manor, the finest a home gets. A yellow bar under a
+  home means it is being improved.
 
 The top panel shows the selected village: people by trade, houses, market stock and prices
 (bread, wheat, firewood: the prices people pay), the town purse, how many people are idle, and

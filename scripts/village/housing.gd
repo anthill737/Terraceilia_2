@@ -29,14 +29,16 @@ const CUSHION_DAYS: float = 10.0       # buyers and builders keep this many days
 const RENT_DAYS_TO_LEAVE: int = 4     # a household that can't pay rent this long leaves town
 const MAX_BUILDS: int = 2             # houses going up at once in one village
 ## Home improvements: someone who owns the house they live in and has money to spare makes
-## it better, one level at a time: cottage, house, fine house, hall, great hall, manor, and
-## after that a manor keeps getting rooms added. Steps stay affordable (a few weeks of an
-## owner's profit), so the spending is a steady stream, not a rare lump. It takes logs
-## and builder days (index = the level it starts from). This is where profit goes back
-## into the town: it pays the woodworker and a builder, who spend it on bread.
+## it better, one level at a time: cottage, house, fine house, hall, great hall, manor. The
+## manor is the last step, so a home is improved at most five times, each step once (as in
+## Saelig, where every home has a short list of upgrades and each is bought once). Until
+## 2026-11-14 a manor kept getting rooms added up to level 99, and the richest owner never
+## stopped building. Steps stay affordable (a few weeks of an owner's profit). It takes logs
+## and builder days (index = the level it starts from). It pays the woodworker and a builder,
+## who spend it on bread.
 const UP_WOOD: Array = [0, 10, 12, 14, 16, 16]   # from level 5 on every step costs the same
 const UP_DAYS: Array = [0, 4, 5, 6, 7, 7]
-const MAX_LEVEL: int = 99                       # no real limit: there is always a room to add
+const MAX_LEVEL: int = 6                        # the manor: dev mode row home_top_level
 const MAX_IMPROVING: int = 2          # homes being improved at once in one village
 const LEVEL_NAMES: Array = ["", "cottage", "house", "fine house", "hall", "great hall", "manor"]
 const OWNER_WAGE_DAYS: float = 10.0   # a business owner keeps this many days of wages per hand (and one more) before improving
@@ -125,7 +127,24 @@ func improve_cost(level: int) -> float:
 	return float(UP_WOOD[l]) * market.firewood_price + float(UP_DAYS[l]) * LaborMarket.daily_wage(market)
 
 
-## "house", "hall", ... and past a manor "manor with 3 more rooms".
+## The highest a home is improved to: a manor (6), unless dev mode says otherwise.
+static func top_level() -> int:
+	return Tuning.i("home_top_level", MAX_LEVEL)
+
+
+## The owner living in `h` would start improving it today: it isn't already as fine as a
+## home gets, nothing is being built for them, and they can pay for the step and still keep
+## their reserve.
+func can_improve(h: Dictionary) -> bool:
+	if not h.done or h.owner == null or h.occupant != h.owner or h.get("up") != null:
+		return false
+	var a = h.owner
+	if int(h.get("level", 1)) >= top_level() or not is_instance_valid(a) or a.wallet == null or _building_by(a):
+		return false
+	return a.wallet.money >= improve_cost(int(h.get("level", 1))) + _reserve_of(a)
+
+
+## "house", "hall", ... and past a manor (only when dev mode allows it) "manor with 3 more rooms".
 static func level_name(level: int) -> String:
 	var top: int = LEVEL_NAMES.size() - 1
 	if level <= top:
@@ -613,15 +632,9 @@ func start_new_builds(day: int) -> void:
 		var pick: Dictionary = {}
 		var pick_cash: float = 0.0
 		for h in houses:
-			if not h.done or h.owner == null or h.occupant != h.owner or h.get("up") != null:
-				continue
-			var lvl: int = int(h.get("level", 1))
-			var a = h.owner
-			if lvl >= MAX_LEVEL or not is_instance_valid(a) or a.wallet == null or _building_by(a):
-				continue
-			if a.wallet.money >= improve_cost(lvl) + _reserve_of(a) and a.wallet.money > pick_cash:
+			if can_improve(h) and h.owner.wallet.money > pick_cash:
 				pick = h
-				pick_cash = a.wallet.money
+				pick_cash = h.owner.wallet.money
 		if not pick.is_empty():
 			var lv: int = int(pick.get("level", 1))
 			pick.up = {"id": pick.id, "node": pick.get("node"), "wood": 0, "work": 0, "worker": null,
@@ -833,7 +846,9 @@ func describe(a) -> String:
 		parts.append("Lets out %d house(s)." % let_out)
 	if not home.is_empty() and home.owner == a:
 		var lvl2: int = int(home.get("level", 1))
-		if lvl2 > 1:
+		if lvl2 >= top_level():
+			parts.append("Their home is a %s, as fine as a home gets." % level_name(lvl2))
+		elif lvl2 > 1:
 			parts.append("Their home is a %s." % level_name(lvl2))
 		if home.get("up") != null:
 			parts.append("Improving it into a %s: wood %d/%d, work %d/%d days." % [level_name(lvl2 + 1),

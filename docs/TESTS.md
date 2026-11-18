@@ -93,7 +93,14 @@ same result (ticks follow the physics clock). Run with Godot 4.6.1, headless, fr
   purse, never with the food money; that rags burn two logs in a frost; that no two sets last the
   same; that someone with no work and no coins sews their own and a hired hand does not; and that
   with the switch off clothes do not wear.
-- `res://scenes/TestPoorhouse.tscn`: the poorhouse (docs/POORHOUSE.md). Checks (20 checks) that
+- `res://scenes/TestHomeImprovements.tscn`: home improvements stop at the manor
+  (docs/HOUSING.md). Checks (8 checks) that an owner living in their own cottage with money to
+  spare starts improving it; that a manor's owner, with 100,000 coins, starts nothing more; that
+  the dev mode row `home_top_level` set to 7 lets the manor take one more room; that a great
+  hall's last step is finished by the day's own work and makes it a manor, whose rich owner then
+  starts no other step for five days; that no home in town goes past a manor; and that the
+  inspector says the manor is as fine as a home gets.
+- `res://scenes/TestPoorhouse.tscn`: the poorhouse (docs/POORHOUSE.md). Checks (22 checks) that
   someone with no work and nothing left moves in instead of leaving and gives up the house they
   rented; that the town buys them a loaf and a log at the market price, paid to the baker and the
   woodworker, and pays exactly that; that they pay no rent, take no empty house and so hold none

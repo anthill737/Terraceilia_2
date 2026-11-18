@@ -47,6 +47,7 @@ const INPUTS: Array = [
 	{"k": "house_build_days", "g": "Houses", "t": "Days of work to build a house", "d": 5, "lo": 1, "hi": 365, "st": 1},
 	{"k": "houses_spare_at_start", "g": "Houses", "t": "Empty houses when the town starts", "d": 2, "lo": 0, "hi": 100, "st": 1},
 	{"k": "poorhouse_places", "g": "Houses", "t": "People the poorhouse can keep", "d": 6, "lo": 0, "hi": 500, "st": 1},
+	{"k": "home_top_level", "g": "Houses", "t": "Highest a home is improved to (1 cottage, 6 manor, above that rooms)", "d": 6, "lo": 1, "hi": 99, "st": 1},
 
 	{"k": "arrivals_follow_jobs", "g": "Switches", "t": "Who arrives follows jobs: workers, or people with coins", "d": true},
 	{"k": "shop_extensions", "g": "Switches", "t": "Full shops are extended to hold more hands", "d": true},

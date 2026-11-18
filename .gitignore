@@ -13,3 +13,6 @@ export.cfg
 .mono/
 data_*/
 mono_crash.*.json
+
+# Backups the BridgeSpace swarm tool left beside Claude settings
+.claude/*.bsbackup-*
